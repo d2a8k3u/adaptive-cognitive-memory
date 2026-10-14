@@ -45,6 +45,8 @@ export function seedConfig(pluginData: string, modelCacheDir: string): Config {
     pluginData,
     dbPath: join(pluginData, DB_FILENAME),
     modelCacheDir,
+    modelRemoteHost: undefined,
+    autoDownloadModel: false,
     budgetTokens: 1200,
     pretoolBudgetTokens: 300,
   };

@@ -21,6 +21,12 @@
       "default": 300,
       "min": 100,
       "max": 2375
+    },
+    "download_model": {
+      "type": "boolean",
+      "title": "Download the embedding model automatically",
+      "description": "On first run, download Xenova/multilingual-e5-small (one time, about 135 MB) into the plugin data directory in the background. Turn off to run model-init yourself (see /memory-doctor).",
+      "default": true
     }
   }
 }

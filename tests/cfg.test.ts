@@ -5,17 +5,19 @@ import {
   BUDGET_MAX_TOKENS,
   BUDGET_MIN_TOKENS,
   DEFAULT_BUDGET_TOKENS,
+  DEFAULT_DOWNLOAD_MODEL,
   DEFAULT_PRETOOL_BUDGET_TOKENS,
   loadConfig,
+  MODEL_DOWNLOAD_SIZE,
 } from "../src/cfg";
 
 interface UserConfigOption {
   type: string;
   title: string;
   description: string;
-  default: number;
-  min: number;
-  max: number;
+  default: number | boolean;
+  min?: number;
+  max?: number;
 }
 
 const userConfig = (
@@ -40,37 +42,53 @@ describe("loadConfig", () => {
       pluginData: "/data",
       dbPath: join("/data", "memory.sqlite"),
       modelCacheDir: join("/data", "models"),
+      modelRemoteHost: undefined,
+      autoDownloadModel: true,
       budgetTokens: 1200,
       pretoolBudgetTokens: 300,
     });
   });
 
-  it("resolves path overrides", () => {
+  it("resolves path and download source overrides", () => {
     const config = loadConfig({
       CLAUDE_PLUGIN_DATA: "/data",
       ACM_DB_PATH: "/tmp/acm-test.sqlite",
       ACM_MODEL_CACHE_DIR: "/tmp/acm-models",
+      ACM_MODEL_REMOTE_HOST: "http://127.0.0.1:9/",
     });
     expect(config.dbPath).toBe("/tmp/acm-test.sqlite");
     expect(config.modelCacheDir).toBe("/tmp/acm-models");
+    expect(config.modelRemoteHost).toBe("http://127.0.0.1:9/");
   });
 
-  it("reads each budget from the plugin option variable its userConfig key names", () => {
+  it("reads each option from the plugin option variable its userConfig key names", () => {
     const config = loadConfig({
       CLAUDE_PLUGIN_DATA: "/data",
       [optionVariable("recall_budget_tokens")]: "500",
       [optionVariable("pretool_budget_tokens")]: "100",
+      [optionVariable("download_model")]: "false",
     });
 
     expect(Object.keys(userConfig).sort()).toEqual([
+      "download_model",
       "pretool_budget_tokens",
       "recall_budget_tokens",
     ]);
-    expect([config.budgetTokens, config.pretoolBudgetTokens]).toEqual([500, 100]);
+    expect([config.budgetTokens, config.pretoolBudgetTokens, config.autoDownloadModel]).toEqual([
+      500,
+      100,
+      false,
+    ]);
   });
 
   it("declares in plugin.json the defaults and bounds the config enforces", () => {
     expect(userConfig).toEqual({
+      download_model: {
+        type: "boolean",
+        title: expect.any(String),
+        description: expect.stringContaining(MODEL_DOWNLOAD_SIZE),
+        default: DEFAULT_DOWNLOAD_MODEL,
+      },
       recall_budget_tokens: {
         type: "number",
         title: expect.any(String),
@@ -109,4 +127,24 @@ describe("loadConfig", () => {
       );
     }
   });
+
+  it.each([
+    { value: undefined, autoDownloadModel: true },
+    { value: "TRUE", autoDownloadModel: true },
+    { value: "false", autoDownloadModel: false },
+    { value: "yes", autoDownloadModel: "error" },
+  ])(
+    "reads a download_model option of $value as $autoDownloadModel",
+    ({ value, autoDownloadModel }) => {
+      const variable = optionVariable("download_model");
+      const env = value === undefined ? {} : { [variable]: value };
+      const load = () => loadConfig({ CLAUDE_PLUGIN_DATA: "/data", ...env });
+
+      if (autoDownloadModel === "error") {
+        expect(load).toThrow(`${variable} must be true or false, got: ${value}`);
+      } else {
+        expect(load().autoDownloadModel).toBe(autoDownloadModel);
+      }
+    },
+  );
 });
