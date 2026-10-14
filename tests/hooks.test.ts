@@ -1172,6 +1172,7 @@ describe("hooks internal error contract", () => {
 
 describe("hooks storage outage", () => {
   const dlopenFailure = join(process.cwd(), "tests", "fixtures", "dlopen-fail.cjs");
+  const missingDependency = join(process.cwd(), "tests", "fixtures", "missing-dependency.cjs");
 
   function newerSchemaEnv(): NodeJS.ProcessEnv {
     const { env, config } = freshEnv();
@@ -1190,7 +1191,23 @@ describe("hooks storage outage", () => {
       name: "a native module that fails to load at session start",
       env: () => ({ ...freshEnv().env, NODE_OPTIONS: `--require ${dlopenFailure}` }),
       event: "SessionStart",
-      notice: [/better-sqlite3 failed to load/, /NODE_MODULE_VERSION 115/, /\/memory-doctor/],
+      notice: [/better-sqlite3 failed to load/, /NODE_MODULE_VERSION 115/, /Fix: run npm rebuild/],
+    },
+    {
+      name: "npm dependencies that were never installed at session start",
+      env: () => ({ ...freshEnv().env, NODE_OPTIONS: `--require ${missingDependency}` }),
+      event: "SessionStart",
+      notice: [
+        /npm dependencies are not installed \(missing better-sqlite3\)/,
+        /claude plugin update adaptive-cognitive-memory@adaptive-cognitive-memory/,
+        /npm ci --ignore-scripts/,
+      ],
+    },
+    {
+      name: "npm dependencies that were never installed on a prompt",
+      env: () => ({ ...freshEnv().env, NODE_OPTIONS: `--require ${missingDependency}` }),
+      event: "UserPromptSubmit",
+      notice: [],
     },
     {
       name: "a native module that fails to load on a prompt",
@@ -1202,7 +1219,7 @@ describe("hooks storage outage", () => {
       name: "a database written by a newer schema at session start",
       env: newerSchemaEnv,
       event: "SessionStart",
-      notice: [/database schema 99/, /update the plugin/, /\/memory-doctor/],
+      notice: [/database schema 99/, /Fix: update the plugin/],
     },
   ])("exits 0 on $name, telling only session start", async ({ env, event, notice }) => {
     const result = await spawnHook(
