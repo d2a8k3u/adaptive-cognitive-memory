@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DeadlineExceededError = void 0;
+exports.DeadlineExceededError = exports.MODEL_FILES = void 0;
 exports.modelCachePath = modelCachePath;
 exports.modelCached = modelCached;
 exports.passageInput = passageInput;
@@ -16,7 +16,7 @@ const QUERY_PREFIX = "query: ";
 const ONNX_FILE_BY_DTYPE = {
     q8: "onnx/model_quantized.onnx",
 };
-const MODEL_FILES = [
+exports.MODEL_FILES = [
     "config.json",
     "tokenizer.json",
     "tokenizer_config.json",
@@ -27,7 +27,7 @@ function modelCachePath(modelCacheDir) {
 }
 function modelCached(modelCacheDir) {
     const modelPath = modelCachePath(modelCacheDir);
-    return MODEL_FILES.every((file) => (0, node_fs_1.existsSync)((0, node_path_1.join)(modelPath, file)));
+    return exports.MODEL_FILES.every((file) => (0, node_fs_1.existsSync)((0, node_path_1.join)(modelPath, file)));
 }
 const models = new Map();
 async function loadModel(modelCacheDir) {

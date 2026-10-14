@@ -1,7 +1,10 @@
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { MODEL_DTYPE, MODEL_ID } from "./cfg";
+import { type Config, MODEL_DTYPE, MODEL_ID } from "./cfg";
 import { modelCachePath } from "./embeddings";
+import { downloadLockPath, downloadModel, type ModelFetcher } from "./modeldownload";
+
+type ModelInitConfig = Pick<Config, "pluginData" | "modelCacheDir" | "modelRemoteHost">;
 
 function directoryBytes(dir: string): number {
   return readdirSync(dir, { withFileTypes: true }).reduce((total, entry) => {
@@ -10,15 +13,35 @@ function directoryBytes(dir: string): number {
   }, 0);
 }
 
-export async function modelInit(modelCacheDir: string): Promise<void> {
-  const { env, pipeline } = await import("@huggingface/transformers");
-  env.cacheDir = modelCacheDir;
-  env.allowRemoteModels = true;
-  try {
-    await pipeline("feature-extraction", MODEL_ID, { dtype: MODEL_DTYPE });
-  } finally {
-    env.allowRemoteModels = false;
+function transformersFetcher(remoteHost: string | undefined): ModelFetcher {
+  return async (cacheDir) => {
+    const { env, pipeline } = await import("@huggingface/transformers");
+    env.cacheDir = cacheDir;
+    if (remoteHost !== undefined) {
+      env.remoteHost = remoteHost;
+    }
+    env.allowRemoteModels = true;
+    try {
+      await pipeline("feature-extraction", MODEL_ID, { dtype: MODEL_DTYPE });
+    } finally {
+      env.allowRemoteModels = false;
+    }
+  };
+}
+
+export async function modelInit(config: ModelInitConfig): Promise<number> {
+  const outcome = await downloadModel(
+    config,
+    transformersFetcher(config.modelRemoteHost),
+    () => new Date(),
+  );
+  if (outcome === "busy") {
+    console.error(
+      `another model-init is already downloading the embedding model (lock ${downloadLockPath(config.pluginData)}); wait for it to finish`,
+    );
+    return 1;
   }
-  const modelPath = modelCachePath(modelCacheDir);
+  const modelPath = modelCachePath(config.modelCacheDir);
   console.log(`${directoryBytes(modelPath)} bytes at ${modelPath}`);
+  return 0;
 }

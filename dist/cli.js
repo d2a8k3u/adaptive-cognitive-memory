@@ -111,10 +111,7 @@ function commandFor(argv, cwd) {
     const [command, argument] = argv.slice(2);
     switch (command) {
         case "model-init":
-            return async (config) => {
-                await (0, modelinit_1.modelInit)(config.modelCacheDir);
-                return 0;
-            };
+            return modelinit_1.modelInit;
         case "reembed":
             return reembed;
         case "recall":

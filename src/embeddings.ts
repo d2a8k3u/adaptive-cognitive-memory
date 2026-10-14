@@ -14,7 +14,7 @@ const ONNX_FILE_BY_DTYPE: Record<typeof MODEL_DTYPE, string> = {
   q8: "onnx/model_quantized.onnx",
 };
 
-const MODEL_FILES = [
+export const MODEL_FILES = [
   "config.json",
   "tokenizer.json",
   "tokenizer_config.json",

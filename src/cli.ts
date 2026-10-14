@@ -119,10 +119,7 @@ function commandFor(argv: readonly string[], cwd: string): Command | undefined {
   const [command, argument] = argv.slice(2);
   switch (command) {
     case "model-init":
-      return async (config) => {
-        await modelInit(config.modelCacheDir);
-        return 0;
-      };
+      return modelInit;
     case "reembed":
       return reembed;
     case "recall":
