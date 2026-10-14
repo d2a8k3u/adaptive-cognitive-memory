@@ -1,7 +1,7 @@
 {
   "name": "adaptive-cognitive-memory",
   "description": "Adaptive cognitive memory: one cross-project memory database with local semantic search, budgeted hook recall, explicit curated capture and a self-diagnosing doctor.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "David Kulhanek"
   },
