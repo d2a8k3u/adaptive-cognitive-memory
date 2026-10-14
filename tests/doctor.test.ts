@@ -13,6 +13,7 @@ import { SCHEMA_VERSION } from "../src/db/schema";
 import { type DoctorCheck, type DoctorReport, dataRetentionCheck, runDoctor } from "../src/doctor";
 import { modelCachePath } from "../src/embeddings";
 import { resolveProjectId } from "../src/ids";
+import { acquireDownloadLock, recordDownloadFailure } from "../src/modeldownload";
 import { PLUGIN_VERSION } from "../src/version";
 import { testModelCacheDir } from "../vitest.config";
 
@@ -223,6 +224,39 @@ describe("runDoctor", () => {
     expect(model.ok).toBe(false);
     expect(model.detail).toContain(modelCachePath(emptyCacheDir));
     expect(model.fix).toMatch(/model-init/);
+  });
+
+  it("warns that the missing model is downloading while a fresh download lock exists", () => {
+    const env = healthyEnv();
+    env.ACM_MODEL_CACHE_DIR = mkdtempSync(join(tmpdir(), "acm-doctor-model-"));
+    const lock = acquireDownloadLock(env.CLAUDE_PLUGIN_DATA as string, new Date())!;
+
+    const report = runDoctor(env, PROJECT_DIR);
+
+    expect(report.status).toBe("ok");
+    expect(checkByName(report, "model")).toMatchObject({
+      status: "warn",
+      detail: `model missing at ${modelCachePath(env.ACM_MODEL_CACHE_DIR)}; downloading since ${lock.startedAt} (pid ${lock.pid})`,
+      fix: expect.stringContaining("wait for the download to finish"),
+    });
+  });
+
+  it("names the last download failure while the model is missing", () => {
+    const env = healthyEnv();
+    env.ACM_MODEL_CACHE_DIR = mkdtempSync(join(tmpdir(), "acm-doctor-model-"));
+    recordDownloadFailure(env.CLAUDE_PLUGIN_DATA as string, {
+      failedAt: "2026-10-14T09:15:00.000Z",
+      error: "fetch failed (getaddrinfo ENOTFOUND huggingface.co)",
+    });
+
+    const report = runDoctor(env, PROJECT_DIR);
+
+    expect(report.status).toBe("degraded");
+    expect(checkByName(report, "model")).toMatchObject({
+      status: "fail",
+      detail: `model missing at ${modelCachePath(env.ACM_MODEL_CACHE_DIR)}; the last download failed at 2026-10-14T09:15:00.000Z: fetch failed (getaddrinfo ENOTFOUND huggingface.co)`,
+      fix: expect.stringMatching(/model-init/),
+    });
   });
 
   it("warns with the time and the deadline when the last prompt's query embedding timed out", () => {

@@ -11,6 +11,12 @@ import { lastExportAt } from "./db/transfer";
 import { driftedVecStateCount } from "./db/transitions";
 import { modelCached, modelCachePath } from "./embeddings";
 import { collectLocationFacts, type LocationFacts, projectIdentity } from "./ids";
+import {
+  DOWNLOAD_LOCK_STALE_MS,
+  lockFresh,
+  readDownloadFailure,
+  readDownloadLock,
+} from "./modeldownload";
 import { NATIVE_MODULE_FIX } from "./outage";
 import { daysBefore } from "./retention";
 import { PLUGIN_NAME, PLUGIN_ROOT } from "./version";
@@ -50,6 +56,7 @@ const DB_FIX =
 const VEC_FIX =
   "reinstall plugin dependencies (npm ci) to restore the sqlite-vec build for this platform";
 const MODEL_FIX = "run node dist/cli.js model-init to cache the embedding model";
+const MODEL_DOWNLOADING_FIX = `wait for the download to finish, then run the doctor again; a download that has not finished within ${DOWNLOAD_LOCK_STALE_MS / 60_000} minutes is retried by the next session start or by node dist/cli.js model-init`;
 const EMBEDDING_TIMEOUT_FIX =
   "the next prompt retries the embedding; if timeouts persist, free CPU for the hooks or run node dist/cli.js model-init to restore the model files";
 const UNEMBEDDED_FIX =
@@ -161,13 +168,37 @@ function checkVec(opened: OpenedDb | undefined, openDetail: string): DoctorCheck
       );
 }
 
+function missingModelCheck(pluginData: string, path: string): DoctorCheck {
+  const lock = readDownloadLock(pluginData);
+  if (lockFresh(lock, Date.now())) {
+    return rated(
+      "model",
+      {
+        status: "warn",
+        detail: `model missing at ${path}; downloading since ${lock.startedAt} (pid ${lock.pid})`,
+      },
+      MODEL_DOWNLOADING_FIX,
+    );
+  }
+  const failure = readDownloadFailure(pluginData);
+  const cause =
+    failure === undefined
+      ? ""
+      : `; the last download failed at ${failure.failedAt}: ${failure.error}`;
+  return failed("model", `model missing at ${path}${cause}`, MODEL_FIX);
+}
+
 function checkModel(config: Config | undefined, opened: OpenedDb | undefined): DoctorCheck {
   if (!config) {
     return failed("model", "skipped: CLAUDE_PLUGIN_DATA not resolved", MODEL_FIX);
   }
   const path = modelCachePath(config.modelCacheDir);
   if (!modelCached(config.modelCacheDir)) {
-    return failed("model", `model missing at ${path}`, MODEL_FIX);
+    try {
+      return missingModelCheck(config.pluginData, path);
+    } catch (error) {
+      return failed("model", `model missing at ${path}; ${errorMessage(error)}`, MODEL_FIX);
+    }
   }
   return asCheck("model", EMBEDDING_TIMEOUT_FIX, () => {
     const timedOutAt = opened === undefined ? undefined : lastEmbeddingTimeout(opened.db);

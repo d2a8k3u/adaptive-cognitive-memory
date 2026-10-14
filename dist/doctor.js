@@ -17,6 +17,7 @@ const transfer_1 = require("./db/transfer");
 const transitions_1 = require("./db/transitions");
 const embeddings_1 = require("./embeddings");
 const ids_1 = require("./ids");
+const modeldownload_1 = require("./modeldownload");
 const outage_1 = require("./outage");
 const retention_1 = require("./retention");
 const version_1 = require("./version");
@@ -26,6 +27,7 @@ const PLUGIN_DATA_FIX = "set CLAUDE_PLUGIN_DATA to a writable directory";
 const DB_FIX = "make the plugin data directory writable, or restore a backup / delete the database file to start fresh; a newer schema needs a plugin update";
 const VEC_FIX = "reinstall plugin dependencies (npm ci) to restore the sqlite-vec build for this platform";
 const MODEL_FIX = "run node dist/cli.js model-init to cache the embedding model";
+const MODEL_DOWNLOADING_FIX = `wait for the download to finish, then run the doctor again; a download that has not finished within ${modeldownload_1.DOWNLOAD_LOCK_STALE_MS / 60_000} minutes is retried by the next session start or by node dist/cli.js model-init`;
 const EMBEDDING_TIMEOUT_FIX = "the next prompt retries the embedding; if timeouts persist, free CPU for the hooks or run node dist/cli.js model-init to restore the model files";
 const UNEMBEDDED_FIX = "restore the model (model-init) and sqlite-vec, then run node dist/cli.js reembed";
 const VEC_STATE_FIX = "restore sqlite-vec, then run node dist/cli.js reembed or restart the session's memory server";
@@ -108,13 +110,32 @@ function checkVec(opened, openDetail) {
         ? rated("vec", passOrFail(true, "sqlite-vec loaded"), VEC_FIX)
         : failed("vec", `sqlite-vec not loaded — vector search unavailable: ${opened.vecError}`, VEC_FIX);
 }
+function missingModelCheck(pluginData, path) {
+    const lock = (0, modeldownload_1.readDownloadLock)(pluginData);
+    if ((0, modeldownload_1.lockFresh)(lock, Date.now())) {
+        return rated("model", {
+            status: "warn",
+            detail: `model missing at ${path}; downloading since ${lock.startedAt} (pid ${lock.pid})`,
+        }, MODEL_DOWNLOADING_FIX);
+    }
+    const failure = (0, modeldownload_1.readDownloadFailure)(pluginData);
+    const cause = failure === undefined
+        ? ""
+        : `; the last download failed at ${failure.failedAt}: ${failure.error}`;
+    return failed("model", `model missing at ${path}${cause}`, MODEL_FIX);
+}
 function checkModel(config, opened) {
     if (!config) {
         return failed("model", "skipped: CLAUDE_PLUGIN_DATA not resolved", MODEL_FIX);
     }
     const path = (0, embeddings_1.modelCachePath)(config.modelCacheDir);
     if (!(0, embeddings_1.modelCached)(config.modelCacheDir)) {
-        return failed("model", `model missing at ${path}`, MODEL_FIX);
+        try {
+            return missingModelCheck(config.pluginData, path);
+        }
+        catch (error) {
+            return failed("model", `model missing at ${path}; ${errorMessage(error)}`, MODEL_FIX);
+        }
     }
     return asCheck("model", EMBEDDING_TIMEOUT_FIX, () => {
         const timedOutAt = opened === undefined ? undefined : (0, health_1.lastEmbeddingTimeout)(opened.db);
