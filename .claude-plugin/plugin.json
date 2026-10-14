@@ -1,0 +1,26 @@
+{
+  "name": "adaptive-cognitive-memory",
+  "description": "Adaptive cognitive memory: one cross-project memory database with local semantic search, budgeted hook recall, explicit curated capture and a self-diagnosing doctor.",
+  "version": "0.1.0",
+  "author": {
+    "name": "David Kulhanek"
+  },
+  "userConfig": {
+    "recall_budget_tokens": {
+      "type": "number",
+      "title": "Recall budget (tokens)",
+      "description": "Most tokens of recalled memories injected at session start and on each prompt.",
+      "default": 1200,
+      "min": 100,
+      "max": 2375
+    },
+    "pretool_budget_tokens": {
+      "type": "number",
+      "title": "Pre-tool recall budget (tokens)",
+      "description": "Most tokens of recalled memories injected before a Bash, Edit or Write call.",
+      "default": 300,
+      "min": 100,
+      "max": 2375
+    }
+  }
+}

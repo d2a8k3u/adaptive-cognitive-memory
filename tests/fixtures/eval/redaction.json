@@ -1,0 +1,19 @@
+[
+  {"name": "stripe_live_key", "text_parts": ["The production Stripe key for billing is {secret}; rotate it after the audit."], "secret_parts": ["sk_", "live_51EXAMPLEfakeKEYdoNotUse00000000000000"]},
+  {"name": "stripe_test_key", "text_parts": ["Tests call stripe-mock with {secret} as the API key."], "secret_parts": ["sk_", "test_51EXAMPLEfakeTESTkey000000000000000000"]},
+  {"name": "slack_bot_token", "text_parts": ["The deploy bot posts to the release channel with token {secret} from CI."], "secret_parts": ["xox", "b-000000000000-0000000000000-EXAMPLEfakeSLACKtoken0"]},
+  {"name": "google_api_key", "text_parts": ["The maps fallback uses key {secret} restricted to staging."], "secret_parts": ["AI", "zaSyEXAMPLEfakeKEY0000000000000000000"]},
+  {"name": "npm_token", "text_parts": ["Packages are published from CI only, with {secret} in the runner secrets."], "secret_parts": ["npm", "_EXAMPLEfakeNPMtoken000000000000000000"]},
+  {"name": "huggingface_token", "text_parts": ["Private model downloads authenticate with {secret} on the build machine."], "secret_parts": ["hf", "_EXAMPLEfakeHFtokenDoNotUse0000000"]},
+  {"name": "aws_secret_whitespace_label", "text_parts": ["The export job credentials are aws_secret_access_key {secret} in the legacy cron file."], "secret_parts": ["wJalrXUtnFEMI/K7MDENG/", "bPxRfiCYEXAMPLEKEY"]},
+  {"name": "aws_access_key_id", "text_parts": ["The access key id {secret} belongs to the nightly export job."], "secret_parts": ["AKIA", "IOSFODNN7EXAMPLE"]},
+  {"name": "github_classic_token", "text_parts": ["CI clones the private schema repo with {secret} until the app migration."], "secret_parts": ["ghp", "_EXAMPLEfakeGitHubToken000000000000000"]},
+  {"name": "github_fine_grained_token", "text_parts": ["The release workflow uses {secret} to push tags."], "secret_parts": ["github", "_pat_11EXAMPLE0fake0token0000000000000000000000"]},
+  {"name": "anthropic_key", "text_parts": ["The summary worker calls the API with {secret} from the vault."], "secret_parts": ["sk-", "ant-api03-EXAMPLE-fake-key-000000000000000000000000AA"]},
+  {"name": "openai_style_key", "text_parts": ["The embedding fallback uses {secret} for batch jobs."], "secret_parts": ["sk-", "proj-EXAMPLEfakeOPENAIkey000000000000000000"]},
+  {"name": "jwt", "text_parts": ["The internal service token {secret} expires in five minutes."], "secret_parts": ["eyJhbGciOiJIUzI1NiJ9.", "eyJzdWIiOiJleGFtcGxlIn0.ZmFrZS1zaWduYXR1cmUtZXhhbXBsZQ"]},
+  {"name": "pem_private_key", "text_parts": ["The invoice signing key is stored here for now.\n-----BEGIN ", "PRIVATE KEY-----\n{secret}\n-----END ", "PRIVATE KEY-----"], "secret_parts": ["MIIEvQIBADANBgkqhkiG9w0BAQEFAASCEXAMPLEFAKEKEYMATERIAL0000"]},
+  {"name": "url_credentials", "text_parts": ["Connect to the replica with postgres://billing_app:{secret}@db.internal.example:5432/billing for reports."], "secret_parts": ["EXAMPLEfakePassw0rd"]},
+  {"name": "bearer_token", "text_parts": ["Smoke test: curl -H 'Authorization: Bearer {secret}' https://api.example.com/v1/ping returns 200."], "secret_parts": ["EXAMPLEfakeBearerToken0123456789"]},
+  {"name": "labelled_password", "text_parts": ["The staging admin account uses password: {secret} until SSO lands."], "secret_parts": ["EXAMPLE-fake-Passw0rd!"]}
+]

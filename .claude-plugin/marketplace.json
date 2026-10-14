@@ -1,0 +1,14 @@
+{
+  "name": "adaptive-cognitive-memory",
+  "description": "Marketplace for the adaptive-cognitive-memory plugin",
+  "owner": {
+    "name": "David Kulhanek"
+  },
+  "plugins": [
+    {
+      "name": "adaptive-cognitive-memory",
+      "source": "./",
+      "description": "Local cross-project memory for Claude Code: calibrated recall through hooks, a two-phase store with conflict keys, usage receipts and continuous capture"
+    }
+  ]
+}

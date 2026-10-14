@@ -1,0 +1,200 @@
+# Adaptive cognitive memory
+
+A Claude Code plugin that gives Claude a persistent cognitive memory: one central, local SQLite database shared by every project, with local semantic search, budgeted hook recall and explicit, curated capture.
+
+Every project Claude works in reads and writes the same `${CLAUDE_PLUGIN_DATA}/memory.sqlite`. Memories carry a scope — `project` (visible only in that project) or `user` (visible everywhere) — and a type: `semantic` (facts), `procedural` (how-tos), `episodic` (session events) or `pattern` (lessons and preferences). All memories are stored in English as the canonical retrieval language; a multilingual local embedding model makes Czech or other non-English queries find them anyway.
+
+## How it works
+
+- **Recall is automatic.** Hooks inject one-line abstracts under a token budget at session start, on every user prompt and before tool calls; Claude expands a memory's full body with `memory_get` using the full id on the recalled line.
+- **Capture is explicit.** Nothing is auto-saved. Claude stores durable knowledge with the `memory_*` MCP tools, guided by the bundled `memory` skill. Hooks only point at the moments worth a store: a correction, a remember request, a failing command that later passed.
+- **Claude curates, the server guards.** Every memory names its slot (`kind`, `conflict_key`, `cardinality`, `value_text`). A store that finds related memories in its project (same key, nearest vectors, keyword hits) writes nothing and returns them as `needs_resolution`; Claude repeats the call with `SUPERSEDE`, `UPDATE`, `NOOP` or `ADD`, and the server rejects resolutions that would break a single-valued key or cross a project. Superseded memories are revoked: they stay readable but never reach recall. A procedure, constraint or preference with the same key and value in two projects is copied to `user` scope; facts never are.
+- **Nothing ever leaves the machine.** No outbound request carries memory content, the MCP server talks stdio only, and hooks make zero LLM calls. Secrets are redacted at the persist boundary and again on export.
+- **Degraded is never silent.** A missing embedding model or sqlite-vec extension falls back to FTS5 keyword search with a visible warning; a native module that does not load or a database from a newer plugin turns memory off with one session-start notice; `/memory-doctor` names the broken piece and its fix.
+
+## Install
+
+Requirements: Claude Code and Node.js ≥ 22.
+
+The repository is its own marketplace. In Claude Code:
+
+```
+/plugin install adaptive-cognitive-memory --marketplace d2a8k3u/adaptive-cognitive-memory
+```
+
+or from a shell:
+
+```bash
+claude plugin marketplace add d2a8k3u/adaptive-cognitive-memory
+claude plugin install adaptive-cognitive-memory@adaptive-cognitive-memory
+```
+
+A checkout also loads directly with `claude --plugin-dir /path/to/adaptive-cognitive-memory`. The plugin ships `dist/` committed, so its install is dependency-only, run once in the installed plugin directory (`claude plugin list` shows it under `Read from`):
+
+```bash
+npm ci --ignore-scripts
+```
+
+Then:
+
+1. Run `/memory-doctor`. It prints a JSON health report; exit code 1 means a check failed.
+2. If the `model` check fails, cache the embedding model once (`Xenova/multilingual-e5-small`, int8, ~118 MB, into the plugin data directory — the only network operation the plugin performs, and it never touches memory content):
+
+```bash
+CLAUDE_PLUGIN_DATA="<plugin data dir>" node dist/cli.js model-init
+```
+
+`/memory-doctor` explains the same step with the paths filled in.
+
+### Keep your memories when you uninstall
+
+The database lives in `${CLAUDE_PLUGIN_DATA}` (`~/.claude/plugins/data/<id>/`), outside the versioned plugin directory, so it survives plugin updates. **Uninstalling the plugin from the last scope it is installed at deletes that directory.** Export first and keep the data:
+
+```bash
+CLAUDE_PLUGIN_DATA="<plugin data dir>" node dist/cli.js export ~/memory-backup.jsonl
+claude plugin uninstall adaptive-cognitive-memory --keep-data
+```
+
+The doctor's `data_retention` check warns while the database sits in the plugin data directory with no export in the last 30 days.
+
+## Native auto memory
+
+Claude Code's own auto memory (`~/.claude/projects/<project>/memory/MEMORY.md`, or the `autoMemoryDirectory` setting) is on by default and can run beside this plugin. The plugin reads the same settings Claude Code does — `CLAUDE_CODE_DISABLE_AUTO_MEMORY` (`1` off, `0` on) first, then `autoMemoryEnabled` in `.claude/settings.local.json`, `.claude/settings.json` and `~/.claude/settings.json`, highest first. Managed settings and `--settings` are invisible to it, so its verdict holds "as far as the readable settings show". While auto memory is on:
+
+- SessionStart (`startup`, `clear`, `compact`) adds one line asking Claude to store durable lessons with `memory_store`, not in `MEMORY.md`.
+- `memory_store` rejects content that restates a line of that `MEMORY.md` (as it does for `CLAUDE.md` and `.claude/rules/*.md`).
+- `/memory-doctor` warns (`auto_memory`). To make this plugin the only durable memory, set `"autoMemoryEnabled": false` in `.claude/settings.json` (one project) or `~/.claude/settings.json` (every project).
+
+## Recall
+
+Injection shape (abstracts only, never content; token estimate = chars/4; never more than 9,500 characters whatever the budget, since the host truncates additional context above 10,000):
+
+```
+Native auto memory is also on: store durable lessons with memory_store, not in the auto-memory MEMORY.md.
+memory degraded (model missing) — run /memory-doctor
+<memory>
+Recalled memory from earlier sessions; verify it against the current code. Apply or follow each line, or say why it does not apply, then send memory_feedback with the ids.
+Constraints:
+- Apply — release only from the main branch (valid from 2026-10-13 · project · 01K7Q3M5X8R2C9V4N6B1T0ZJHD)
+Preferences:
+- prefer pnpm for new TypeScript projects (valid from 2026-10-02 · user · 01K6ZP2Y7W3N8D5Q1F4H9GX0RB)
+Project facts:
+- deploys go to the ECS cluster (valid from 2026-10-10 · project · 01K7JD9C4T6M1Q8W2Z5R3N7BXA)
+Procedures:
+- Follow — run uv run pytest -q from the repository root (valid from 2026-10-11 · project · 01K7MA0F3H8B6Y2K9V1D4S7CWE)
+</memory>
+```
+
+The first line appears only at session start while native auto memory is on, the second only when a prompt's recall ran degraded; sections appear only when non-empty. Constraints start with `Apply —`, procedures with `Follow —`.
+
+| Event | Behaviour | Budget |
+|---|---|---|
+| `SessionStart` | the active constraints and preferences of the user and the project, ranked by derived importance, then rows injected fewer than 500 injection events ago, then recency; on `resume` and `compact` also every row injected earlier in the session | `recall_budget_tokens` (1200) |
+| `UserPromptSubmit` | admission first (slash commands, acknowledgements and prompts with fewer than 3 content words inject nothing and never load the model), then vector KNN + FTS5 candidates through a calibrated gate per prompt language: a row must reach an absolute cosine floor (English 0.857, Czech 0.792) and stand out from the mean cosine of the prompt's 10 nearest memories by a margin (English 0.017, Czech 0.013), or reach a lower threshold when its key or keywords match the prompt (English 0.853, Czech 0.781); with fewer than 10 memories in the partition the margin is not computed and a plain cosine threshold applies (English 0.851, Czech 0.788); beliefs and unverified rows also need a key hit; at most 3 rows | `recall_budget_tokens` (1200) |
+| `PreToolUse` (`Bash\|Edit\|Write`) | no embedding: the Bash command head (`pytest`, `git commit`, `uv run pytest` → also `pytest`) or the edited path (relative path, basename, directory prefixes, extensions) matched exactly against each memory's anchors | `pretool_budget_tokens` (300) |
+
+Rows already injected in the session since its latest SessionStart are skipped. The gate's operating point is measured, not chosen: `npm run eval:sweep` scores the grid on the calibration split (240 positive and 207 negative prompts over partitions of 115 memories) and picks the highest F0.5 among points whose gold hit holds a per-language floor and whose false-injection rate is no worse than the previous gate's in either language; the frozen point lives in `src/calibration.ts`, and a test pins it to the live embedding model and query/passage inputs. It was confirmed once on a fresh, separately written set of 240 positive and 120 negative prompts: precision 44.2% (previous gate 32.2%), gold hit 53.8% (57.9%), false injections 3/120 (8/120), non-gold rows per prompt 0.46 (0.82). The margin makes the gate more conservative as a store grows denser. An embedding run has a 1.5 s deadline per event; without a query vector `UserPromptSubmit` injects only the degraded warning, which names `embedding timeout` when the deadline passed and `model missing` when the model failed.
+
+`/memory-recall off` turns recall off for the current project (its git repository, or its directory outside git): the hooks inject no memories there while capture, the Stop checkpoint, `memory_store` and `memory_search` keep working. `/memory-recall on` restores it.
+
+## Capture moments and the Stop checkpoint
+
+- A human prompt that corrects how Claude works (`don't`, `never`, `wrong`, `instead`, `nedělej`, `špatně`, …) gets one context line: store the rule and the reason with `memory_store` before continuing. A remember request (`remember`, `from now on`, `zapamatuj si`, …) gets: store it now. Agent and system messages never trigger a line.
+- A Bash command that failed and later passed in the same session opens a resolution moment.
+- When a turn ends with such a moment still open (no `memory_store` or `memory_update` since), the Stop hook returns one memory checkpoint: store the durable lesson, or say there is none, then finish. It never fires while a stop hook is already continuing the turn.
+- `memory_feedback` receipts drive the lifecycle: only in sessions that give receipts does an injection without a `used` receipt count against a memory; at 5 or more receipted injections with a used share below 0.5 it becomes a `hypothesis` and leaves recall. Nothing is deleted.
+
+All hooks run `dist/hooks.js`, always exit 0 and never block. They print at most one JSON object: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"…"}}`, or, at session start when the database cannot be used, `{"systemMessage":"…"}` naming the cause and `/memory-doctor`. Any other internal failure prints one class-only line to stderr and nothing to stdout.
+
+## MCP tools
+
+Server name `memory`, so tool ids look like `mcp__plugin_adaptive-cognitive-memory_memory__memory_store`.
+
+| Tool | Arguments | Result |
+|---|---|---|
+| `memory_store` | `title` (≤200), `content` (≤32000), `type`, `kind`, `conflict_key` (lowercase dotted, ≤120) — required; `cardinality` (`single`\|`multi`, default `multi`), `value_text` (≤200, required for `single`), `keywords` (≤300), `anchors` (≤20 × ≤200), `scope` (`project`\|`user`, default `project`), `abstract`, `resolution` (`{action: ADD\|UPDATE\|SUPERSEDE\|NOOP, target?}`) | `{id, action: created\|superseded\|updated\|noop, refId?, promotedId?}` or `{status: needs_resolution, candidates, allowed}` |
+| `memory_search` | `query` (required, may be blank), `limit` (1–100, default 10), `type`, `scope` | `{results: [{id, scope, type, importance, abstract, score}], degraded?}` |
+| `memory_get` | `id` (full id or unique prefix) | full record incl. `content`, `state`, `conflict_key`, `value_text`, `superseded_by`, `relations` |
+| `memory_update` | `id`, plus at least one of `title`, `abstract`, `content` | updated record; revoked memories are immutable |
+| `memory_feedback` | `ids` (1–20, as recall printed them), `verdict` (`used`\|`wrong`\|`not_applicable`) | `{memories: [{id, state}]}`; `wrong` moves a memory to `hypothesis`, `used` brings it back; a call naming an unknown or revoked id records nothing |
+| `memory_delete` | `id` | `{deleted: true}`; deletes the row, its vector and its relations |
+| `memory_relate` | `source_id`, `target_id`, `relation_type` (≤40) | `{ok: true}`; rejects self-relations, unknown ids and a 21st relation |
+| `memory_status` | — | this project's id and recall switch; memory counts by state × kind for `user` scope and the project; transitions by reason; the share of the newest 500 recall events that injected anything (admission rejections and gate abstentions included); the share of memories injected in receipt-giving sessions that never got `used`; the newest 10 open capture signals with session and age; the last 10 injections |
+| `memory_doctor` | — | the doctor report |
+
+Invalid input returns `{error: {field, message}}` and persists nothing. When the native module or the database cannot be used, every tool except `memory_doctor` returns an error naming the cause and the fix.
+
+## Commands and CLI
+
+From a session, `/memory-doctor` and `/memory-recall on|off` run the CLI with the plugin data directory filled in. From a shell, set `CLAUDE_PLUGIN_DATA` and run `node dist/cli.js <command>` in the plugin root:
+
+| Command | Effect |
+|---|---|
+| `doctor` | JSON health report; exit 1 when a check fails |
+| `recall on\|off` | recall switch for the project of the working directory |
+| `export <file>` | writes JSONL: a header, then one record per memory (every column needed to restore it — state, counters, timestamps — but no vector), relation and transition; secrets redacted again, personal data kept; refuses an existing file; stamps the export time the doctor reads |
+| `import <file>` | validates every line first and rejects the whole file naming each bad line; then writes in one transaction. A memory id already present is skipped (re-import is a no-op); an active single-valued memory whose slot another active memory holds, or a memory with more than 20 relations, rejects the import naming the line. Imported text is redacted like a stored memory's. Imported rows arrive without vectors: run `reembed` (each server start embeds up to 32 active ones) |
+| `model-init` | one-time model download, the only command that touches the network |
+| `reembed` | realigns vector states that drifted while sqlite-vec was not loaded, then embeds every memory still missing a vector (the MCP server does both for up to 32 active ones after it connects; a failure there leaves the rows unembedded and shows in the doctor's `unembedded` check) |
+
+### Doctor checks
+
+Every check has `status` `ok`, `warn` or `fail` (`ok: false` only for `fail`), a `detail` and, unless ok, a `fix`. Only `fail` makes the report `degraded` and the exit code 1.
+
+`node`, `native_module` (better-sqlite3 loads under this node; the fix is `npm rebuild better-sqlite3` in the plugin root), `plugin_data`, `database` (schema version, `quick_check`, a newer schema written by a newer plugin), `vec`, `model` (warns when the last prompt's query embedding missed its 1.5 s deadline), `unembedded` (active memories without a vector, with the last failed start-up backfill), `vec_state` (vectors whose state drifted from their memory's), `fts`, `calibration` (the model and sweep the gate was calibrated with), `project_identity` (warns with the `safe.directory` fix when git refuses the repository for dubious ownership and the project falls back to its directory), `auto_memory` (warns while native auto memory is on), `data_retention` (warns while the database sits in the plugin data directory without an export in the last 30 days).
+
+## Configuration
+
+Plugin options (`/config`, or `claude plugin configure adaptive-cognitive-memory`):
+
+| Option | Meaning | Default | Range |
+|---|---|---|---|
+| `recall_budget_tokens` | injection budget, SessionStart + UserPromptSubmit | `1200` | 100–2375 |
+| `pretool_budget_tokens` | injection budget, PreToolUse | `300` | 100–2375 |
+
+Hooks receive them as `CLAUDE_PLUGIN_OPTION_RECALL_BUDGET_TOKENS` and `CLAUDE_PLUGIN_OPTION_PRETOOL_BUDGET_TOKENS`; a value outside the range is an explicit error. Environment:
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `CLAUDE_PLUGIN_DATA` | plugin data directory; required | set by Claude Code |
+| `ACM_DB_PATH` | database path override | `${CLAUDE_PLUGIN_DATA}/memory.sqlite` |
+| `ACM_MODEL_CACHE_DIR` | model cache override | `${CLAUDE_PLUGIN_DATA}/models` |
+
+## Storage
+
+One SQLite database (WAL, `busy_timeout` 5000 ms, short immediate transactions) holds:
+
+- `memories` — ulid id, type, kind, scope, `project_id`, title, abstract, content, slot, state, counters, derived importance ((1 + used) / (2 + used + failures) with failures = 2 × wrong + receipted injections without use), validity timestamps. `project_id` is the first 16 hex chars of the sha256 of the project's git common dir, so every subdirectory and worktree of one repository shares it; outside git it hashes the directory's real path.
+- `relations` (explicit, capped at 20 per source), `memories_vec` (sqlite-vec, float[384] cosine, with a `state` column so KNN filters to active rows), `memories_fts` (FTS5 over title, abstract, conflict key, keywords and value).
+- `transitions` — every supersession, promotion, demotion and reactivation with its evidence.
+- `injections`, `receipt_sessions`, `recall_events` — what each session was shown, which sessions gave receipts, and one row per recall hook run with the number of rows it injected (kept to the newest 10,000 at each session start).
+- `session_signals`, `command_failures` — capture moments; closed signals and command failures older than 30 days are dropped at session start.
+- `project_settings` — the per-project recall switch.
+
+Concurrent sessions are safe: an externally locked database surfaces an explicit `database locked` error, never a partial write. The embedding model identity and dimension are guarded at open. Every open stamps the plugin version that wrote the database; a database whose schema is newer than the running plugin supports is refused with both versions named and "update the plugin".
+
+## Development
+
+```bash
+npm ci               # install dependencies (exact pins, lockfile committed)
+npm run build        # tsc → dist/ (commit the result — dist ships with the plugin)
+npm run check        # tsc + biome + vitest run
+npm run eval         # retrieval and capture evaluation at the host boundary
+```
+
+The suite covers the store pipeline, scope isolation, budgeted injection, redaction, tool contracts, hook spawning against the committed `dist`, concurrency and kill -9 durability, export/import round trips, the doctor, native-module and newer-schema fail-open, install and static gates, and a two-session end-to-end recall run. The perf gate measures the warm `UserPromptSubmit` hook at 1000 memories against a 750 ms p95 budget (hooks.json timeout 5 s).
+
+### Real-session eval
+
+`evals/` holds a small `claude plugin eval` suite that runs a real model against the plugin: a correction, a remember request and a resolved failure lead to a store; a conflicting fact goes through the two-phase store and supersedes the old value; a content-free prompt, a neutral turn and another project's fact inject nothing; a superseded fact and a pre-tool procedure reach the answer. Each case's scaffold links the embedding model cached by `npm test` into the run's plugin data directory and seeds memories through the real MCP server. The cases need the real server and Bash:
+
+```bash
+claude plugin eval . --tag baseline --ablation with-without --mocks off --scaffold \
+  --allow-tools "mcp__plugin_adaptive-cognitive-memory_memory__*" Bash --trust-plugin
+claude plugin eval . --tag single-arm --ablation none --mocks off --scaffold \
+  --allow-tools "mcp__plugin_adaptive-cognitive-memory_memory__*" Bash --trust-plugin
+```
+
+Transcripts carry only SessionStart hook output, so whether a memory was injected is checked in each run's database (`--keep-temp`, then the `injections` and `session_signals` tables), not with trace graders.
+
+Source layout: `src/` core (`cfg`, `ids`, `redact`, `embeddings`, `search`, `gate`, `inject`, `capture`, `lifecycle`, `policy`, `automemory`, `status`, `transfer`, `doctor`, `tools`) and `src/db/` (`database`, `schema`, `memories`, `relations`, `injections`, `signals`, `events`, `projects`, `status`, `transfer`), entries `src/server.ts`, `src/hooks.ts`, `src/cli.ts`.

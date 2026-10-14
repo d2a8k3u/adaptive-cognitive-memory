@@ -1,0 +1,16 @@
+[
+  {
+    "memory": {
+      "title": "Python test command",
+      "abstract": "Run the Python tests with `uv run pytest -q`; plain pytest misses the project virtualenv",
+      "content": "Run the Python tests with `uv run pytest -q` from the project root. Plain `pytest` uses the system interpreter and misses the project's virtualenv dependencies.",
+      "type": "procedural",
+      "kind": "procedure",
+      "conflict_key": "test.command.python",
+      "cardinality": "single",
+      "value_text": "uv run pytest -q",
+      "keywords": "pytest tests uv virtualenv",
+      "anchors": ["pytest"]
+    }
+  }
+]

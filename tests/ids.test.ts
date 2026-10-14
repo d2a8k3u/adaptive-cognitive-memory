@@ -1,0 +1,134 @@
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { collectLocationFacts, newId, projectIdentity } from "../src/ids";
+
+const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+const ISOLATED_GIT_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+};
+
+function git(dir: string, ...args: string[]): void {
+  execFileSync(
+    "git",
+    ["-c", "user.name=acm", "-c", "user.email=acm@example.invalid", "-C", dir, ...args],
+    { env: ISOLATED_GIT_ENV, stdio: "ignore" },
+  );
+}
+
+function tempDir(prefix: string): string {
+  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+}
+
+function fakeGitDir(script: string): string {
+  const dir = tempDir("acm-fake-git-");
+  const path = join(dir, "git");
+  writeFileSync(path, script);
+  chmodSync(path, 0o755);
+  return dir;
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("newId", () => {
+  it("emits lexicographically sortable ulids", () => {
+    const first = newId();
+    const second = newId();
+    expect(first).toMatch(ULID_PATTERN);
+    expect(first < second).toBe(true);
+  });
+});
+
+describe("projectIdentity", () => {
+  it.each([
+    {
+      name: "a subdirectory of a repository shares the repository identity",
+      facts: { realpath: "/work/alpha/src/app", gitCommonDir: "/work/alpha/.git" },
+      expected: "0c5bcc2e9ee18edd",
+    },
+    {
+      name: "a worktree shares the identity of its common git dir",
+      facts: { realpath: "/elsewhere/alpha-feature", gitCommonDir: "/work/alpha/.git" },
+      expected: "0c5bcc2e9ee18edd",
+    },
+    {
+      name: "a directory outside git is identified by its real path",
+      facts: { realpath: "/work/alpha", gitCommonDir: undefined },
+      expected: "017094432d2c0fa9",
+    },
+    {
+      name: "another repository has its own identity",
+      facts: { realpath: "/work/alpha", gitCommonDir: "/work/beta/.git" },
+      expected: "f4c917f55aca7e78",
+    },
+  ])("$name", ({ facts, expected }) => {
+    expect(projectIdentity(facts)).toBe(expected);
+  });
+});
+
+describe("collectLocationFacts", () => {
+  it("reports one common git dir for the repository root, a nested directory and a worktree", () => {
+    const root = tempDir("acm-ids-repo-");
+    const nested = join(root, "src", "app");
+    mkdirSync(nested, { recursive: true });
+    git(root, "init", "-q");
+    git(root, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init");
+    const worktree = join(tempDir("acm-ids-worktree-"), "feature");
+    git(root, "worktree", "add", "-q", "--detach", worktree);
+    const expectedCommonDir = join(root, ".git");
+
+    expect([root, nested, worktree].map((dir) => collectLocationFacts(dir).gitCommonDir)).toEqual([
+      expectedCommonDir,
+      expectedCommonDir,
+      expectedCommonDir,
+    ]);
+    expect(collectLocationFacts(nested).realpath).toBe(nested);
+  });
+
+  it("reports the real path and no git dir outside a repository", () => {
+    const linkedPath = mkdtempSync(join(tmpdir(), "acm-ids-plain-"));
+
+    expect(collectLocationFacts(linkedPath)).toEqual({
+      realpath: realpathSync(linkedPath),
+      gitCommonDir: undefined,
+    });
+  });
+
+  it("names a repository git refuses for dubious ownership and falls back to the directory identity", () => {
+    const root = tempDir("acm-ids-dubious-");
+    const nested = join(root, "src");
+    mkdirSync(nested);
+    git(root, "init", "-q");
+    vi.stubEnv("GIT_CONFIG_GLOBAL", "/dev/null");
+    vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+    vi.stubEnv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1");
+
+    expect(collectLocationFacts(nested)).toEqual({
+      realpath: nested,
+      gitCommonDir: undefined,
+      dubiousRepository: root,
+    });
+  });
+
+  it("treats a missing git executable as a directory outside git", () => {
+    const plain = tempDir("acm-ids-nogit-");
+    vi.stubEnv("PATH", tempDir("acm-empty-path-"));
+
+    expect(collectLocationFacts(plain)).toEqual({ realpath: plain, gitCommonDir: undefined });
+  });
+
+  it("throws when git is killed before answering, so identity never silently changes", () => {
+    const plain = tempDir("acm-ids-killed-");
+    vi.stubEnv("PATH", fakeGitDir("#!/bin/sh\nkill -KILL $$\n"));
+
+    expect(() => collectLocationFacts(plain)).toThrowError(
+      expect.objectContaining({ signal: "SIGKILL" }),
+    );
+  });
+});

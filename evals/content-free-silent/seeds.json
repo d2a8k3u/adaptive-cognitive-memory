@@ -1,0 +1,28 @@
+[
+  {
+    "memory": {
+      "title": "Deploy window",
+      "abstract": "Production deploys happen on Tuesdays and Thursdays only (sm-7731)",
+      "content": "Production deploys happen on Tuesdays and Thursdays only, because the on-call rotation covers those days.",
+      "type": "semantic",
+      "kind": "fact",
+      "conflict_key": "deploy.window",
+      "cardinality": "single",
+      "value_text": "Tuesdays and Thursdays",
+      "keywords": "deploy release schedule"
+    }
+  },
+  {
+    "memory": {
+      "title": "Billing currency",
+      "abstract": "Billing amounts are stored in minor units as integers (sm-7731)",
+      "content": "Billing amounts are stored in minor units as integers, never as floats, to avoid rounding drift.",
+      "type": "semantic",
+      "kind": "fact",
+      "conflict_key": "billing.amount_storage",
+      "cardinality": "single",
+      "value_text": "integer minor units",
+      "keywords": "billing money amount cents"
+    }
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "memory": {
+      "title": "Primary database",
+      "abstract": "The primary database is MySQL 8",
+      "content": "The service stores all of its data in MySQL 8.",
+      "type": "semantic",
+      "kind": "fact",
+      "conflict_key": "project.primary_database",
+      "cardinality": "single",
+      "value_text": "MySQL 8",
+      "keywords": "database mysql storage"
+    }
+  },
+  {
+    "supersedes": 0,
+    "memory": {
+      "title": "Primary database",
+      "abstract": "The primary database is PostgreSQL 15",
+      "content": "The service stores all of its data in PostgreSQL 15.",
+      "type": "semantic",
+      "kind": "fact",
+      "conflict_key": "project.primary_database",
+      "cardinality": "single",
+      "value_text": "PostgreSQL 15",
+      "keywords": "database postgres postgresql storage"
+    }
+  }
+]

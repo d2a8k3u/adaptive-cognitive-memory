@@ -1,0 +1,15 @@
+[
+  {
+    "memory": {
+      "title": "Primary database",
+      "abstract": "The primary database is MySQL 8",
+      "content": "The service stores all of its data in MySQL 8.",
+      "type": "semantic",
+      "kind": "fact",
+      "conflict_key": "project.primary_database",
+      "cardinality": "single",
+      "value_text": "MySQL 8",
+      "keywords": "database mysql storage"
+    }
+  }
+]

@@ -1,0 +1,30 @@
+{
+  "name": "adaptive-cognitive-memory",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit && tsc -p tsconfig.test.json && biome check --error-on-warnings . && vitest run",
+    "eval": "tsc && vitest run --config vitest.eval.config.ts run.eval",
+    "eval:sweep": "tsc && vitest run --config vitest.eval.config.ts sweep.eval",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.1",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "better-sqlite3": "13.0.3",
+    "sqlite-vec": "0.1.9",
+    "ulid": "2.4.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}
