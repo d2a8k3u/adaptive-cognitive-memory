@@ -10,7 +10,7 @@ cd adaptive-cognitive-memory
 npm ci
 ```
 
-The first test run downloads the local embedding model (~118 MB) from Hugging Face, so it needs a network connection. Later runs work fully offline.
+The first test run downloads the local embedding model (about 135 MB) from Hugging Face, so it needs a network connection. Later runs work fully offline.
 
 ## The One Gate
 

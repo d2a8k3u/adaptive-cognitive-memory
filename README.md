@@ -37,16 +37,15 @@ A checkout loaded in place — `claude --plugin-dir /path/to/adaptive-cognitive-
 npm ci --ignore-scripts
 ```
 
-Then:
+The first session downloads the embedding model by itself: `Xenova/multilingual-e5-small`, int8, about 135 MB, once, into the plugin data directory. It is the only network operation the plugin performs, and it never touches memory content. The download runs in the background, so the session starts at once with a notice; until it finishes, prompts recall nothing (session-start and pre-tool recall need no model), `memory_search` matches keywords only, and new memories are stored without a vector — the next memory server start embeds up to 32 of them, `reembed` the rest. A failed download is retried at every session start, whose notice then names the failure.
 
-1. Run `/memory-doctor`. It prints a JSON health report; exit code 1 means a check failed.
-2. If the `model` check fails, cache the embedding model once (`Xenova/multilingual-e5-small`, int8, ~118 MB, into the plugin data directory — the only network operation the plugin performs, and it never touches memory content):
+To keep the plugin off the network, turn the `download_model` option off (`/config`, or `claude plugin configure adaptive-cognitive-memory`) and cache the model yourself:
 
 ```bash
 CLAUDE_PLUGIN_DATA="<plugin data dir>" node dist/cli.js model-init
 ```
 
-`/memory-doctor` explains the same step with the paths filled in.
+Then run `/memory-doctor`. It prints a JSON health report; exit code 1 means a check failed. Its `model` check shows a running download, the last failed one, and the command above with the paths filled in.
 
 ### Keep your memories when you uninstall
 
@@ -106,7 +105,7 @@ Rows already injected in the session since its latest SessionStart are skipped. 
 - When a turn ends with such a moment still open (no `memory_store` or `memory_update` since), the Stop hook returns one memory checkpoint: store the durable lesson, or say there is none, then finish. It never fires while a stop hook is already continuing the turn.
 - `memory_feedback` receipts drive the lifecycle: only in sessions that give receipts does an injection without a `used` receipt count against a memory; at 5 or more receipted injections with a used share below 0.5 it becomes a `hypothesis` and leaves recall. Nothing is deleted.
 
-All hooks run `dist/hooks.js`, always exit 0 and never block. They print at most one JSON object: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"…"}}`, or, at session start when the database cannot be used, `{"systemMessage":"…"}` naming the cause and `/memory-doctor`. Any other internal failure prints one class-only line to stderr and nothing to stdout.
+All hooks run `dist/hooks.js`, always exit 0 and never block. They print at most one JSON object: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"…"}}`, or, at session start when the database cannot be used, `{"systemMessage":"…"}` naming the cause and `/memory-doctor`. While the embedding model is missing, session start adds a `systemMessage` beside the context: the model is downloading, or, with `download_model` off, run `/memory-doctor`; after a failed download it names the failure's first line (at most 120 characters) and that the download is retrying. When no download is running, that session start also launches `model-init` as a detached background process and does not wait for it; no other event starts one. Any other internal failure prints one class-only line to stderr and nothing to stdout.
 
 ## MCP tools
 
@@ -136,14 +135,14 @@ From a session, `/memory-doctor` and `/memory-recall on|off` run the CLI with th
 | `recall on\|off` | recall switch for the project of the working directory |
 | `export <file>` | writes JSONL: a header, then one record per memory (every column needed to restore it — state, counters, timestamps — but no vector), relation and transition; secrets redacted again, personal data kept; refuses an existing file; stamps the export time the doctor reads |
 | `import <file>` | validates every line first and rejects the whole file naming each bad line; then writes in one transaction. A memory id already present is skipped (re-import is a no-op); an active single-valued memory whose slot another active memory holds, or a memory with more than 20 relations, rejects the import naming the line. Imported text is redacted like a stored memory's. Imported rows arrive without vectors: run `reembed` (each server start embeds up to 32 active ones) |
-| `model-init` | one-time model download, the only command that touches the network |
+| `model-init` | one-time model download, the only command that touches the network (session start runs it in the background unless `download_model` is off). It downloads into a staging directory beside the model cache and moves the finished model into place, so an interrupted download never leaves a partial model; a lock in the plugin data directory admits one download at a time (exit 1 while another runs; a lock older than 15 minutes is taken over), and a failure is recorded for the doctor. Prints the model's size and path; does nothing when the model is already cached |
 | `reembed` | realigns vector states that drifted while sqlite-vec was not loaded, then embeds every memory still missing a vector (the MCP server does both for up to 32 active ones after it connects; a failure there leaves the rows unembedded and shows in the doctor's `unembedded` check) |
 
 ### Doctor checks
 
 Every check has `status` `ok`, `warn` or `fail` (`ok: false` only for `fail`), a `detail` and, unless ok, a `fix`. Only `fail` makes the report `degraded` and the exit code 1.
 
-`node`, `native_module` (better-sqlite3 loads under this node; the fix is `npm rebuild better-sqlite3` in the plugin root), `plugin_data`, `database` (schema version, `quick_check`, a newer schema written by a newer plugin), `vec`, `model` (warns when the last prompt's query embedding missed its 1.5 s deadline), `unembedded` (active memories without a vector, with the last failed start-up backfill), `vec_state` (vectors whose state drifted from their memory's), `fts`, `calibration` (the model and sweep the gate was calibrated with), `project_identity` (warns with the `safe.directory` fix when git refuses the repository for dubious ownership and the project falls back to its directory), `auto_memory` (warns while native auto memory is on), `data_retention` (warns while the database sits in the plugin data directory without an export in the last 30 days).
+`node`, `native_module` (better-sqlite3 loads under this node; the fix is `npm rebuild better-sqlite3` in the plugin root), `plugin_data`, `database` (schema version, `quick_check`, a newer schema written by a newer plugin), `vec`, `model` (fails while the model is missing, naming the last failed download; warns instead while a download is running, and when the last prompt's query embedding missed its 1.5 s deadline), `unembedded` (active memories without a vector, with the last failed start-up backfill), `vec_state` (vectors whose state drifted from their memory's), `fts`, `calibration` (the model and sweep the gate was calibrated with), `project_identity` (warns with the `safe.directory` fix when git refuses the repository for dubious ownership and the project falls back to its directory), `auto_memory` (warns while native auto memory is on), `data_retention` (warns while the database sits in the plugin data directory without an export in the last 30 days).
 
 ## Configuration
 
@@ -153,14 +152,16 @@ Plugin options (`/config`, or `claude plugin configure adaptive-cognitive-memory
 |---|---|---|---|
 | `recall_budget_tokens` | injection budget, SessionStart + UserPromptSubmit | `1200` | 100–2375 |
 | `pretool_budget_tokens` | injection budget, PreToolUse | `300` | 100–2375 |
+| `download_model` | download the embedding model in the background at the first session start | `true` | `true`, `false` |
 
-Hooks receive them as `CLAUDE_PLUGIN_OPTION_RECALL_BUDGET_TOKENS` and `CLAUDE_PLUGIN_OPTION_PRETOOL_BUDGET_TOKENS`; a value outside the range is an explicit error. Environment:
+Hooks receive them as `CLAUDE_PLUGIN_OPTION_RECALL_BUDGET_TOKENS`, `CLAUDE_PLUGIN_OPTION_PRETOOL_BUDGET_TOKENS` and `CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL`; an unset option takes its default, and a value outside the range is an explicit error. Environment:
 
 | Variable | Meaning | Default |
 |---|---|---|
 | `CLAUDE_PLUGIN_DATA` | plugin data directory; required | set by Claude Code |
 | `ACM_DB_PATH` | database path override | `${CLAUDE_PLUGIN_DATA}/memory.sqlite` |
 | `ACM_MODEL_CACHE_DIR` | model cache override | `${CLAUDE_PLUGIN_DATA}/models` |
+| `ACM_MODEL_REMOTE_HOST` | model download source override (the tests point it at an unreachable local address) | `https://huggingface.co/` |
 
 ## Storage
 
