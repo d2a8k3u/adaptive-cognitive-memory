@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { hostToolName, MEMORY_SERVER_NAME } from "../src/toolnames";
-import { PLUGIN_VERSION } from "../src/version";
+import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
 
 const DIST_DIR = join(process.cwd(), "dist");
 const HOOK_ENTRY = join(DIST_DIR, "hooks.js");
@@ -141,6 +141,65 @@ describe("repository secret hygiene", () => {
     });
 
     expect(offenders).toEqual([]);
+  });
+});
+
+interface LockedPackage {
+  readonly dev?: boolean;
+  readonly link?: boolean;
+  readonly resolved?: string;
+  readonly integrity?: string;
+  readonly dependencies?: Readonly<Record<string, string>>;
+}
+
+const AUTO_INSTALL_LOCKFILE_VERSIONS = [2, 3];
+const NPM_REGISTRY = "https://registry.npmjs.org/";
+
+function readJson<T>(...path: string[]): T {
+  return JSON.parse(readFileSync(join(process.cwd(), ...path), "utf8")) as T;
+}
+
+describe("marketplace install", () => {
+  it("lists the plugin under the install id that the dependency fix names", () => {
+    const marketplace = readJson<{ name: string; plugins: { name: string }[] }>(
+      ".claude-plugin",
+      "marketplace.json",
+    );
+
+    expect(marketplace.plugins.map((entry) => `${entry.name}@${marketplace.name}`)).toEqual([
+      PLUGIN_INSTALL_ID,
+    ]);
+  });
+
+  it("keeps the runtime dependencies installable by Claude Code's frozen, script-free npm install", () => {
+    const manifest = readJson<{ dependencies: Record<string, string>; overrides?: unknown }>(
+      "package.json",
+    );
+    const lock = readJson<{ lockfileVersion: number; packages: Record<string, LockedPackage> }>(
+      "package-lock.json",
+    );
+    const runtimePackages = Object.entries(lock.packages).filter(
+      ([path, entry]) => path !== "" && entry.dev !== true,
+    );
+
+    expect({
+      lockfileVersion: AUTO_INSTALL_LOCKFILE_VERSIONS.includes(lock.lockfileVersion),
+      overrides: manifest.overrides,
+      lockedDependencies: lock.packages[""]?.dependencies,
+      unpinned: runtimePackages
+        .filter(
+          ([, entry]) =>
+            entry.link === true ||
+            entry.integrity === undefined ||
+            !entry.resolved?.startsWith(NPM_REGISTRY),
+        )
+        .map(([path]) => path),
+    }).toEqual({
+      lockfileVersion: true,
+      overrides: undefined,
+      lockedDependencies: manifest.dependencies,
+      unpinned: [],
+    });
   });
 });
 
