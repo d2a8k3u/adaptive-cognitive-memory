@@ -29,7 +29,9 @@ claude plugin marketplace add d2a8k3u/adaptive-cognitive-memory
 claude plugin install adaptive-cognitive-memory@adaptive-cognitive-memory
 ```
 
-A checkout also loads directly with `claude --plugin-dir /path/to/adaptive-cognitive-memory`. The plugin ships `dist/` committed, so its install is dependency-only, run once in the installed plugin directory (`claude plugin list` shows it under `Read from`):
+The plugin ships `dist/` committed, and Claude Code installs its npm dependencies from `package-lock.json` into the plugin's cached copy during the marketplace install (registry packages only, `--ignore-scripts`, within 60 s), so there is no build or install step of your own. If that install does not finish, `claude plugin list` notes the missing packages and the first session says so; `claude plugin update adaptive-cognitive-memory@adaptive-cognitive-memory` retries it.
+
+A checkout loaded in place — `claude --plugin-dir /path/to/adaptive-cognitive-memory`, or a marketplace added from a local path — gets no automatic install. Run once in the checkout:
 
 ```bash
 npm ci --ignore-scripts
