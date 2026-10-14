@@ -380,6 +380,7 @@ export class WorldWriter {
         CLAUDE_CONFIG_DIR: this.world.claudeConfigDir,
         CLAUDE_PLUGIN_ROOT: this.plugin.root,
         CLAUDE_PLUGIN_DATA: this.world.pluginData,
+        CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false",
         ACM_MODEL_CACHE_DIR: this.world.modelCacheDir,
       }),
       stderr: "inherit",
@@ -450,6 +451,7 @@ export function runHook(
         CLAUDE_PLUGIN_ROOT: plugin.root,
         CLAUDE_PLUGIN_DATA: world.pluginData,
         CLAUDE_PROJECT_DIR: invocation.projectDir,
+        CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false",
         ACM_MODEL_CACHE_DIR: world.modelCacheDir,
       }),
     });

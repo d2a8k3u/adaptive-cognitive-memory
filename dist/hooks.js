@@ -1,5 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const node_child_process_1 = require("node:child_process");
+const node_path_1 = require("node:path");
 const automemory_1 = require("./automemory");
 const calibration_1 = require("./calibration");
 const capture_1 = require("./capture");
@@ -17,6 +19,7 @@ const prompt_1 = require("./prompt");
 const retention_1 = require("./retention");
 const session_1 = require("./session");
 const toolnames_1 = require("./toolnames");
+const version_1 = require("./version");
 const HOOK_EVENTS = [
     "SessionStart",
     "UserPromptSubmit",
@@ -26,6 +29,7 @@ const HOOK_EVENTS = [
     "Stop",
 ];
 const SESSION_EVENTS = ["PostToolUse", "PostToolUseFailure", "Stop"];
+const CLI_ENTRY = (0, node_path_1.join)(version_1.PLUGIN_ROOT, "dist", "cli.js");
 const BASH_TOOL = "Bash";
 const FEEDBACK_TOOL = (0, toolnames_1.hostToolName)("memory_feedback");
 const STORE_RECEIPT_TOOLS = new Set([
@@ -44,8 +48,17 @@ function stringField(value) {
 function projectDirectory(sessionProjectDir, eventCwd) {
     return sessionProjectDir !== undefined && sessionProjectDir !== "" ? sessionProjectDir : eventCwd;
 }
-function hookOutput(event, additionalContext) {
-    return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext } });
+function hookOutput(event, reply) {
+    const output = {
+        ...(reply.notice === undefined ? {} : { systemMessage: reply.notice }),
+        ...(reply.context === ""
+            ? {}
+            : { hookSpecificOutput: { hookEventName: event, additionalContext: reply.context } }),
+    };
+    return Object.keys(output).length === 0 ? undefined : JSON.stringify(output);
+}
+function contextOnly(text) {
+    return text.then((context) => ({ context }));
 }
 function readStdin() {
     return new Promise((resolve, reject) => {
@@ -131,6 +144,33 @@ function lessonRouting(scope, facts, source) {
     return (0, session_1.routesLessons)(source)
         ? (0, session_1.routingLine)((0, automemory_1.readAutoMemory)(scope.env, scope.projectDir, facts).enabled)
         : "";
+}
+function startModelDownload(env) {
+    const child = (0, node_child_process_1.spawn)(process.execPath, [CLI_ENTRY, "model-init"], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+        env,
+    });
+    child.on("error", (error) => {
+        console.error(`memory hook SessionStart could not start the model download: ${errorClassName(error)}`);
+    });
+    child.unref();
+}
+async function setUpModel(scope) {
+    const { modelNotice, observedModelSetup, readDownloadFailure } = await import("./modeldownload.js");
+    const setup = observedModelSetup(scope.config, Date.parse(scope.now));
+    if (setup === "ready") {
+        return undefined;
+    }
+    if (setup === "start-download") {
+        startModelDownload(scope.env);
+    }
+    return modelNotice(setup, readDownloadFailure(scope.config.pluginData));
+}
+async function sessionStartReply(scope, source) {
+    const notice = await setUpModel(scope);
+    return { context: await sessionStartText(scope, source), notice };
 }
 function sessionStartText(scope, source) {
     const facts = (0, ids_1.collectLocationFacts)(scope.projectDir);
@@ -274,21 +314,21 @@ async function dispatch(event, input, env) {
     const now = new Date().toISOString();
     if (isSessionEvent(event)) {
         return sessionId === undefined
-            ? ""
-            : sessionEventText(event, input, { config: (0, cfg_1.loadConfig)(env), sessionId, now });
+            ? { context: "" }
+            : contextOnly(sessionEventText(event, input, { config: (0, cfg_1.loadConfig)(env), sessionId, now }));
     }
     const projectDir = projectDirectory(env.CLAUDE_PROJECT_DIR, stringField(input.cwd));
     if (projectDir === undefined) {
-        return "";
+        return { context: "" };
     }
     const scope = { config: (0, cfg_1.loadConfig)(env), env, projectDir, sessionId, now };
     if (event === "UserPromptSubmit") {
-        return promptText(scope, stringField(input.prompt)?.trim() ?? "");
+        return contextOnly(promptText(scope, stringField(input.prompt)?.trim() ?? ""));
     }
     if (event === "PreToolUse") {
-        return toolText(scope, (0, keys_1.toolLookup)(stringField(input.tool_name) ?? "", input.tool_input, projectDir));
+        return contextOnly(toolText(scope, (0, keys_1.toolLookup)(stringField(input.tool_name) ?? "", input.tool_input, projectDir)));
     }
-    return sessionStartText(scope, stringField(input.source));
+    return sessionStartReply(scope, stringField(input.source));
 }
 async function runHook() {
     let event = "unknown";
@@ -303,9 +343,9 @@ async function runHook() {
             return;
         }
         event = hookEvent;
-        const text = await dispatch(hookEvent, input, process.env);
-        if (text !== "") {
-            console.log(hookOutput(hookEvent, text));
+        const output = hookOutput(hookEvent, await dispatch(hookEvent, input, process.env));
+        if (output !== undefined) {
+            console.log(output);
         }
     }
     catch (error) {

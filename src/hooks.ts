@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { join } from "node:path";
 import { readAutoMemory } from "./automemory";
 import { PROMPT_GATE, PROMPT_MIN_CONTENT_TOKENS, TOOL_GATE } from "./calibration";
 import { checkpoint, cueLine, detectCue, signalDetail } from "./capture";
@@ -35,6 +37,7 @@ import {
   sessionStartMemories,
 } from "./session";
 import { hostToolName, STORE_TOOL } from "./toolnames";
+import { PLUGIN_ROOT } from "./version";
 
 const HOOK_EVENTS = [
   "SessionStart",
@@ -47,6 +50,8 @@ const HOOK_EVENTS = [
 type HookEvent = (typeof HOOK_EVENTS)[number];
 const SESSION_EVENTS = ["PostToolUse", "PostToolUseFailure", "Stop"] as const;
 type SessionEvent = (typeof SESSION_EVENTS)[number];
+
+const CLI_ENTRY = join(PLUGIN_ROOT, "dist", "cli.js");
 
 const BASH_TOOL = "Bash";
 const FEEDBACK_TOOL = hostToolName("memory_feedback");
@@ -88,6 +93,11 @@ interface Selection {
   readonly degraded?: DegradedFlags;
 }
 
+interface HookReply {
+  readonly context: string;
+  readonly notice?: string;
+}
+
 function isHookEvent(value: unknown): value is HookEvent {
   return typeof value === "string" && (HOOK_EVENTS as readonly string[]).includes(value);
 }
@@ -107,8 +117,18 @@ function projectDirectory(
   return sessionProjectDir !== undefined && sessionProjectDir !== "" ? sessionProjectDir : eventCwd;
 }
 
-function hookOutput(event: HookEvent, additionalContext: string): string {
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext } });
+function hookOutput(event: HookEvent, reply: HookReply): string | undefined {
+  const output = {
+    ...(reply.notice === undefined ? {} : { systemMessage: reply.notice }),
+    ...(reply.context === ""
+      ? {}
+      : { hookSpecificOutput: { hookEventName: event, additionalContext: reply.context } }),
+  };
+  return Object.keys(output).length === 0 ? undefined : JSON.stringify(output);
+}
+
+function contextOnly(text: Promise<string>): Promise<HookReply> {
+  return text.then((context) => ({ context }));
 }
 
 function readStdin(): Promise<string> {
@@ -220,6 +240,40 @@ function lessonRouting(scope: HookScope, facts: LocationFacts, source: string | 
   return routesLessons(source)
     ? routingLine(readAutoMemory(scope.env, scope.projectDir, facts).enabled)
     : "";
+}
+
+function startModelDownload(env: NodeJS.ProcessEnv): void {
+  const child = spawn(process.execPath, [CLI_ENTRY, "model-init"], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env,
+  });
+  child.on("error", (error) => {
+    console.error(
+      `memory hook SessionStart could not start the model download: ${errorClassName(error)}`,
+    );
+  });
+  child.unref();
+}
+
+async function setUpModel(scope: HookScope): Promise<string | undefined> {
+  const { modelNotice, observedModelSetup, readDownloadFailure } = await import(
+    "./modeldownload.js"
+  );
+  const setup = observedModelSetup(scope.config, Date.parse(scope.now));
+  if (setup === "ready") {
+    return undefined;
+  }
+  if (setup === "start-download") {
+    startModelDownload(scope.env);
+  }
+  return modelNotice(setup, readDownloadFailure(scope.config.pluginData));
+}
+
+async function sessionStartReply(scope: HookScope, source: string | undefined): Promise<HookReply> {
+  const notice = await setUpModel(scope);
+  return { context: await sessionStartText(scope, source), notice };
 }
 
 function sessionStartText(scope: HookScope, source: string | undefined): Promise<string> {
@@ -402,29 +456,28 @@ async function dispatch(
   event: HookEvent,
   input: HookInput,
   env: NodeJS.ProcessEnv,
-): Promise<string> {
+): Promise<HookReply> {
   const sessionId = stringField(input.session_id);
   const now = new Date().toISOString();
   if (isSessionEvent(event)) {
     return sessionId === undefined
-      ? ""
-      : sessionEventText(event, input, { config: loadConfig(env), sessionId, now });
+      ? { context: "" }
+      : contextOnly(sessionEventText(event, input, { config: loadConfig(env), sessionId, now }));
   }
   const projectDir = projectDirectory(env.CLAUDE_PROJECT_DIR, stringField(input.cwd));
   if (projectDir === undefined) {
-    return "";
+    return { context: "" };
   }
   const scope: HookScope = { config: loadConfig(env), env, projectDir, sessionId, now };
   if (event === "UserPromptSubmit") {
-    return promptText(scope, stringField(input.prompt)?.trim() ?? "");
+    return contextOnly(promptText(scope, stringField(input.prompt)?.trim() ?? ""));
   }
   if (event === "PreToolUse") {
-    return toolText(
-      scope,
-      toolLookup(stringField(input.tool_name) ?? "", input.tool_input, projectDir),
+    return contextOnly(
+      toolText(scope, toolLookup(stringField(input.tool_name) ?? "", input.tool_input, projectDir)),
     );
   }
-  return sessionStartText(scope, stringField(input.source));
+  return sessionStartReply(scope, stringField(input.source));
 }
 
 async function runHook(): Promise<void> {
@@ -440,9 +493,9 @@ async function runHook(): Promise<void> {
       return;
     }
     event = hookEvent;
-    const text = await dispatch(hookEvent, input, process.env);
-    if (text !== "") {
-      console.log(hookOutput(hookEvent, text));
+    const output = hookOutput(hookEvent, await dispatch(hookEvent, input, process.env));
+    if (output !== undefined) {
+      console.log(output);
     }
   } catch (error) {
     const outage = storageOutage(error);

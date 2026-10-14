@@ -5,19 +5,28 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { type Config, loadConfig } from "../src/cfg";
 import { type OpenedDb, openDatabase } from "../src/db/database";
-import { embedPassage } from "../src/embeddings";
+import { embedPassage, modelCached } from "../src/embeddings";
 import { resolveProjectId } from "../src/ids";
 import { estimateTokens } from "../src/inject";
+import {
+  acquireDownloadLock,
+  downloadLockPath,
+  readDownloadFailure,
+  readDownloadLock,
+} from "../src/modeldownload";
 import { testModelCacheDir } from "../vitest.config";
 
 const CHILD_KILL_MS = 25_000;
+const UNREACHABLE_MODEL_HOST = "http://127.0.0.1:9/";
+const DOWNLOAD_SETTLE_MS = 20_000;
 const DAY_MS = 86_400_000;
 const FEEDBACK_TOOL_NAME = "mcp__plugin_adaptive-cognitive-memory_memory__memory_feedback";
 const RECEIPT_TOOL_NAMES = [
@@ -59,7 +68,20 @@ function hookEntryPath(): string {
   return entry;
 }
 
+function refuseNetworkDownload(env: NodeJS.ProcessEnv): void {
+  const offline =
+    env.ACM_MODEL_CACHE_DIR === testModelCacheDir ||
+    env.CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL === "false" ||
+    env.ACM_MODEL_REMOTE_HOST === UNREACHABLE_MODEL_HOST;
+  if (!offline) {
+    throw new Error(
+      "this hook env could download the embedding model over the network: use the cached test model, set CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL=false or point ACM_MODEL_REMOTE_HOST at UNREACHABLE_MODEL_HOST",
+    );
+  }
+}
+
 function spawnHook(env: NodeJS.ProcessEnv, stdinText: string): Promise<HookResult> {
+  refuseNetworkDownload(env);
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [hookEntryPath()], { env });
     let stdout = "";
@@ -1245,6 +1267,107 @@ describe("hooks storage outage", () => {
       expect(output.systemMessage).toMatch(pattern);
     }
   });
+});
+
+describe("hooks model download", () => {
+  const countModelInit = join(process.cwd(), "tests", "fixtures", "count-model-init.cjs");
+  const downloadingNotice =
+    /adaptive-cognitive-memory is downloading its embedding model \(one time, about 135 MB\); prompt recall starts when it finishes/;
+
+  function missingModelEnv(): { env: NodeJS.ProcessEnv; config: Config } {
+    return freshEnv({
+      ACM_MODEL_CACHE_DIR: mkdtempSync(join(tmpdir(), "acm-hooks-no-model-")),
+      ACM_MODEL_REMOTE_HOST: UNREACHABLE_MODEL_HOST,
+      NODE_OPTIONS: `--require ${countModelInit}`,
+    });
+  }
+
+  function startMarker(): string {
+    return join(mkdtempSync(join(tmpdir(), "acm-hooks-model-init-")), "started");
+  }
+
+  function startedRuns(marker: string): number {
+    return existsSync(marker)
+      ? readFileSync(marker, "utf8")
+          .split("\n")
+          .filter((line) => line !== "").length
+      : 0;
+  }
+
+  function sessionStart(env: NodeJS.ProcessEnv, marker: string): Promise<HookResult> {
+    return spawnHook(
+      { ...env, ACM_MODEL_INIT_MARKER: marker },
+      JSON.stringify({
+        hook_event_name: "SessionStart",
+        source: "startup",
+        cwd: CWD,
+        session_id: "session-model-download",
+      }),
+    );
+  }
+
+  function systemMessage(result: HookResult): unknown {
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    return (JSON.parse(result.stdout) as { systemMessage?: unknown }).systemMessage;
+  }
+
+  async function downloadSettled(config: Config): Promise<void> {
+    await vi.waitFor(
+      () => {
+        expect(readDownloadFailure(config.pluginData)).toBeDefined();
+        expect(readDownloadLock(config.pluginData)).toBeUndefined();
+      },
+      { timeout: DOWNLOAD_SETTLE_MS, interval: 50 },
+    );
+  }
+
+  it("starts one background download at session start and none on a prompt, telling the user", async () => {
+    const { env, config } = missingModelEnv();
+    const promptMarker = startMarker();
+    const sessionMarker = startMarker();
+
+    const prompt = await spawnHook(
+      { ...env, ACM_MODEL_INIT_MARKER: promptMarker },
+      promptEvent("session-model-download", "how do we deploy the billing service"),
+    );
+    const started = await sessionStart(env, sessionMarker);
+    await downloadSettled(config);
+
+    expect(prompt.code).toBe(0);
+    expect(prompt.stdout).not.toContain("systemMessage");
+    expect(systemMessage(started)).toMatch(downloadingNotice);
+    expect([startedRuns(promptMarker), startedRuns(sessionMarker)]).toEqual([0, 1]);
+    expect(modelCached(config.modelCacheDir)).toBe(false);
+
+    const retried = await sessionStart(env, startMarker());
+
+    expect(systemMessage(retried)).toMatch(
+      /last embedding model download failed \(fetch failed.*\); retrying in the background \(one time, about 135 MB\)/,
+    );
+  }, 60_000);
+
+  it("starts no download while one is running or when automatic download is off, and says why", async () => {
+    const { env, config } = missingModelEnv();
+    const whileLocked = startMarker();
+    const whileOff = startMarker();
+    const afterwards = startMarker();
+
+    acquireDownloadLock(config.pluginData, new Date());
+    const locked = await sessionStart(env, whileLocked);
+    rmSync(downloadLockPath(config.pluginData));
+    const off = await sessionStart(
+      { ...env, CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false" },
+      whileOff,
+    );
+    const resumed = await sessionStart(env, afterwards);
+    await downloadSettled(config);
+
+    expect(systemMessage(locked)).toMatch(downloadingNotice);
+    expect(systemMessage(off)).toMatch(/automatic download is off.*\/memory-doctor/);
+    expect(systemMessage(resumed)).toMatch(downloadingNotice);
+    expect([whileLocked, whileOff, afterwards].map(startedRuns)).toEqual([0, 0, 1]);
+  }, 60_000);
 });
 
 describe("hooks defensive stdin", () => {
