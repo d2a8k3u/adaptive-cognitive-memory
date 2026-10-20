@@ -3,12 +3,20 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  ANCHOR_MAX_CHARS,
+  ANCHORS_MAX_ITEMS,
   type AuthoringProblem,
   anchorsProblem,
+  CONFLICT_KEY_MAX_CHARS,
+  CONFLICT_KEY_NAMESPACES,
   conflictKeyProblem,
+  KEYWORDS_MAX_CHARS,
   keywordsProblem,
+  VALUE_TEXT_MAX_CHARS,
   valueTextProblem,
 } from "../src/authoring";
+import { ABSTRACT_MAX_CHARS, CONTENT_MAX_CHARS, TITLE_MAX_CHARS } from "../src/cfg";
+import { MAX_HEAD_WORDS } from "../src/keys";
 import { hostToolName, MEMORY_SERVER_NAME } from "../src/toolnames";
 import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
 
@@ -351,6 +359,129 @@ describe("authoring standard", () => {
       "./branch",
       "./keys",
     ]);
+  });
+});
+
+const AUTHORING_REFERENCE_PATH = "memory/references/authoring.md";
+const AUTHORING_REFERENCE_MAX_WORDS = 600;
+const AUTHORING_SUMMARY_MAX_LINES = 8;
+const EXAMPLE_LIST_MIN_TOKENS = 5;
+
+function authoringReference(): string {
+  return readFileSync(join(process.cwd(), "skills", AUTHORING_REFERENCE_PATH), "utf8");
+}
+
+function exampleTokens(text: string, label: string): string[] {
+  const line = text.split("\n").find((candidate) => candidate.startsWith(`${label}:`)) ?? "";
+  return [...line.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? "");
+}
+
+function markdownSection(text: string, heading: string): string[] {
+  const lines = text.split("\n");
+  const start = lines.indexOf(heading);
+  if (start === -1) {
+    return [];
+  }
+  const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+  return lines.slice(start + 1, end === -1 ? undefined : end).filter((line) => line.trim() !== "");
+}
+
+function readmeLine(prefix: string): string {
+  return (
+    readFileSync(join(process.cwd(), "README.md"), "utf8")
+      .split("\n")
+      .find((line) => line.startsWith(prefix)) ?? ""
+  );
+}
+
+const RENDERED_LIMITS = [
+  `${ANCHORS_MAX_ITEMS} anchors`,
+  `${ANCHOR_MAX_CHARS} characters`,
+  `${VALUE_TEXT_MAX_CHARS} characters`,
+  `${KEYWORDS_MAX_CHARS} characters`,
+  `${CONFLICT_KEY_MAX_CHARS} characters`,
+  `${TITLE_MAX_CHARS} characters`,
+  `${ABSTRACT_MAX_CHARS} characters`,
+  `${CONTENT_MAX_CHARS} characters`,
+  `${MAX_HEAD_WORDS} words`,
+];
+
+describe("authoring standard docs", () => {
+  it("the reference names every limit from its owner and every conflict key namespace", () => {
+    const reference = authoringReference();
+
+    expect({
+      missingLimits: RENDERED_LIMITS.filter((limit) => !reference.includes(limit)),
+      missingNamespaces: CONFLICT_KEY_NAMESPACES.filter(
+        (namespace) => !reference.includes(`| \`${namespace}\` |`),
+      ),
+    }).toEqual({ missingLimits: [], missingNamespaces: [] });
+  });
+
+  it("every good example passes the server checks and every bad example fails them", () => {
+    const reference = authoringReference();
+    const lists = {
+      goodAnchors: exampleTokens(reference, "Good anchors"),
+      badAnchors: exampleTokens(reference, "Bad anchors"),
+      goodKeys: exampleTokens(reference, "Good keys"),
+      badKeys: exampleTokens(reference, "Bad keys"),
+    };
+
+    expect(
+      Object.entries(lists)
+        .filter(([, tokens]) => tokens.length < EXAMPLE_LIST_MIN_TOKENS)
+        .map(([list]) => list),
+    ).toEqual([]);
+    expect({
+      rejectedGoodAnchors: lists.goodAnchors.filter((token) => anchorsProblem([token])),
+      acceptedBadAnchors: lists.badAnchors.filter((token) => !anchorsProblem([token])),
+      rejectedGoodKeys: lists.goodKeys.filter((token) => conflictKeyProblem(token)),
+      acceptedBadKeys: lists.badKeys.filter((token) => !conflictKeyProblem(token)),
+    }).toEqual({
+      rejectedGoodAnchors: [],
+      acceptedBadAnchors: [],
+      rejectedGoodKeys: [],
+      acceptedBadKeys: [],
+    });
+  });
+
+  it("the reference stays short and the memory skill summarises it in a few lines that link it and repeat no limit", () => {
+    const summary = markdownSection(
+      readFileSync(join(process.cwd(), "skills", "memory", "SKILL.md"), "utf8"),
+      "## Authoring standard",
+    );
+
+    const referenceWords = authoringReference()
+      .split(/\s+/)
+      .filter((word) => word !== "");
+
+    expect(referenceWords.length).toBeLessThanOrEqual(AUTHORING_REFERENCE_MAX_WORDS);
+    expect(summary.length).toBeGreaterThan(0);
+    expect(summary.length).toBeLessThanOrEqual(AUTHORING_SUMMARY_MAX_LINES);
+    expect(summary.join("\n")).toContain(AUTHORING_REFERENCE_PATH);
+    expect(RENDERED_LIMITS.filter((limit) => summary.join("\n").includes(limit))).toEqual([]);
+  });
+
+  it("the README memory_store row names the key limits from their owner, the namespace rule and the anchor forms", () => {
+    const row = readmeLine("| `memory_store` |");
+
+    expect(row).toContain(`\`conflict_key\` (lowercase dotted, ≤${CONFLICT_KEY_MAX_CHARS})`);
+    expect(row).toContain(`\`value_text\` (≤${VALUE_TEXT_MAX_CHARS},`);
+    expect(row).toContain(`\`keywords\` (≤${KEYWORDS_MAX_CHARS})`);
+    expect(row).toContain(`\`anchors\` (≤${ANCHORS_MAX_ITEMS} × ≤${ANCHOR_MAX_CHARS})`);
+    expect(row).toContain(
+      `\`namespace.topic\` with namespace one of ${CONFLICT_KEY_NAMESPACES.map((namespace) => `\`${namespace}\``).join(", ")}`,
+    );
+    expect(row).toContain(`a command head of at most ${MAX_HEAD_WORDS} words`);
+  });
+
+  it("the README states the authoring rejections and that import applies the same key rules", () => {
+    expect(readmeLine("Invalid input returns")).toContain(
+      "An anchor no recall path can match or a `conflict_key` outside `namespace.topic` with a listed namespace is rejected the same way, the message naming the fix",
+    );
+    expect(readmeLine("| `import <file>` |")).toContain(
+      'every memory must pass the same key rules as `memory_store` (conflict key, value, keywords, anchors), except that a legacy empty `conflict_key` (`""`) is kept',
+    );
   });
 });
 

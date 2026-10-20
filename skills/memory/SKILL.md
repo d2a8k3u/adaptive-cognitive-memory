@@ -44,6 +44,11 @@ Recalled constraints start with `Apply —`, procedures with `Follow —`. Apply
 - `value_text`: the slot's value in a few words (`PostgreSQL 15`); required for `single`.
 - `keywords` and `anchors` help recall find it. Before a tool call a memory is recalled only when an anchor matches exactly: before Bash, a command head (`pytest`, `git commit`); before Read, Edit or Write, a project-relative path or basename (`billing/tax.py`), a directory prefix ending in `/` (`migrations/versions/`) or an extension starting with `.` (`.vue`) of the file.
 
+## Authoring standard
+
+Read [memory/references/authoring.md](references/authoring.md) before you write or edit a memory: it gives each field's limit and form, the namespaces a `conflict_key` may start with, and the anchor forms recall can match, with good and bad examples.
+The server rejects an anchor or key that no recall path can hit and names the fix; correct that field and repeat the call.
+
 ## When the answer is needs_resolution
 
 The server wrote nothing and lists the candidates it found. Repeat the same call with `resolution`:
