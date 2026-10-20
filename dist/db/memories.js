@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryRejection = void 0;
+exports.storedKeys = exports.MemoryRejection = void 0;
 exports.deriveAbstract = deriveAbstract;
 exports.passageText = passageText;
 exports.resolveMemoryId = resolveMemoryId;
@@ -43,6 +43,14 @@ const MEMORY_ROW_COLUMNS = `id, type, kind, scope, project_id, title, abstract, 
 const SLOT_ROW_COLUMNS = `id, scope, project_id AS projectId, conflict_key AS conflictKey, cardinality,
   value_text AS valueText, state, kind`;
 const EVERY_MEMORY = { sql: "TRUE", params: [] };
+function storedKeyText(text) {
+    return (0, redact_1.redact)(text).text;
+}
+exports.storedKeys = {
+    valueText: storedKeyText,
+    keywords: storedKeyText,
+    anchors: (anchors) => anchors.map(storedKeyText),
+};
 function deriveAbstract(content) {
     const text = content.trim();
     const sentence = text.match(/^[\s\S]*?[.!?](?=\s|$)/)?.[0] ?? text;
@@ -198,14 +206,14 @@ function prepareRow(input, projectId) {
         projectId,
         conflictKey: input.conflictKey,
         cardinality: input.cardinality,
-        valueText: (0, redact_1.redact)(input.valueText).text,
+        valueText: exports.storedKeys.valueText(input.valueText),
         title: (0, redact_1.redactWithin)(input.title, cfg_1.TITLE_MAX_CHARS),
         abstract: input.abstract === undefined
             ? deriveAbstract(content)
             : (0, redact_1.redactWithin)(input.abstract, cfg_1.ABSTRACT_MAX_CHARS),
         content,
-        keywords: (0, redact_1.redact)(input.keywords).text,
-        anchors: JSON.stringify(input.anchors.map((anchor) => (0, redact_1.redact)(anchor).text)),
+        keywords: exports.storedKeys.keywords(input.keywords),
+        anchors: JSON.stringify(exports.storedKeys.anchors(input.anchors)),
         contentHash: (0, policy_1.contentHash)(content),
     };
 }

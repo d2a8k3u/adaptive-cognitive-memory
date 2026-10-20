@@ -46,6 +46,8 @@ const GLOB_MARK = /[*?]/;
 
 const CONFLICT_KEY_MESSAGE = `conflict_key must be namespace.topic naming the slot — lowercase, dotted, at most ${CONFLICT_KEY_MAX_CHARS} characters, with namespace one of ${CONFLICT_KEY_NAMESPACES.join(", ")} — such as project.primary_database or team.reviewers`;
 const ANCHORS_SHAPE_MESSAGE = `anchors must be a list of at most ${ANCHORS_MAX_ITEMS} non-empty strings of at most ${ANCHOR_MAX_CHARS} characters`;
+const REDACTED_ANCHOR_FAULT =
+  "contains a secret; anchors match raw tool input, so a redacted anchor never fires";
 
 function isSingleToken(anchor: string): boolean {
   return !WHITESPACE.test(anchor);
@@ -144,6 +146,16 @@ function anchorFault(
   }
   const firstIndex = anchors.indexOf(anchor);
   return firstIndex < index ? `repeats anchors[${firstIndex}]; list each anchor once` : undefined;
+}
+
+export function redactedAnchorProblem(
+  written: readonly string[],
+  stored: readonly string[],
+): AuthoringProblem | undefined {
+  const index = written.findIndex((anchor, position) => anchor !== stored[position]);
+  return index === -1
+    ? undefined
+    : { field: "anchors", message: `anchors[${index}] ${REDACTED_ANCHOR_FAULT}` };
 }
 
 export function anchorsProblem(value: unknown): AuthoringProblem | undefined {

@@ -174,6 +174,16 @@ const SLOT_ROW_COLUMNS = `id, scope, project_id AS projectId, conflict_key AS co
 
 const EVERY_MEMORY: PartitionFilter = { sql: "TRUE", params: [] };
 
+function storedKeyText(text: string): string {
+  return redact(text).text;
+}
+
+export const storedKeys = {
+  valueText: storedKeyText,
+  keywords: storedKeyText,
+  anchors: (anchors: readonly string[]): string[] => anchors.map(storedKeyText),
+} as const;
+
 export function deriveAbstract(content: string): string {
   const text = content.trim();
   const sentence = text.match(/^[\s\S]*?[.!?](?=\s|$)/)?.[0] ?? text;
@@ -383,15 +393,15 @@ function prepareRow(input: StoreInput, projectId: string): PreparedRow {
     projectId,
     conflictKey: input.conflictKey,
     cardinality: input.cardinality,
-    valueText: redact(input.valueText).text,
+    valueText: storedKeys.valueText(input.valueText),
     title: redactWithin(input.title, TITLE_MAX_CHARS),
     abstract:
       input.abstract === undefined
         ? deriveAbstract(content)
         : redactWithin(input.abstract, ABSTRACT_MAX_CHARS),
     content,
-    keywords: redact(input.keywords).text,
-    anchors: JSON.stringify(input.anchors.map((anchor) => redact(anchor).text)),
+    keywords: storedKeys.keywords(input.keywords),
+    anchors: JSON.stringify(storedKeys.anchors(input.anchors)),
     contentHash: contentHash(content),
   };
 }

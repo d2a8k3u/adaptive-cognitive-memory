@@ -109,9 +109,24 @@ function optionalInt(args, field, min, max) {
 function authoringError(problem) {
     return problem === undefined ? undefined : fieldError(problem.field, problem.message);
 }
+function isString(value) {
+    return typeof value === "string";
+}
+function isStringList(value) {
+    return Array.isArray(value) && value.every(isString);
+}
+function writtenKey(value, isKey, problemOf) {
+    const rejection = authoringError(problemOf(value));
+    if (rejection !== undefined) {
+        return rejection;
+    }
+    if (!isKey(value)) {
+        throw new TypeError("an authoring check accepted a value of the wrong type");
+    }
+    return value;
+}
 function requiredConflictKey(args) {
-    const value = args.conflict_key;
-    return authoringError((0, authoring_1.conflictKeyProblem)(value)) ?? value;
+    return writtenKey(args.conflict_key, isString, authoring_1.conflictKeyProblem);
 }
 function valueTextFor(args, cardinality) {
     const value = args.value_text;
@@ -121,19 +136,31 @@ function valueTextFor(args, cardinality) {
     if (value === undefined) {
         return "";
     }
-    return authoringError((0, authoring_1.valueTextProblem)(value)) ?? value;
+    const valueText = writtenKey(value, isString, authoring_1.valueTextProblem);
+    if (isToolError(valueText)) {
+        return valueText;
+    }
+    return authoringError((0, authoring_1.valueTextProblem)(memories_1.storedKeys.valueText(valueText))) ?? valueText;
 }
 function keywordsArgument(args) {
-    const value = args.keywords;
-    return value === undefined
-        ? undefined
-        : (authoringError((0, authoring_1.keywordsProblem)(value)) ?? value);
+    if (args.keywords === undefined) {
+        return undefined;
+    }
+    const keywords = writtenKey(args.keywords, isString, authoring_1.keywordsProblem);
+    if (isToolError(keywords)) {
+        return keywords;
+    }
+    return authoringError((0, authoring_1.keywordsProblem)(memories_1.storedKeys.keywords(keywords))) ?? keywords;
 }
 function anchorsArgument(args) {
-    const value = args.anchors;
-    return value === undefined
-        ? undefined
-        : (authoringError((0, authoring_1.anchorsProblem)(value)) ?? value);
+    if (args.anchors === undefined) {
+        return undefined;
+    }
+    const anchors = writtenKey(args.anchors, isStringList, authoring_1.anchorsProblem);
+    if (isToolError(anchors)) {
+        return anchors;
+    }
+    return authoringError((0, authoring_1.redactedAnchorProblem)(anchors, memories_1.storedKeys.anchors(anchors))) ?? anchors;
 }
 function optionalResolution(args) {
     const value = args.resolution;

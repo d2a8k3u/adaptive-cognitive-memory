@@ -4,6 +4,7 @@ import {
   CONFLICT_KEY_NAMESPACES,
   conflictKeyProblem,
   keywordsProblem,
+  redactedAnchorProblem,
   valueTextProblem,
 } from "../src/authoring";
 
@@ -161,6 +162,21 @@ describe("anchorsProblem", () => {
       expect(p95).toBeLessThanOrEqual(ANCHOR_CHECK_P95_CAP_MS);
     },
   );
+});
+
+describe("redactedAnchorProblem", () => {
+  it("names the first anchor its stored form changed, without quoting the secret", () => {
+    expect(
+      redactedAnchorProblem(
+        ["pytest", "deploy token=abcdefgh", "release token=abcdefgh"],
+        ["pytest", "deploy token=[REDACTED]", "release token=[REDACTED]"],
+      ),
+    ).toEqual({
+      field: "anchors",
+      message:
+        "anchors[1] contains a secret; anchors match raw tool input, so a redacted anchor never fires",
+    });
+  });
 });
 
 describe("conflictKeyProblem", () => {

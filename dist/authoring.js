@@ -4,6 +4,7 @@ exports.ANCHOR_MAX_CHARS = exports.ANCHORS_MAX_ITEMS = exports.KEYWORDS_MAX_CHAR
 exports.conflictKeyProblem = conflictKeyProblem;
 exports.valueTextProblem = valueTextProblem;
 exports.keywordsProblem = keywordsProblem;
+exports.redactedAnchorProblem = redactedAnchorProblem;
 exports.anchorsProblem = anchorsProblem;
 const branch_1 = require("./branch");
 const keys_1 = require("./keys");
@@ -38,6 +39,7 @@ const BACKSLASH = "\\";
 const GLOB_MARK = /[*?]/;
 const CONFLICT_KEY_MESSAGE = `conflict_key must be namespace.topic naming the slot — lowercase, dotted, at most ${exports.CONFLICT_KEY_MAX_CHARS} characters, with namespace one of ${exports.CONFLICT_KEY_NAMESPACES.join(", ")} — such as project.primary_database or team.reviewers`;
 const ANCHORS_SHAPE_MESSAGE = `anchors must be a list of at most ${exports.ANCHORS_MAX_ITEMS} non-empty strings of at most ${exports.ANCHOR_MAX_CHARS} characters`;
+const REDACTED_ANCHOR_FAULT = "contains a secret; anchors match raw tool input, so a redacted anchor never fires";
 function isSingleToken(anchor) {
     return !WHITESPACE.test(anchor);
 }
@@ -108,6 +110,12 @@ function anchorFault(anchors, index, anchor) {
     }
     const firstIndex = anchors.indexOf(anchor);
     return firstIndex < index ? `repeats anchors[${firstIndex}]; list each anchor once` : undefined;
+}
+function redactedAnchorProblem(written, stored) {
+    const index = written.findIndex((anchor, position) => anchor !== stored[position]);
+    return index === -1
+        ? undefined
+        : { field: "anchors", message: `anchors[${index}] ${REDACTED_ANCHOR_FAULT}` };
 }
 function anchorsProblem(value) {
     if (!isAnchorList(value)) {

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/cfg";
 import { runCli } from "../src/cli";
 import { type Db, openDatabase } from "../src/db/database";
+import { memoryStore, type ToolDeps } from "../src/tools";
 import { EXPORT_HEADER, parseImport, planImport } from "../src/transfer";
 import { FAKE_SECRETS } from "./fixtures/secrets";
 
@@ -308,6 +309,86 @@ describe("cli export and import", () => {
     expect(withDb(target, (db) => db.prepare("SELECT count(*) FROM memories").pluck().get())).toBe(
       0,
     );
+  });
+
+  it("rejects a store whose recall keys redaction would grow or merge, so the stored world re-imports into an empty database", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const source = pluginEnv();
+    const target = pluginEnv();
+    const labeledSecret = "token=abcdefgh";
+    const urlCredential = "https://:p@";
+    const secretAnchor = {
+      field: "anchors",
+      message:
+        "anchors[0] contains a secret; anchors match raw tool input, so a redacted anchor never fires",
+    };
+    const rejectedKeys = [
+      { anchors: [FAKE_SECRETS.awsAccessKeyId, FAKE_SECRETS.awsAccessKeyIdNeighbour] },
+      { anchors: [`${urlCredential}${"x".repeat(200 - urlCredential.length)}`] },
+      { anchors: [`${"x".repeat(200 - labeledSecret.length)}${labeledSecret}`] },
+      { keywords: `${"w".repeat(300 - labeledSecret.length - 1)} ${labeledSecret}` },
+      { value_text: `${"v".repeat(200 - labeledSecret.length)}${labeledSecret}` },
+    ];
+    const opened = openDatabase(loadConfig(source));
+    const projectDir = mkdtempSync(join(tmpdir(), "acm-transfer-project-"));
+    const deps: ToolDeps = {
+      env: {
+        db: opened.db,
+        vecLoaded: opened.vecLoaded,
+        modelCacheDir: loadConfig(source).modelCacheDir,
+      },
+      projectId: "proj-transfer",
+      processEnv: source,
+      instructionSources: {
+        projectDir,
+        autoMemoryIndex: join(projectDir, "auto-memory", "MEMORY.md"),
+      },
+    };
+    const storeWith = (index: number, keys: Record<string, unknown>) =>
+      memoryStore(deps, {
+        title: `round trip ${index}`,
+        content: `Round trip case ${index}. Second sentence.`,
+        type: "semantic",
+        kind: "fact",
+        conflict_key: `test.round_trip_${index}`,
+        resolution: { action: "ADD" },
+        ...keys,
+      });
+    const outcomes = [];
+    for (const [index, keys] of rejectedKeys.entries()) {
+      outcomes.push(await storeWith(index, keys));
+    }
+    const kept = await storeWith(rejectedKeys.length, { keywords: `deploy ${labeledSecret}` });
+    opened.db.close();
+    const file = join(mkdtempSync(join(tmpdir(), "acm-transfer-files-")), "keys.jsonl");
+
+    const codes = [await exportTo(source, file), await importFrom(target, file)];
+
+    expect({ outcomes, kept, codes }).toEqual({
+      outcomes: [
+        { error: secretAnchor },
+        { error: secretAnchor },
+        { error: secretAnchor },
+        {
+          error: {
+            field: "keywords",
+            message: "keywords must be a string of at most 300 characters",
+          },
+        },
+        {
+          error: {
+            field: "value_text",
+            message: "value_text must be a string of at most 200 characters",
+          },
+        },
+      ],
+      kept: { id: expect.any(String), action: "created" },
+      codes: [0, 0],
+    });
+    expect(
+      withDb(target, (db) => db.prepare("SELECT keywords FROM memories").pluck().all()),
+    ).toEqual(["deploy token=[REDACTED]"]);
   });
 
   it("refuses to overwrite an existing export file", async () => {

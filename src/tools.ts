@@ -8,6 +8,7 @@ import {
   conflictKeyProblem,
   KEYWORDS_MAX_CHARS,
   keywordsProblem,
+  redactedAnchorProblem,
   VALUE_TEXT_MAX_CHARS,
   valueTextProblem,
 } from "./authoring";
@@ -32,6 +33,7 @@ import {
   type StoreOutcome,
   type StoreResult,
   store,
+  storedKeys,
   updateMemory,
 } from "./db/memories";
 import { relate } from "./db/relations";
@@ -199,9 +201,31 @@ function authoringError(problem: AuthoringProblem | undefined): ToolErrorValue |
   return problem === undefined ? undefined : fieldError(problem.field, problem.message);
 }
 
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isStringList(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every(isString);
+}
+
+function writtenKey<Key>(
+  value: unknown,
+  isKey: (value: unknown) => value is Key,
+  problemOf: (value: unknown) => AuthoringProblem | undefined,
+): Key | ToolErrorValue {
+  const rejection = authoringError(problemOf(value));
+  if (rejection !== undefined) {
+    return rejection;
+  }
+  if (!isKey(value)) {
+    throw new TypeError("an authoring check accepted a value of the wrong type");
+  }
+  return value;
+}
+
 function requiredConflictKey(args: Record<string, unknown>): string | ToolErrorValue {
-  const value = args.conflict_key;
-  return authoringError(conflictKeyProblem(value)) ?? (value as string);
+  return writtenKey(args.conflict_key, isString, conflictKeyProblem);
 }
 
 function valueTextFor(
@@ -218,21 +242,35 @@ function valueTextFor(
   if (value === undefined) {
     return "";
   }
-  return authoringError(valueTextProblem(value)) ?? (value as string);
+  const valueText = writtenKey(value, isString, valueTextProblem);
+  if (isToolError(valueText)) {
+    return valueText;
+  }
+  return authoringError(valueTextProblem(storedKeys.valueText(valueText))) ?? valueText;
 }
 
 function keywordsArgument(args: Record<string, unknown>): string | undefined | ToolErrorValue {
-  const value = args.keywords;
-  return value === undefined
-    ? undefined
-    : (authoringError(keywordsProblem(value)) ?? (value as string));
+  if (args.keywords === undefined) {
+    return undefined;
+  }
+  const keywords = writtenKey(args.keywords, isString, keywordsProblem);
+  if (isToolError(keywords)) {
+    return keywords;
+  }
+  return authoringError(keywordsProblem(storedKeys.keywords(keywords))) ?? keywords;
 }
 
-function anchorsArgument(args: Record<string, unknown>): string[] | undefined | ToolErrorValue {
-  const value = args.anchors;
-  return value === undefined
-    ? undefined
-    : (authoringError(anchorsProblem(value)) ?? (value as string[]));
+function anchorsArgument(
+  args: Record<string, unknown>,
+): readonly string[] | undefined | ToolErrorValue {
+  if (args.anchors === undefined) {
+    return undefined;
+  }
+  const anchors = writtenKey(args.anchors, isStringList, anchorsProblem);
+  if (isToolError(anchors)) {
+    return anchors;
+  }
+  return authoringError(redactedAnchorProblem(anchors, storedKeys.anchors(anchors))) ?? anchors;
 }
 
 function optionalResolution(
