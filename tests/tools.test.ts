@@ -783,15 +783,19 @@ describe("tools", () => {
 
       await memoryUpdate(deps, { id, anchors: ["billing/invoice.py"] });
 
-      const anchoredAt = (path: string) =>
-        toolCandidates(deps.env.db, {
-          projectId: deps.projectId,
-          lookup: toolLookup("Edit", { file_path: join(projectDir, path) }, projectDir)!,
-          keywordSignal: false,
-          now: new Date().toISOString(),
-        })
-          .filter((candidate) => candidate.anchorHit)
-          .map((candidate) => candidate.id);
+      const anchoredAt = (path: string) => {
+        const lookup = toolLookup("Edit", { file_path: join(projectDir, path) }, projectDir);
+        return lookup === undefined
+          ? undefined
+          : toolCandidates(deps.env.db, {
+              projectId: deps.projectId,
+              lookup,
+              keywordSignal: false,
+              now: new Date().toISOString(),
+            })
+              .filter((candidate) => candidate.anchorHit)
+              .map((candidate) => candidate.id);
+      };
       expect({
         newPath: anchoredAt("billing/invoice.py"),
         oldPath: anchoredAt("billing/tax.py"),

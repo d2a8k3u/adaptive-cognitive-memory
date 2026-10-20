@@ -263,12 +263,12 @@ describe("memory_list", () => {
       "INSERT INTO injections (session_id, memory_id, event, at) VALUES ('s', ?, 'UserPromptSubmit', '2026-10-01T00:00:00.000Z')",
     ).run(listId(1));
     const snapshot = () => ({
-      counts: (
-        db
-          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-          .pluck()
-          .all() as string[]
-      ).map((table) => [table, db.prepare(`SELECT count(*) FROM "${table}"`).pluck().get()]),
+      counts: db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        .pluck()
+        .all()
+        .map(String)
+        .map((table) => [table, db.prepare(`SELECT count(*) FROM "${table}"`).pluck().get()]),
       memories: db.prepare("SELECT * FROM memories ORDER BY id").all(),
     });
     const before = snapshot();
