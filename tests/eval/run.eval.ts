@@ -1114,7 +1114,7 @@ describe("memory evaluation at the host boundary", () => {
     expect(records).toHaveLength(keys.length * bySource.length);
   });
 
-  it("pretool: PreToolUse on realistic Bash, Edit and Write inputs", async () => {
+  it("pretool: PreToolUse on realistic Bash, Edit, Write and Read inputs", async () => {
     const { corpus } = requireWorlds(state);
     const cases: PretoolCase[] = sampleEvenly(state.fixtures.pretool, state.sample);
     const observed = await mapPool(cases, HOOK_POOL_SIZE, async (item) => {
@@ -1179,6 +1179,11 @@ describe("memory evaluation at the host boundary", () => {
         deliveredMetrics(observed.filter(({ item }) => pretoolSplit(item.id) === split)),
       );
     }
+    writeAggregate(
+      state,
+      "pretool_read",
+      deliveredMetrics(observed.filter(({ item }) => item.tool_name === "Read")),
+    );
     writeAggregate(state, "pretool", {
       ...deliveredMetrics(observed),
       tool_recall_hit_stdout_only: ratioMetric(

@@ -26,7 +26,7 @@ export const NEGATIVE_CATEGORIES = [
   "vague_followup",
   "other_project",
 ] as const;
-export const TOOL_NAMES = ["Bash", "Edit", "Write"] as const;
+export const TOOL_NAMES = ["Bash", "Edit", "Write", "Read"] as const;
 export const CUE_ORIGINS = ["human", "harness"] as const;
 export const CUE_LABELS = ["correction", "remember", "neutral"] as const;
 export const HARNESS_MARKERS = [
@@ -381,6 +381,7 @@ const REQUIRED_TOOL_FIELDS: Readonly<Record<ToolName, readonly string[]>> = {
   Bash: ["command"],
   Edit: ["file_path", "old_string", "new_string"],
   Write: ["file_path", "content"],
+  Read: ["file_path"],
 };
 
 interface SplitAssigned {
