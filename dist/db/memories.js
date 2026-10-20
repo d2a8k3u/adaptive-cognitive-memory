@@ -36,6 +36,7 @@ const UPDATE_BASIS_COLUMNS = [
     "content",
     "conflict_key",
     "keywords",
+    "anchors",
 ];
 const MEMORY_ROW_COLUMNS = `id, type, kind, scope, project_id, title, abstract, content, conflict_key,
   cardinality, value_text, keywords, anchors, state, importance, support_count, valid_from,
@@ -125,14 +126,27 @@ function updatedText(row, input) {
         content,
     };
 }
+function updatedKeys(row, input) {
+    return {
+        keywords: input.keywords === undefined ? row.keywords : exports.storedKeys.keywords(input.keywords),
+        anchors: input.anchors === undefined ? row.anchors : JSON.stringify(exports.storedKeys.anchors(input.anchors)),
+    };
+}
+function passageEdited(input) {
+    return (input.title !== undefined ||
+        input.abstract !== undefined ||
+        input.content !== undefined ||
+        input.keywords !== undefined);
+}
 function sameUpdateBasis(current, snapshot) {
     return UPDATE_BASIS_COLUMNS.every((column) => current[column] === snapshot[column]);
 }
 async function updateFromSnapshot(env, snapshot, input) {
     const text = updatedText(snapshot, input);
-    const textChanged = input.title !== undefined || input.abstract !== undefined || input.content !== undefined;
-    const embedding = textChanged
-        ? await embedForStore(env, passageText({ ...text, conflictKey: snapshot.conflict_key, keywords: snapshot.keywords }))
+    const keys = updatedKeys(snapshot, input);
+    const reembed = passageEdited(input);
+    const embedding = reembed
+        ? await embedForStore(env, passageText({ ...text, conflictKey: snapshot.conflict_key, keywords: keys.keywords }))
         : undefined;
     const txn = env.db.transaction(() => {
         const current = fetchMemoryRow(env.db, snapshot.id);
@@ -143,10 +157,11 @@ async function updateFromSnapshot(env, snapshot, input) {
             return false;
         }
         env.db
-            .prepare(`UPDATE memories SET title = ?, abstract = ?, content = ?, content_hash = ?, updated_at = ?
+            .prepare(`UPDATE memories SET title = ?, abstract = ?, content = ?, keywords = ?, anchors = ?,
+           content_hash = ?, updated_at = ?
          WHERE id = ?`)
-            .run(text.title, text.abstract, text.content, (0, policy_1.contentHash)(text.content), nowIso(), current.id);
-        if (textChanged) {
+            .run(text.title, text.abstract, text.content, keys.keywords, keys.anchors, (0, policy_1.contentHash)(text.content), nowIso(), current.id);
+        if (reembed) {
             replaceVecRow(env, current, embedding);
         }
         return true;

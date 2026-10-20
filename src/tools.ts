@@ -84,6 +84,7 @@ const ID_MAX_CHARS = 26;
 const SEARCH_LIMIT_MAX = 100;
 const FEEDBACK_IDS_MAX_ITEMS = 20;
 const ALL_PROJECTS = "all";
+const IMMUTABLE_FIELDS = ["scope", "kind"] as const;
 
 export function isToolError(value: unknown): value is ToolErrorValue {
   return typeof value === "object" && value !== null && "error" in value;
@@ -571,12 +572,30 @@ export async function memoryUpdate(
   if (isToolError(content)) {
     return content;
   }
-  if (title === undefined && abstract === undefined && content === undefined) {
-    return { error: { message: "update requires at least one of title, abstract, content" } };
+  const keywords = keywordsArgument(args);
+  if (isToolError(keywords)) {
+    return keywords;
   }
-  return rejectionsAsToolErrors(() =>
-    updateMemory(deps.env, visibleId(deps, id), { title, abstract, content }),
-  );
+  const anchors = anchorsArgument(args);
+  if (isToolError(anchors)) {
+    return anchors;
+  }
+  const immutable = IMMUTABLE_FIELDS.find((field) => args[field] !== undefined);
+  if (immutable !== undefined) {
+    return fieldError(
+      immutable,
+      `${immutable} cannot change in place; store the memory again with the new ${immutable}, then delete this one`,
+    );
+  }
+  const edits = { title, abstract, content, keywords, anchors };
+  if (Object.values(edits).every((edit) => edit === undefined)) {
+    return {
+      error: {
+        message: "update requires at least one of title, abstract, content, keywords, anchors",
+      },
+    };
+  }
+  return rejectionsAsToolErrors(() => updateMemory(deps.env, visibleId(deps, id), edits));
 }
 
 export async function memoryDelete(
@@ -680,6 +699,12 @@ export interface ToolDefinition {
 const ID_PROPERTY = { type: "string", maxLength: ID_MAX_CHARS };
 const TYPE_PROPERTY = { type: "string", enum: [...MEMORY_TYPES] };
 const KIND_PROPERTY = { type: "string", enum: [...MEMORY_KINDS] };
+const KEYWORDS_PROPERTY = { type: "string", maxLength: KEYWORDS_MAX_CHARS };
+const ANCHORS_PROPERTY = {
+  type: "array",
+  items: { type: "string", maxLength: ANCHOR_MAX_CHARS },
+  maxItems: ANCHORS_MAX_ITEMS,
+};
 const SCOPE_PROPERTY = { type: "string", enum: [...MEMORY_SCOPES] };
 const TITLE_PROPERTY = { type: "string", maxLength: TITLE_MAX_CHARS };
 const CONTENT_PROPERTY = { type: "string", maxLength: CONTENT_MAX_CHARS };
@@ -704,12 +729,8 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
         },
         cardinality: { type: "string", enum: [...CARDINALITIES] },
         value_text: { type: "string", maxLength: VALUE_TEXT_MAX_CHARS },
-        keywords: { type: "string", maxLength: KEYWORDS_MAX_CHARS },
-        anchors: {
-          type: "array",
-          items: { type: "string", maxLength: ANCHOR_MAX_CHARS },
-          maxItems: ANCHORS_MAX_ITEMS,
-        },
+        keywords: KEYWORDS_PROPERTY,
+        anchors: ANCHORS_PROPERTY,
         scope: SCOPE_PROPERTY,
         abstract: ABSTRACT_PROPERTY,
         resolution: {
@@ -769,7 +790,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: "memory_update",
     description:
-      "Update the title, abstract or content of a memory in place. Revoked memories are immutable; use memory_store with resolution SUPERSEDE or UPDATE to change a fact.",
+      "Update title, abstract, content, keywords or anchors in place; keywords and anchors replace the stored value whole. Revoked memories are immutable; scope and kind cannot change — re-store, then delete.",
     inputSchema: {
       type: "object",
       properties: {
@@ -777,6 +798,8 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
         title: TITLE_PROPERTY,
         abstract: ABSTRACT_PROPERTY,
         content: CONTENT_PROPERTY,
+        keywords: KEYWORDS_PROPERTY,
+        anchors: ANCHORS_PROPERTY,
       },
       required: ["id"],
     },

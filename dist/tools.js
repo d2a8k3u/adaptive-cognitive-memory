@@ -31,6 +31,7 @@ const ID_MAX_CHARS = 26;
 const SEARCH_LIMIT_MAX = 100;
 const FEEDBACK_IDS_MAX_ITEMS = 20;
 const ALL_PROJECTS = "all";
+const IMMUTABLE_FIELDS = ["scope", "kind"];
 function isToolError(value) {
     return typeof value === "object" && value !== null && "error" in value;
 }
@@ -391,10 +392,27 @@ async function memoryUpdate(deps, args) {
     if (isToolError(content)) {
         return content;
     }
-    if (title === undefined && abstract === undefined && content === undefined) {
-        return { error: { message: "update requires at least one of title, abstract, content" } };
+    const keywords = keywordsArgument(args);
+    if (isToolError(keywords)) {
+        return keywords;
     }
-    return rejectionsAsToolErrors(() => (0, memories_1.updateMemory)(deps.env, visibleId(deps, id), { title, abstract, content }));
+    const anchors = anchorsArgument(args);
+    if (isToolError(anchors)) {
+        return anchors;
+    }
+    const immutable = IMMUTABLE_FIELDS.find((field) => args[field] !== undefined);
+    if (immutable !== undefined) {
+        return fieldError(immutable, `${immutable} cannot change in place; store the memory again with the new ${immutable}, then delete this one`);
+    }
+    const edits = { title, abstract, content, keywords, anchors };
+    if (Object.values(edits).every((edit) => edit === undefined)) {
+        return {
+            error: {
+                message: "update requires at least one of title, abstract, content, keywords, anchors",
+            },
+        };
+    }
+    return rejectionsAsToolErrors(() => (0, memories_1.updateMemory)(deps.env, visibleId(deps, id), edits));
 }
 async function memoryDelete(deps, args) {
     const id = requiredString(args, "id", ID_MAX_CHARS);
@@ -459,6 +477,12 @@ async function memoryStatus(deps) {
 const ID_PROPERTY = { type: "string", maxLength: ID_MAX_CHARS };
 const TYPE_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_TYPES] };
 const KIND_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_KINDS] };
+const KEYWORDS_PROPERTY = { type: "string", maxLength: authoring_1.KEYWORDS_MAX_CHARS };
+const ANCHORS_PROPERTY = {
+    type: "array",
+    items: { type: "string", maxLength: authoring_1.ANCHOR_MAX_CHARS },
+    maxItems: authoring_1.ANCHORS_MAX_ITEMS,
+};
 const SCOPE_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_SCOPES] };
 const TITLE_PROPERTY = { type: "string", maxLength: cfg_1.TITLE_MAX_CHARS };
 const CONTENT_PROPERTY = { type: "string", maxLength: cfg_1.CONTENT_MAX_CHARS };
@@ -481,12 +505,8 @@ exports.TOOL_DEFINITIONS = [
                 },
                 cardinality: { type: "string", enum: [...policy_1.CARDINALITIES] },
                 value_text: { type: "string", maxLength: authoring_1.VALUE_TEXT_MAX_CHARS },
-                keywords: { type: "string", maxLength: authoring_1.KEYWORDS_MAX_CHARS },
-                anchors: {
-                    type: "array",
-                    items: { type: "string", maxLength: authoring_1.ANCHOR_MAX_CHARS },
-                    maxItems: authoring_1.ANCHORS_MAX_ITEMS,
-                },
+                keywords: KEYWORDS_PROPERTY,
+                anchors: ANCHORS_PROPERTY,
                 scope: SCOPE_PROPERTY,
                 abstract: ABSTRACT_PROPERTY,
                 resolution: {
@@ -542,7 +562,7 @@ exports.TOOL_DEFINITIONS = [
     },
     {
         name: "memory_update",
-        description: "Update the title, abstract or content of a memory in place. Revoked memories are immutable; use memory_store with resolution SUPERSEDE or UPDATE to change a fact.",
+        description: "Update title, abstract, content, keywords or anchors in place; keywords and anchors replace the stored value whole. Revoked memories are immutable; scope and kind cannot change — re-store, then delete.",
         inputSchema: {
             type: "object",
             properties: {
@@ -550,6 +570,8 @@ exports.TOOL_DEFINITIONS = [
                 title: TITLE_PROPERTY,
                 abstract: ABSTRACT_PROPERTY,
                 content: CONTENT_PROPERTY,
+                keywords: KEYWORDS_PROPERTY,
+                anchors: ANCHORS_PROPERTY,
             },
             required: ["id"],
         },

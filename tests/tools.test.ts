@@ -6,6 +6,8 @@ import { loadConfig } from "../src/cfg";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import type { MemoryEnv } from "../src/db/memories";
 import type { InstructionSources } from "../src/instructions";
+import { toolLookup } from "../src/keys";
+import { toolCandidates } from "../src/search";
 import {
   isToolError,
   memoryDelete,
@@ -39,6 +41,7 @@ const embedState = vi.hoisted(() => ({
   cached: true,
   passageInputs: [] as string[],
   passageQueue: [] as Float32Array[],
+  duringEmbed: undefined as (() => void) | undefined,
   defaultVector: (() => {
     const vector = new Float32Array(384);
     vector[0] = 1;
@@ -58,6 +61,7 @@ vi.mock("../src/embeddings", async (importOriginal) => {
     modelCached: () => embedState.cached,
     embedPassage: (texts: string[]) => {
       embedState.passageInputs.push(texts[0] ?? "");
+      embedState.duringEmbed?.();
       return Promise.resolve([embedState.passageQueue.shift() ?? embedState.defaultVector]);
     },
     embedQuery: () => Promise.resolve(embedState.queryVector),
@@ -130,6 +134,7 @@ afterEach(() => {
   embedState.cached = true;
   embedState.passageInputs = [];
   embedState.passageQueue = [];
+  embedState.duringEmbed = undefined;
   vecState.failGetLoadablePath = false;
 });
 
@@ -680,7 +685,9 @@ describe("tools", () => {
     const first = { id: await storedId(deps, cacheTtl) };
     for (const args of [{ id: first.id }, { id: first.id, importance: 0.7 }]) {
       expect(await memoryUpdate(deps, args)).toEqual({
-        error: { message: "update requires at least one of title, abstract, content" },
+        error: {
+          message: "update requires at least one of title, abstract, content, keywords, anchors",
+        },
       });
     }
 
@@ -698,6 +705,151 @@ describe("tools", () => {
       throw new Error("expected error");
     }
     expect(immutable.error.message).toMatch(/revoked and immutable/);
+  });
+
+  describe("memory_update recall keys", () => {
+    it.each([
+      { name: "an absolute path", keys: { anchors: ["/Users/me/app/billing/tax.py"] } },
+      { name: "a ./ prefix", keys: { anchors: ["./scripts/release.sh"] } },
+      { name: "repeated whitespace", keys: { anchors: ["git  commit"] } },
+      { name: "a backslash", keys: { anchors: ["billing\\tax.py"] } },
+      { name: "a glob", keys: { anchors: ["src/*.ts"] } },
+      { name: "more than three words", keys: { anchors: ["uv run pytest tests"] } },
+      { name: "a lower-case ticket id", keys: { anchors: ["touch-4945"] } },
+      { name: "a repeated anchor", keys: { anchors: ["pytest", "pytest"] } },
+      {
+        name: "more than twenty anchors",
+        keys: { anchors: Array.from({ length: 21 }, (_, index) => `step${index}`) },
+      },
+      { name: "an anchor holding a secret", keys: { anchors: ["deploy token=abcdefgh"] } },
+      { name: "keywords over the cap", keys: { keywords: "w".repeat(301) } },
+      {
+        name: "keywords whose redaction outgrows the cap",
+        keys: { keywords: `${"w".repeat(285)} token=abcdefgh` },
+      },
+    ])(
+      "rejects $name with memory_store's error, before any statement, leaving the row unchanged",
+      async ({ keys }) => {
+        const deps = openDeps();
+        const id = await storedId(
+          deps,
+          storeArgs({ keywords: "rollback", anchors: ["scripts/release.sh"] }),
+        );
+        const stored = await memoryStore(deps, storeArgs({ title: "another rollback", ...keys }));
+        const prepare = vi.spyOn(deps.env.db, "prepare");
+
+        const updated = await memoryUpdate(deps, { id, ...keys });
+        const prepared = prepare.mock.calls.length;
+        prepare.mockRestore();
+
+        const record = await memoryGet(deps, { id });
+        expect({
+          field: isToolError(stored) ? stored.error.field : "stored",
+          updated,
+          prepared,
+          keys: isToolError(record) ? record : [record.keywords, record.anchors],
+        }).toEqual({
+          field: Object.keys(keys)[0],
+          updated: stored,
+          prepared: 0,
+          keys: ["rollback", ["scripts/release.sh"]],
+        });
+      },
+    );
+
+    it.each([
+      { field: "scope", value: "user" },
+      { field: "kind", value: "fact" },
+    ])(
+      "rejects a $field change naming the field and leaves the row unchanged",
+      async ({ field, value }) => {
+        const deps = openDeps();
+        const id = await storedId(deps, storeArgs());
+
+        const updated = await memoryUpdate(deps, { id, title: "renamed rollback", [field]: value });
+
+        const record = await memoryGet(deps, { id });
+        expect({ updated, title: isToolError(record) ? record : record.title }).toEqual({
+          updated: { error: { field, message: expect.any(String) } },
+          title: "deploy rollback",
+        });
+      },
+    );
+
+    it("replaces the anchors whole, so recall before an Edit fires on the new path and not on the old one", async () => {
+      const deps = openDeps();
+      const { projectDir } = deps.instructionSources;
+      const id = await storedId(deps, storeArgs({ anchors: ["billing/tax.py"] }));
+
+      await memoryUpdate(deps, { id, anchors: ["billing/invoice.py"] });
+
+      const anchoredAt = (path: string) =>
+        toolCandidates(deps.env.db, {
+          projectId: deps.projectId,
+          lookup: toolLookup("Edit", { file_path: join(projectDir, path) }, projectDir)!,
+          keywordSignal: false,
+          now: new Date().toISOString(),
+        })
+          .filter((candidate) => candidate.anchorHit)
+          .map((candidate) => candidate.id);
+      expect({
+        newPath: anchoredAt("billing/invoice.py"),
+        oldPath: anchoredAt("billing/tax.py"),
+      }).toEqual({ newPath: [id], oldPath: [] });
+    });
+
+    it("replaces the keywords whole and redacted, so search finds the memory by the new terms only", async () => {
+      embedState.cached = false;
+      const deps = openDeps();
+      const id = await storedId(deps, storeArgs({ keywords: "alphaword" }));
+
+      const updated = await memoryUpdate(deps, { id, keywords: "betaword token=abcdefgh" });
+
+      const foundBy = async (query: string) => {
+        const found = await memorySearch(deps, { query });
+        return isToolError(found) ? found : found.results.map((row) => row.id);
+      };
+      expect({
+        keywords: isToolError(updated) ? updated : updated.keywords,
+        byNew: await foundBy("betaword"),
+        byOld: await foundBy("alphaword"),
+      }).toEqual({ keywords: "betaword token=[REDACTED]", byNew: [id], byOld: [] });
+    });
+
+    it("re-embeds the passage when the keywords change and not when only the anchors do", async () => {
+      const deps = openDeps();
+      const id = await storedId(deps, storeArgs({ keywords: "alphaword" }));
+      embedState.passageInputs = [];
+
+      await memoryUpdate(deps, { id, anchors: ["scripts/release.sh"] });
+      const afterAnchors = [...embedState.passageInputs];
+      await memoryUpdate(deps, { id, keywords: "betaword" });
+
+      expect({ afterAnchors, afterKeywords: embedState.passageInputs }).toEqual({
+        afterAnchors: [],
+        afterKeywords: [
+          "deploy rollback. Roll back via the release script. deploy.rollback betaword",
+        ],
+      });
+    });
+
+    it("keeps the anchors another writer changed while the new keywords were being embedded", async () => {
+      const deps = openDeps();
+      const id = await storedId(deps, storeArgs({ anchors: ["scripts/release.sh"] }));
+      embedState.duringEmbed = () => {
+        embedState.duringEmbed = undefined;
+        deps.env.db
+          .prepare("UPDATE memories SET anchors = ? WHERE id = ?")
+          .run(JSON.stringify(["scripts/rollback.sh"]), id);
+      };
+
+      const updated = await memoryUpdate(deps, { id, keywords: "betaword" });
+
+      expect(isToolError(updated) ? updated : [updated.keywords, updated.anchors]).toEqual([
+        "betaword",
+        ["scripts/rollback.sh"],
+      ]);
+    });
   });
 
   it("keeps a row stored three times with a typed importance at a fresh row's rank, below a row stored once with a used receipt", async () => {

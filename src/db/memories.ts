@@ -95,6 +95,8 @@ export interface UpdateInput {
   title?: string;
   abstract?: string;
   content?: string;
+  keywords?: string;
+  anchors?: readonly string[];
 }
 
 export interface MemoryRelation {
@@ -133,6 +135,7 @@ export interface MemoryRecord extends Omit<MemoryRow, "anchors"> {
 }
 
 type UpdatedText = Pick<MemoryRow, "title" | "abstract" | "content">;
+type UpdatedKeys = Pick<MemoryRow, "keywords" | "anchors">;
 
 const UPDATE_BASIS_COLUMNS = [
   "title",
@@ -140,6 +143,7 @@ const UPDATE_BASIS_COLUMNS = [
   "content",
   "conflict_key",
   "keywords",
+  "anchors",
 ] as const satisfies readonly (keyof MemoryRow)[];
 
 interface PreparedRow extends Slot {
@@ -285,6 +289,23 @@ function updatedText(row: MemoryRow, input: UpdateInput): UpdatedText {
   };
 }
 
+function updatedKeys(row: MemoryRow, input: UpdateInput): UpdatedKeys {
+  return {
+    keywords: input.keywords === undefined ? row.keywords : storedKeys.keywords(input.keywords),
+    anchors:
+      input.anchors === undefined ? row.anchors : JSON.stringify(storedKeys.anchors(input.anchors)),
+  };
+}
+
+function passageEdited(input: UpdateInput): boolean {
+  return (
+    input.title !== undefined ||
+    input.abstract !== undefined ||
+    input.content !== undefined ||
+    input.keywords !== undefined
+  );
+}
+
 function sameUpdateBasis(current: MemoryRow, snapshot: MemoryRow): boolean {
   return UPDATE_BASIS_COLUMNS.every((column) => current[column] === snapshot[column]);
 }
@@ -295,12 +316,12 @@ async function updateFromSnapshot(
   input: UpdateInput,
 ): Promise<boolean> {
   const text = updatedText(snapshot, input);
-  const textChanged =
-    input.title !== undefined || input.abstract !== undefined || input.content !== undefined;
-  const embedding = textChanged
+  const keys = updatedKeys(snapshot, input);
+  const reembed = passageEdited(input);
+  const embedding = reembed
     ? await embedForStore(
         env,
-        passageText({ ...text, conflictKey: snapshot.conflict_key, keywords: snapshot.keywords }),
+        passageText({ ...text, conflictKey: snapshot.conflict_key, keywords: keys.keywords }),
       )
     : undefined;
   const txn = env.db.transaction((): boolean => {
@@ -313,18 +334,21 @@ async function updateFromSnapshot(
     }
     env.db
       .prepare(
-        `UPDATE memories SET title = ?, abstract = ?, content = ?, content_hash = ?, updated_at = ?
+        `UPDATE memories SET title = ?, abstract = ?, content = ?, keywords = ?, anchors = ?,
+           content_hash = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
         text.title,
         text.abstract,
         text.content,
+        keys.keywords,
+        keys.anchors,
         contentHash(text.content),
         nowIso(),
         current.id,
       );
-    if (textChanged) {
+    if (reembed) {
       replaceVecRow(env, current, embedding);
     }
     return true;
