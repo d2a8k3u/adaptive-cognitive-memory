@@ -44,7 +44,7 @@ function memory(id: string, project: string | undefined): FixtureMemory {
     kind: "fact",
     title: `title ${id}`,
     content: `content ${id}`,
-    conflict_key: `subject.${id}`,
+    conflict_key: `test.${id}`,
     cardinality: "single",
     value_text: id,
     keywords: id,
@@ -164,7 +164,7 @@ describe("referenceProblems", () => {
         memories: [
           ...base.corpus.memories,
           { ...memory("dx-anchored", "p1"), anchors: ["src/app.ts"] },
-          { ...memory("dx-sharing", "p2"), conflict_key: "subject.m2" },
+          { ...memory("dx-sharing", "p2"), conflict_key: "test.m2" },
           memory("dx-gold", "p1"),
         ],
       },
@@ -175,8 +175,24 @@ describe("referenceProblems", () => {
     };
     expect(referenceProblems(fixtures)).toEqual([
       expect.stringMatching(/dx-anchored.*must not carry anchors/),
-      expect.stringMatching(/dx-sharing.*shares conflict key subject\.m2/),
+      expect.stringMatching(/dx-sharing.*shares conflict key test\.m2/),
       expect.stringMatching(/pos-m1-2.*gold names distractor dx-gold/),
+    ]);
+  });
+
+  it("reports a memory whose conflict key the store would reject, before any store", () => {
+    const base = validFixtures();
+    const fixtures: Fixtures = {
+      ...base,
+      corpus: {
+        ...base.corpus,
+        memories: base.corpus.memories.map((item) =>
+          item.id === "m1" ? { ...item, conflict_key: "billing.x" } : item,
+        ),
+      },
+    };
+    expect(referenceProblems(fixtures)).toEqual([
+      expect.stringMatching(/^m1: conflict_key must be namespace\.topic/),
     ]);
   });
 });

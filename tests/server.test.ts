@@ -251,7 +251,7 @@ describe("server", () => {
     expect(schema.properties.conflict_key).toEqual({
       type: "string",
       maxLength: 120,
-      pattern: "^[a-z0-9_]+(\\.[a-z0-9_-]+)*$",
+      pattern: "^[a-z0-9_]+(\\.[a-z0-9_-]+)+$",
     });
     expect(schema.properties.anchors?.maxItems).toBe(20);
     expect(schema.properties.resolution?.required).toEqual(["action"]);

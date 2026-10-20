@@ -13,7 +13,7 @@ export interface ToolLookup {
 }
 
 const CONFLICT_KEY_NAMESPACE_SEPARATOR = ".";
-const MAX_HEAD_WORDS = 3;
+export const MAX_HEAD_WORDS = 3;
 const MAX_COMMAND_SEGMENTS = 32;
 const DIRECTORY_SEPARATOR = "/";
 const EXTENSION_MARK = ".";

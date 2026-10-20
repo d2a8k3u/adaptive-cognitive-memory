@@ -1,7 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  type AuthoringProblem,
+  anchorsProblem,
+  conflictKeyProblem,
+  keywordsProblem,
+  valueTextProblem,
+} from "../src/authoring";
 import { hostToolName, MEMORY_SERVER_NAME } from "../src/toolnames";
 import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
 
@@ -247,6 +254,103 @@ describe("recall docs", () => {
     const skill = readFileSync(join(process.cwd(), "skills", "memory", "SKILL.md"), "utf8");
 
     expect(skill).toContain("before Read, Edit or Write, a project-relative path");
+  });
+});
+
+const KEY_LIMIT_DECLARATION = /(?:conflict_key|value_text|keywords?|anchors?)\w*\s*=\s*\d/i;
+const KEY_PATTERN_DECLARATION = /CONFLICT_KEY_PATTERN\s*=/;
+const HEAD_WORDS_DECLARATION = /MAX_HEAD_WORDS\s*=/;
+
+function sourceFiles(dir: string = join(process.cwd(), "src")): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return sourceFiles(path);
+    }
+    return entry.name.endsWith(".ts") ? [path] : [];
+  });
+}
+
+type FixtureMemoryFields = Readonly<Record<string, unknown>>;
+
+interface FixtureMemorySource {
+  readonly file: string;
+  readonly memories: readonly FixtureMemoryFields[];
+}
+
+function fixtureMemorySources(): FixtureMemorySource[] {
+  const evalFixture = (name: string) => join("tests", "fixtures", "eval", name);
+  const corpus = readJson<{ memories: FixtureMemoryFields[] }>(evalFixture("corpus.json"));
+  const supersession = readJson<{ old: FixtureMemoryFields; new: FixtureMemoryFields }[]>(
+    evalFixture("supersession.json"),
+  );
+  const contradictions = readJson<
+    { a: { memory: FixtureMemoryFields }; b: { memory: FixtureMemoryFields } }[]
+  >(evalFixture("contradictions.json"));
+  const seedFiles = readdirSync(join(process.cwd(), "evals"))
+    .map((name) => join("evals", name, "seeds.json"))
+    .filter((path) => existsSync(join(process.cwd(), path)));
+  return [
+    { file: evalFixture("corpus.json"), memories: corpus.memories },
+    {
+      file: evalFixture("supersession.json"),
+      memories: supersession.flatMap((item) => [item.old, item.new]),
+    },
+    {
+      file: evalFixture("contradictions.json"),
+      memories: contradictions.flatMap((item) => [item.a.memory, item.b.memory]),
+    },
+    ...seedFiles.map((file) => ({
+      file,
+      memories: readJson<{ memory: FixtureMemoryFields }[]>(file).map((seed) => seed.memory),
+    })),
+  ];
+}
+
+function storedAuthoringProblems(memory: FixtureMemoryFields): AuthoringProblem[] {
+  return [
+    conflictKeyProblem(memory.conflict_key),
+    valueTextProblem(memory.value_text ?? ""),
+    keywordsProblem(memory.keywords ?? ""),
+    anchorsProblem(memory.anchors ?? []),
+  ].filter((problem) => problem !== undefined);
+}
+
+describe("authoring standard", () => {
+  it("every fixture memory the eval and the real-session suite store passes the authoring checks", () => {
+    const offenders = fixtureMemorySources().flatMap(({ file, memories }) =>
+      memories.flatMap((memory, index) =>
+        storedAuthoringProblems(memory).map(
+          (problem) => `${file} ${String(memory.id ?? index)}: ${problem.message}`,
+        ),
+      ),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("declares the key limits only in src/authoring.ts and the head-word cap only in src/keys.ts", () => {
+    const declaringFiles = (declaration: RegExp) =>
+      sourceFiles()
+        .filter((file) => declaration.test(readFileSync(file, "utf8")))
+        .map((file) => relative(process.cwd(), file));
+
+    expect({
+      keyLimits: declaringFiles(KEY_LIMIT_DECLARATION),
+      keyPattern: declaringFiles(KEY_PATTERN_DECLARATION),
+      headWords: declaringFiles(HEAD_WORDS_DECLARATION),
+    }).toEqual({
+      keyLimits: [join("src", "authoring.ts")],
+      keyPattern: [join("src", "authoring.ts")],
+      headWords: [join("src", "keys.ts")],
+    });
+  });
+
+  it("dist/authoring.js requires ./keys and ./branch and nothing else (NFR-19)", () => {
+    expect(specifiersOf(readFileSync(join(DIST_DIR, "authoring.js"), "utf8")).sort()).toEqual([
+      "./branch",
+      "./keys",
+    ]);
   });
 });
 

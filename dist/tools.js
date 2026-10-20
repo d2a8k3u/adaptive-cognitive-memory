@@ -11,6 +11,7 @@ exports.memoryRelate = memoryRelate;
 exports.memoryFeedback = memoryFeedback;
 exports.memoryDoctor = memoryDoctor;
 exports.memoryStatus = memoryStatus;
+const authoring_1 = require("./authoring");
 const cfg_1 = require("./cfg");
 const database_1 = require("./db/database");
 const feedback_1 = require("./db/feedback");
@@ -26,13 +27,7 @@ const search_1 = require("./search");
 const status_2 = require("./status");
 const ID_MAX_CHARS = 26;
 const SEARCH_LIMIT_MAX = 100;
-const CONFLICT_KEY_MAX_CHARS = 120;
-const VALUE_TEXT_MAX_CHARS = 200;
-const KEYWORDS_MAX_CHARS = 300;
-const ANCHORS_MAX_ITEMS = 20;
-const ANCHOR_MAX_CHARS = 200;
 const FEEDBACK_IDS_MAX_ITEMS = 20;
-const CONFLICT_KEY_PATTERN = /^[a-z0-9_]+(\.[a-z0-9_-]+)*$/;
 function isToolError(value) {
     return typeof value === "object" && value !== null && "error" in value;
 }
@@ -111,41 +106,34 @@ function optionalInt(args, field, min, max) {
     }
     return value;
 }
+function authoringError(problem) {
+    return problem === undefined ? undefined : fieldError(problem.field, problem.message);
+}
 function requiredConflictKey(args) {
     const value = args.conflict_key;
-    if (typeof value !== "string" ||
-        value.length > CONFLICT_KEY_MAX_CHARS ||
-        !CONFLICT_KEY_PATTERN.test(value)) {
-        return fieldError("conflict_key", `conflict_key must be a stable lowercase dotted key naming the slot, such as project.primary_database or team.reviewers, of at most ${CONFLICT_KEY_MAX_CHARS} characters`);
-    }
-    return value;
+    return authoringError((0, authoring_1.conflictKeyProblem)(value)) ?? value;
 }
 function valueTextFor(args, cardinality) {
     const value = args.value_text;
     if (cardinality === "single" && (typeof value !== "string" || value.trim() === "")) {
         return fieldError("value_text", "value_text is required for a single-valued conflict_key: give the slot's current value, such as PostgreSQL 15");
     }
-    return optionalText(args, "value_text", VALUE_TEXT_MAX_CHARS);
-}
-function optionalText(args, field, maxChars) {
-    const value = args[field];
     if (value === undefined) {
         return "";
     }
-    return requiredText(args, field, maxChars);
+    return authoringError((0, authoring_1.valueTextProblem)(value)) ?? value;
 }
-function optionalAnchors(args) {
+function keywordsArgument(args) {
+    const value = args.keywords;
+    return value === undefined
+        ? undefined
+        : (authoringError((0, authoring_1.keywordsProblem)(value)) ?? value);
+}
+function anchorsArgument(args) {
     const value = args.anchors;
-    if (value === undefined) {
-        return [];
-    }
-    const valid = Array.isArray(value) &&
-        value.length <= ANCHORS_MAX_ITEMS &&
-        value.every((anchor) => typeof anchor === "string" && anchor !== "" && anchor.length <= ANCHOR_MAX_CHARS);
-    if (!valid) {
-        return fieldError("anchors", `anchors must be a list of at most ${ANCHORS_MAX_ITEMS} non-empty strings of at most ${ANCHOR_MAX_CHARS} characters`);
-    }
-    return value;
+    return value === undefined
+        ? undefined
+        : (authoringError((0, authoring_1.anchorsProblem)(value)) ?? value);
 }
 function optionalResolution(args) {
     const value = args.resolution;
@@ -195,11 +183,11 @@ function parseStoreArgs(args) {
     if (isToolError(valueText)) {
         return valueText;
     }
-    const keywords = optionalText(args, "keywords", KEYWORDS_MAX_CHARS);
+    const keywords = keywordsArgument(args) ?? "";
     if (isToolError(keywords)) {
         return keywords;
     }
-    const anchors = optionalAnchors(args);
+    const anchors = anchorsArgument(args) ?? [];
     if (isToolError(anchors)) {
         return anchors;
     }
@@ -396,16 +384,16 @@ exports.TOOL_DEFINITIONS = [
                 kind: { type: "string", enum: [...policy_1.MEMORY_KINDS] },
                 conflict_key: {
                     type: "string",
-                    maxLength: CONFLICT_KEY_MAX_CHARS,
-                    pattern: CONFLICT_KEY_PATTERN.source,
+                    maxLength: authoring_1.CONFLICT_KEY_MAX_CHARS,
+                    pattern: authoring_1.CONFLICT_KEY_PATTERN.source,
                 },
                 cardinality: { type: "string", enum: [...policy_1.CARDINALITIES] },
-                value_text: { type: "string", maxLength: VALUE_TEXT_MAX_CHARS },
-                keywords: { type: "string", maxLength: KEYWORDS_MAX_CHARS },
+                value_text: { type: "string", maxLength: authoring_1.VALUE_TEXT_MAX_CHARS },
+                keywords: { type: "string", maxLength: authoring_1.KEYWORDS_MAX_CHARS },
                 anchors: {
                     type: "array",
-                    items: { type: "string", maxLength: ANCHOR_MAX_CHARS },
-                    maxItems: ANCHORS_MAX_ITEMS,
+                    items: { type: "string", maxLength: authoring_1.ANCHOR_MAX_CHARS },
+                    maxItems: authoring_1.ANCHORS_MAX_ITEMS,
                 },
                 scope: SCOPE_PROPERTY,
                 abstract: ABSTRACT_PROPERTY,

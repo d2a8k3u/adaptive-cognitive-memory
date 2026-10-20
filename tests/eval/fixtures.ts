@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { conflictKeyProblem } from "../../src/authoring";
 import {
   type JsonRecord,
   optionalString,
@@ -425,7 +426,12 @@ function duplicateProblems(section: string, ids: readonly string[]): string[] {
   return problems;
 }
 
-function memoryProblems(memory: FixtureMemory, projectKeys: ReadonlySet<string>): string[] {
+function conflictKeyProblems(memory: FixtureMemory): string[] {
+  const problem = conflictKeyProblem(memory.conflict_key);
+  return problem === undefined ? [] : [`${memory.id}: ${problem.message}`];
+}
+
+function scopeProblems(memory: FixtureMemory, projectKeys: ReadonlySet<string>): string[] {
   if (memory.scope === "user") {
     return memory.project === undefined
       ? []
@@ -435,6 +441,10 @@ function memoryProblems(memory: FixtureMemory, projectKeys: ReadonlySet<string>)
     return [`${memory.id}: project-scope memory names unknown project ${memory.project}`];
   }
   return [];
+}
+
+function memoryProblems(memory: FixtureMemory, projectKeys: ReadonlySet<string>): string[] {
+  return [...conflictKeyProblems(memory), ...scopeProblems(memory, projectKeys)];
 }
 
 function projectProblems(caseId: string, project: string, keys: ReadonlySet<string>): string[] {

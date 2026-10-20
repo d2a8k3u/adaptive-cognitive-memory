@@ -1,4 +1,17 @@
 import {
+  ANCHOR_MAX_CHARS,
+  ANCHORS_MAX_ITEMS,
+  type AuthoringProblem,
+  anchorsProblem,
+  CONFLICT_KEY_MAX_CHARS,
+  CONFLICT_KEY_PATTERN,
+  conflictKeyProblem,
+  KEYWORDS_MAX_CHARS,
+  keywordsProblem,
+  VALUE_TEXT_MAX_CHARS,
+  valueTextProblem,
+} from "./authoring";
+import {
   ABSTRACT_MAX_CHARS,
   CONTENT_MAX_CHARS,
   RELATION_TYPE_MAX_CHARS,
@@ -57,13 +70,7 @@ export interface NeedsResolutionValue {
 
 const ID_MAX_CHARS = 26;
 const SEARCH_LIMIT_MAX = 100;
-const CONFLICT_KEY_MAX_CHARS = 120;
-const VALUE_TEXT_MAX_CHARS = 200;
-const KEYWORDS_MAX_CHARS = 300;
-const ANCHORS_MAX_ITEMS = 20;
-const ANCHOR_MAX_CHARS = 200;
 const FEEDBACK_IDS_MAX_ITEMS = 20;
-const CONFLICT_KEY_PATTERN = /^[a-z0-9_]+(\.[a-z0-9_-]+)*$/;
 
 export function isToolError(value: unknown): value is ToolErrorValue {
   return typeof value === "object" && value !== null && "error" in value;
@@ -188,19 +195,13 @@ function optionalInt(
   return value;
 }
 
+function authoringError(problem: AuthoringProblem | undefined): ToolErrorValue | undefined {
+  return problem === undefined ? undefined : fieldError(problem.field, problem.message);
+}
+
 function requiredConflictKey(args: Record<string, unknown>): string | ToolErrorValue {
   const value = args.conflict_key;
-  if (
-    typeof value !== "string" ||
-    value.length > CONFLICT_KEY_MAX_CHARS ||
-    !CONFLICT_KEY_PATTERN.test(value)
-  ) {
-    return fieldError(
-      "conflict_key",
-      `conflict_key must be a stable lowercase dotted key naming the slot, such as project.primary_database or team.reviewers, of at most ${CONFLICT_KEY_MAX_CHARS} characters`,
-    );
-  }
-  return value;
+  return authoringError(conflictKeyProblem(value)) ?? (value as string);
 }
 
 function valueTextFor(
@@ -214,39 +215,24 @@ function valueTextFor(
       "value_text is required for a single-valued conflict_key: give the slot's current value, such as PostgreSQL 15",
     );
   }
-  return optionalText(args, "value_text", VALUE_TEXT_MAX_CHARS);
-}
-
-function optionalText(
-  args: Record<string, unknown>,
-  field: string,
-  maxChars: number,
-): string | ToolErrorValue {
-  const value = args[field];
   if (value === undefined) {
     return "";
   }
-  return requiredText(args, field, maxChars);
+  return authoringError(valueTextProblem(value)) ?? (value as string);
 }
 
-function optionalAnchors(args: Record<string, unknown>): string[] | ToolErrorValue {
-  const value: unknown = args.anchors;
-  if (value === undefined) {
-    return [];
-  }
-  const valid =
-    Array.isArray(value) &&
-    value.length <= ANCHORS_MAX_ITEMS &&
-    value.every(
-      (anchor) => typeof anchor === "string" && anchor !== "" && anchor.length <= ANCHOR_MAX_CHARS,
-    );
-  if (!valid) {
-    return fieldError(
-      "anchors",
-      `anchors must be a list of at most ${ANCHORS_MAX_ITEMS} non-empty strings of at most ${ANCHOR_MAX_CHARS} characters`,
-    );
-  }
-  return value as string[];
+function keywordsArgument(args: Record<string, unknown>): string | undefined | ToolErrorValue {
+  const value = args.keywords;
+  return value === undefined
+    ? undefined
+    : (authoringError(keywordsProblem(value)) ?? (value as string));
+}
+
+function anchorsArgument(args: Record<string, unknown>): string[] | undefined | ToolErrorValue {
+  const value = args.anchors;
+  return value === undefined
+    ? undefined
+    : (authoringError(anchorsProblem(value)) ?? (value as string[]));
 }
 
 function optionalResolution(
@@ -307,11 +293,11 @@ function parseStoreArgs(args: Record<string, unknown>): StoreInput | ToolErrorVa
   if (isToolError(valueText)) {
     return valueText;
   }
-  const keywords = optionalText(args, "keywords", KEYWORDS_MAX_CHARS);
+  const keywords = keywordsArgument(args) ?? "";
   if (isToolError(keywords)) {
     return keywords;
   }
-  const anchors = optionalAnchors(args);
+  const anchors = anchorsArgument(args) ?? [];
   if (isToolError(anchors)) {
     return anchors;
   }

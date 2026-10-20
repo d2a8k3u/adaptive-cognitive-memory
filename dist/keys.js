@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.MAX_HEAD_WORDS = void 0;
 exports.keyHit = keyHit;
 exports.parseStoredAnchors = parseStoredAnchors;
 exports.anchorHit = anchorHit;
@@ -8,7 +9,7 @@ exports.toolLookup = toolLookup;
 const node_path_1 = require("node:path");
 const prompt_1 = require("./prompt");
 const CONFLICT_KEY_NAMESPACE_SEPARATOR = ".";
-const MAX_HEAD_WORDS = 3;
+exports.MAX_HEAD_WORDS = 3;
 const MAX_COMMAND_SEGMENTS = 32;
 const DIRECTORY_SEPARATOR = "/";
 const EXTENSION_MARK = ".";
@@ -183,7 +184,7 @@ function withoutWrappers(words) {
     return [command.includes(DIRECTORY_SEPARATOR) ? (0, node_path_1.basename)(command) : command, ...rest];
 }
 function heads(words) {
-    return Array.from({ length: Math.min(MAX_HEAD_WORDS, words.length) }, (_, index) => words.slice(0, index + 1).join(" "));
+    return Array.from({ length: Math.min(exports.MAX_HEAD_WORDS, words.length) }, (_, index) => words.slice(0, index + 1).join(" "));
 }
 function commandHeads(segment) {
     const words = withoutWrappers(segment);
@@ -239,7 +240,7 @@ function endsHead(word) {
     return word.startsWith(FLAG_MARK) || REDIRECTION.test(word);
 }
 function leadingWords(words) {
-    const [command, ...rest] = words.slice(0, MAX_HEAD_WORDS);
+    const [command, ...rest] = words.slice(0, exports.MAX_HEAD_WORDS);
     if (command === undefined) {
         return [];
     }

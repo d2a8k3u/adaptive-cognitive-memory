@@ -204,7 +204,7 @@ describe("tools", () => {
         cardinality: "single",
         value_text: "v".repeat(200),
         keywords: "w".repeat(300),
-        anchors: Array.from({ length: 20 }, () => "p".repeat(200)),
+        anchors: Array.from({ length: 20 }, (_, index) => `${index}`.padEnd(200, "p")),
       }),
     );
     expect(isToolError(stored)).toBe(false);
@@ -283,6 +283,11 @@ describe("tools", () => {
         field: "conflict_key",
       },
       {
+        name: "conflict key outside the namespace list",
+        args: storeArgs({ conflict_key: "billing.tax_rounding" }),
+        field: "conflict_key",
+      },
+      {
         name: "unknown cardinality",
         args: storeArgs({ cardinality: "few" }),
         field: "cardinality",
@@ -319,6 +324,11 @@ describe("tools", () => {
         field: "anchors",
       },
       {
+        name: "anchor that no matcher can produce",
+        args: storeArgs({ anchors: ["/Users/me/app/billing/tax.py"] }),
+        field: "anchors",
+      },
+      {
         name: "unknown resolution action",
         args: storeArgs({ resolution: { action: "MERGE" } }),
         field: "resolution",
@@ -344,6 +354,33 @@ describe("tools", () => {
       expect(outcome.error.message.length, testCase.name).toBeGreaterThan(0);
     }
     expect(rowCount(deps)).toBe(0);
+  });
+
+  it("rejects an authoring fault before preparing any statement", async () => {
+    const deps = openDeps();
+    const prepare = vi.spyOn(deps.env.db, "prepare");
+
+    const outcome = await memoryStore(deps, storeArgs({ anchors: ["pytest", "pytest"] }));
+    const prepared = prepare.mock.calls.length;
+    prepare.mockRestore();
+
+    expect({ field: isToolError(outcome) ? outcome.error.field : "stored", prepared }).toEqual({
+      field: "anchors",
+      prepared: 0,
+    });
+  });
+
+  it("accepts any listed namespace in either scope", async () => {
+    const deps = openDeps();
+    const outcomes = [
+      await memoryStore(deps, storeArgs({ conflict_key: "project.x", scope: "user" })),
+      await memoryStore(deps, storeArgs({ conflict_key: "user.x", scope: "project" })),
+    ];
+
+    expect(outcomes.map((outcome) => (isToolError(outcome) ? outcome.error : "stored"))).toEqual([
+      "stored",
+      "stored",
+    ]);
   });
 
   it("rejects harness-marked or blank text on store and update and persists nothing", async () => {
