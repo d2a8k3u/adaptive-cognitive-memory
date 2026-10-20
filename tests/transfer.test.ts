@@ -218,6 +218,28 @@ describe("cli export and import", () => {
     });
   });
 
+  it("exports a stored anchor holding an unredacted secret as a redacted line the import accepts", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const source = pluginEnv();
+    const target = pluginEnv();
+    withDb(source, (db) => {
+      insertMemory(db, { id: REPLACEMENT_ID });
+      db.prepare("UPDATE memories SET anchors = ? WHERE id = ?").run(
+        JSON.stringify([`deploy ${SECRET}`]),
+        REPLACEMENT_ID,
+      );
+    });
+    const file = join(mkdtempSync(join(tmpdir(), "acm-transfer-files-")), "anchor.jsonl");
+
+    const codes = [await exportTo(source, file), await importFrom(target, file)];
+
+    expect({
+      codes,
+      anchors: withDb(target, (db) => db.prepare("SELECT anchors FROM memories").pluck().get()),
+    }).toEqual({ codes: [0, 0], anchors: JSON.stringify(["deploy [REDACTED]"]) });
+  });
+
   it("redacts a secret in every imported text field but the anchors before it is stored", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -508,6 +530,22 @@ describe("parseImport", () => {
       name: "keywords over the cap",
       text: fileOf(EXPORT_HEADER, { ...VALID_MEMORY, keywords: "w".repeat(301) }),
       error: /^line 2: keywords must be a string of at most 300 characters$/,
+    },
+    {
+      name: "keywords over the cap that redaction would shrink under it",
+      text: fileOf(EXPORT_HEADER, {
+        ...VALID_MEMORY,
+        keywords: `${"w".repeat(300 - SECRET.length)} ${SECRET}`,
+      }),
+      error: /^line 2: keywords must be a string of at most 300 characters$/,
+    },
+    {
+      name: "a value over the cap that redaction would shrink under it",
+      text: fileOf(EXPORT_HEADER, {
+        ...VALID_MEMORY,
+        value_text: `${"v".repeat(201 - SECRET.length)}${SECRET}`,
+      }),
+      error: /^line 2: value_text must be a string of at most 200 characters$/,
     },
     {
       name: "a value over the cap",
