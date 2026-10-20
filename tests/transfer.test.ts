@@ -286,6 +286,30 @@ describe("cli export and import", () => {
     expect(stored).toBe(0);
   });
 
+  it("rejects the whole file when one memory carries an anchor no matcher can hit, with the store's message", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const target = pluginEnv();
+    const file = join(mkdtempSync(join(tmpdir(), "acm-transfer-files-")), "anchors.jsonl");
+    writeFileSync(
+      file,
+      fileOf(EXPORT_HEADER, VALID_MEMORY, {
+        ...VALID_MEMORY,
+        id: "01J8TRANSFER0000000000VAL2",
+        anchors: ["/abs/x.py"],
+      }),
+    );
+
+    const code = await importFrom(target, file);
+
+    expect(code).toBe(1);
+    expect(errors.mock.calls.flat().join("\n")).toContain(
+      'line 3: anchors[0] "/abs/x.py" is an absolute path; anchors match the project-relative path',
+    );
+    expect(withDb(target, (db) => db.prepare("SELECT count(*) FROM memories").pluck().get())).toBe(
+      0,
+    );
+  });
+
   it("refuses to overwrite an existing export file", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const source = pluginEnv();
@@ -373,6 +397,26 @@ describe("parseImport", () => {
       name: "a timestamp that is not an ISO instant",
       text: fileOf(EXPORT_HEADER, { ...VALID_MEMORY, created_at: "yesterday" }),
       error: /^line 2: created_at must be an ISO-8601 UTC timestamp/,
+    },
+    {
+      name: "an empty anchor",
+      text: fileOf(EXPORT_HEADER, { ...VALID_MEMORY, anchors: [""] }),
+      error: /^line 2: anchors must be a list of at most 20 non-empty strings/,
+    },
+    {
+      name: "a conflict key that is not namespace.topic",
+      text: fileOf(EXPORT_HEADER, { ...VALID_MEMORY, conflict_key: "Foo Bar" }),
+      error: /^line 2: conflict_key must be namespace\.topic/,
+    },
+    {
+      name: "keywords over the cap",
+      text: fileOf(EXPORT_HEADER, { ...VALID_MEMORY, keywords: "w".repeat(301) }),
+      error: /^line 2: keywords must be a string of at most 300 characters$/,
+    },
+    {
+      name: "a value over the cap",
+      text: fileOf(EXPORT_HEADER, { ...VALID_MEMORY, value_text: "v".repeat(201) }),
+      error: /^line 2: value_text must be a string of at most 200 characters$/,
     },
   ])("rejects $name", ({ text, error }) => {
     const parsed = parseImport(text);

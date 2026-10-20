@@ -6,6 +6,7 @@ exports.exportText = exportText;
 exports.parseImport = parseImport;
 exports.slotOf = slotOf;
 exports.planImport = planImport;
+const authoring_1 = require("./authoring");
 const cfg_1 = require("./cfg");
 const keys_1 = require("./keys");
 const policy_1 = require("./policy");
@@ -16,6 +17,7 @@ exports.EXPORT_HEADER = {
     version: 1,
 };
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+const LEGACY_CONFLICT_KEY = "";
 function text(maxChars) {
     return (field, value) => {
         if (typeof value === "string" && (maxChars === undefined || value.length <= maxChars)) {
@@ -43,9 +45,12 @@ const instant = (field, value) => typeof value === "string" && ISO_INSTANT.test(
     ? undefined
     : `${field} must be an ISO-8601 UTC timestamp`;
 const optionalInstant = (field, value) => value === null ? undefined : instant(field, value);
-const stringList = (field, value) => Array.isArray(value) && value.every((item) => typeof item === "string")
-    ? undefined
-    : `${field} must be a list of strings`;
+function authoringCheck(problemOf) {
+    return (_field, value) => problemOf(value)?.message;
+}
+function legacyOr(check) {
+    return (field, value) => (value === LEGACY_CONFLICT_KEY ? undefined : check(field, value));
+}
 const MEMORY_FIELDS = {
     id: memoryId,
     type: oneOf(policy_1.MEMORY_TYPES),
@@ -55,11 +60,11 @@ const MEMORY_FIELDS = {
     title: text(cfg_1.TITLE_MAX_CHARS),
     abstract: text(cfg_1.ABSTRACT_MAX_CHARS),
     content: text(cfg_1.CONTENT_MAX_CHARS),
-    conflict_key: text(),
+    conflict_key: legacyOr(authoringCheck(authoring_1.conflictKeyProblem)),
     cardinality: oneOf(policy_1.CARDINALITIES),
-    value_text: text(),
-    keywords: text(),
-    anchors: stringList,
+    value_text: authoringCheck(authoring_1.valueTextProblem),
+    keywords: authoringCheck(authoring_1.keywordsProblem),
+    anchors: authoringCheck(authoring_1.anchorsProblem),
     epistemic: oneOf(policy_1.EPISTEMIC_STATES),
     origin: oneOf(policy_1.MEMORY_ORIGINS),
     state: oneOf(policy_1.MEMORY_STATES),

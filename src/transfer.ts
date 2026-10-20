@@ -1,4 +1,11 @@
 import {
+  type AuthoringProblem,
+  anchorsProblem,
+  conflictKeyProblem,
+  keywordsProblem,
+  valueTextProblem,
+} from "./authoring";
+import {
   ABSTRACT_MAX_CHARS,
   CONTENT_MAX_CHARS,
   RELATION_CAP,
@@ -25,6 +32,7 @@ export const EXPORT_HEADER = {
 } as const;
 
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+const LEGACY_CONFLICT_KEY = "";
 
 export interface MemoryLine {
   readonly record: "memory";
@@ -163,10 +171,13 @@ const instant: Check = (field, value) =>
 const optionalInstant: Check = (field, value) =>
   value === null ? undefined : instant(field, value);
 
-const stringList: Check = (field, value) =>
-  Array.isArray(value) && value.every((item) => typeof item === "string")
-    ? undefined
-    : `${field} must be a list of strings`;
+function authoringCheck(problemOf: (value: unknown) => AuthoringProblem | undefined): Check {
+  return (_field, value) => problemOf(value)?.message;
+}
+
+function legacyOr(check: Check): Check {
+  return (field, value) => (value === LEGACY_CONFLICT_KEY ? undefined : check(field, value));
+}
 
 const MEMORY_FIELDS: Readonly<Record<Exclude<keyof MemoryLine, "record">, Check>> = {
   id: memoryId,
@@ -177,11 +188,11 @@ const MEMORY_FIELDS: Readonly<Record<Exclude<keyof MemoryLine, "record">, Check>
   title: text(TITLE_MAX_CHARS),
   abstract: text(ABSTRACT_MAX_CHARS),
   content: text(CONTENT_MAX_CHARS),
-  conflict_key: text(),
+  conflict_key: legacyOr(authoringCheck(conflictKeyProblem)),
   cardinality: oneOf(CARDINALITIES),
-  value_text: text(),
-  keywords: text(),
-  anchors: stringList,
+  value_text: authoringCheck(valueTextProblem),
+  keywords: authoringCheck(keywordsProblem),
+  anchors: authoringCheck(anchorsProblem),
   epistemic: oneOf(EPISTEMIC_STATES),
   origin: oneOf(MEMORY_ORIGINS),
   state: oneOf(MEMORY_STATES),
