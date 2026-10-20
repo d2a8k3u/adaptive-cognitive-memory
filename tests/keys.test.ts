@@ -134,7 +134,7 @@ describe("toolLookup for Edit and Write", () => {
   });
 
   it("has nothing to look up for other tools or inputs without a path or command", () => {
-    expect(toolLookup("Read", { file_path: "/repo/a.ts" }, "/repo")).toBeUndefined();
+    expect(toolLookup("Grep", { file_path: "/repo/a.ts" }, "/repo")).toBeUndefined();
     expect(toolLookup("Edit", { old_string: "a" }, "/repo")).toBeUndefined();
     expect(toolLookup("Bash", { command: "   " }, "/repo")).toBeUndefined();
   });

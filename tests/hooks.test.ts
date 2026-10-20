@@ -1516,7 +1516,7 @@ describe("hooks.json contract", () => {
       "UserPromptSubmit",
     ]);
     for (const group of config.hooks.PreToolUse ?? []) {
-      expect(group.matcher).toBe("Bash|Edit|Write");
+      expect(group.matcher).toBe("Bash|Edit|Write|Read");
     }
     expect(config.hooks.PostToolUse?.map((group) => group.matcher)).toEqual([POST_TOOL_MATCHER]);
     expect(config.hooks.PostToolUseFailure?.map((group) => group.matcher)).toEqual(["Bash"]);

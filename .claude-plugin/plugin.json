@@ -17,7 +17,7 @@
     "pretool_budget_tokens": {
       "type": "number",
       "title": "Pre-tool recall budget (tokens)",
-      "description": "Most tokens of recalled memories injected before a Bash, Edit or Write call.",
+      "description": "Most tokens of recalled memories injected before a Bash, Read, Edit or Write call.",
       "default": 300,
       "min": 100,
       "max": 2375

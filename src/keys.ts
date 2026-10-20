@@ -52,6 +52,7 @@ const NAVIGATION_COMMANDS: ReadonlySet<string> = new Set([
   "export",
   "set",
 ]);
+const PATH_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "Read"]);
 const FLAG_MARK = "-";
 const REDIRECTION = /[<>]/;
 const OPEN_REDIRECTION = /[<>]$/;
@@ -306,7 +307,7 @@ export function toolLookup(
     const command = stringProperty(toolInput, "command");
     return command === undefined ? undefined : bashLookup(command);
   }
-  if (toolName === "Edit" || toolName === "Write") {
+  if (PATH_TOOLS.has(toolName)) {
     const filePath = stringProperty(toolInput, "file_path");
     return filePath === undefined ? undefined : pathLookup(filePath, projectDir);
   }

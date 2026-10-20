@@ -15,6 +15,10 @@ const SEARCH_RUNS = 50;
 const COLD_CAP_MS = 2000;
 const WARM_P95_CAP_MS = 750;
 const SEARCH_P95_CAP_MS = 100;
+const READ_RUNS = 50;
+const READ_P95_CAP_MS = 300;
+const READ_ANCHOR = "billing/tax.py";
+const READ_ANCHORED_ID = `01J8PERF${"2".padStart(18, "0")}`;
 const SIZE_CAP_BYTES = 25 * 1024 * 1024;
 const HOOK_TIMEOUT_FLOOR_S = 5;
 const RECALL_PROMPT = "how should we handle database migrations under load";
@@ -186,6 +190,47 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
       console.log(
         `hooks.json final timeout: ${requiredTimeoutS} s = max(2 × ${Math.round(coldMs)} ms cold, ${HOOK_TIMEOUT_FLOOR_S} s)`,
       );
+    },
+  );
+
+  it.skipIf(process.env.CI === "true")(
+    "spawned PreToolUse Read p95 stays under 300 ms",
+    { timeout: 120_000 },
+    async () => {
+      const opened: OpenedDb = openDatabase(seedConfig(pluginData, testModelCacheDir));
+      try {
+        opened.db
+          .prepare("UPDATE memories SET anchors = ? WHERE id = ?")
+          .run(JSON.stringify([READ_ANCHOR]), READ_ANCHORED_ID);
+      } finally {
+        opened.db.close();
+      }
+      const readMs: number[] = [];
+      for (let index = 0; index < READ_RUNS; index += 1) {
+        const runStartedAt = performance.now();
+        const run = await runProcess({
+          command: process.execPath,
+          args: [distEntry("hooks.js")],
+          env: hookEnv,
+          stdinText: JSON.stringify({
+            hook_event_name: "PreToolUse",
+            cwd: projectDir,
+            session_id: `perf-read-${index}`,
+            tool_name: "Read",
+            tool_input: { file_path: join(projectDir, READ_ANCHOR) },
+          }),
+          timeoutMs: 30_000,
+        });
+        readMs.push(performance.now() - runStartedAt);
+        expect(run.code).toBe(0);
+        expect(run.stderr).toBe("");
+        expect(run.stdout).toContain(READ_ANCHORED_ID);
+      }
+      const readP95 = percentile(readMs, 0.95);
+      console.log(
+        `NFR-13 PreToolUse Read p95 @${SEED_ROWS}: ${Math.round(readP95)} ms (cap ${READ_P95_CAP_MS}), max ${Math.round(Math.max(...readMs))} ms over ${READ_RUNS} runs`,
+      );
+      expect(readP95).toBeLessThanOrEqual(READ_P95_CAP_MS);
     },
   );
 
