@@ -200,7 +200,7 @@ describe("tools", () => {
         title: "a".repeat(200),
         content: "c".repeat(32000),
         abstract: "b".repeat(200),
-        conflict_key: `k.${"x".repeat(118)}`,
+        conflict_key: `project.${"x".repeat(112)}`,
         cardinality: "single",
         value_text: "v".repeat(200),
         keywords: "w".repeat(300),
@@ -279,7 +279,7 @@ describe("tools", () => {
       },
       {
         name: "conflict key over cap",
-        args: storeArgs({ conflict_key: `k.${"x".repeat(119)}` }),
+        args: storeArgs({ conflict_key: `project.${"x".repeat(113)}` }),
         field: "conflict_key",
       },
       {
@@ -636,7 +636,7 @@ describe("tools", () => {
     const cacheTtl = storeArgs({
       title: "cache ttl",
       content: "Five minutes.",
-      conflict_key: "cache.ttl",
+      conflict_key: "db.cache_ttl",
       cardinality: "single",
       value_text: "5 minutes",
     });
@@ -840,7 +840,7 @@ describe("tools", () => {
         content: "Prefers the dark editor theme in every tool.",
         type: "pattern",
         kind: "preference",
-        conflict_key: "editor.theme",
+        conflict_key: "tool.editor_theme",
         scope: "user",
       }),
     );

@@ -19,7 +19,7 @@
       "content": "Billing amounts are stored in minor units as integers, never as floats, to avoid rounding drift.",
       "type": "semantic",
       "kind": "fact",
-      "conflict_key": "billing.amount_storage",
+      "conflict_key": "code.amount_storage",
       "cardinality": "single",
       "value_text": "integer minor units",
       "keywords": "billing money amount cents"

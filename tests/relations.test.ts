@@ -167,7 +167,7 @@ describe("relate", () => {
       content: `${title} body.`,
       type: "semantic",
       kind: "fact",
-      conflictKey: "capture.subject",
+      conflictKey: "test.capture_subject",
       cardinality: "single",
       valueText: value,
       keywords: "",

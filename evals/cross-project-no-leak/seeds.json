@@ -7,7 +7,7 @@
       "content": "The billing service pins the Stripe API version 2020-08-27 in its client constructor; upgrading needs the webhook payload migration first.",
       "type": "semantic",
       "kind": "fact",
-      "conflict_key": "billing.stripe_api_version",
+      "conflict_key": "api.stripe_api_version",
       "cardinality": "single",
       "value_text": "2020-08-27",
       "keywords": "stripe billing api version pin"

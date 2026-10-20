@@ -18,7 +18,7 @@ function fact(title: string, content: string): StoreInput {
     content,
     type: "semantic",
     kind: "fact",
-    conflictKey: "lock.verification",
+    conflictKey: "test.lock_verification",
     cardinality: "multi",
     valueText: "",
     keywords: "",

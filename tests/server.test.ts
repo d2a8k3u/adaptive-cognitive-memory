@@ -174,7 +174,7 @@ describe("server", () => {
         content: "Facts travel over stdio. Second sentence.",
         type: "semantic",
         kind: "fact",
-        conflict_key: "server.transport",
+        conflict_key: "project.server_transport",
       },
     });
     const storedValue = textOf(stored) as { id: string; action: string };
@@ -268,7 +268,7 @@ describe("server", () => {
           content: "This row gets malformed anchors.",
           type: "semantic",
           kind: "fact",
-          conflict_key: "server.defect",
+          conflict_key: "project.server_defect",
         },
       }),
     ) as { id: string };

@@ -20,7 +20,7 @@ import { oracleResolution, type ResolutionCandidate } from "./oracle";
 export const HOOK_POOL_SIZE = 4;
 
 const NEEDS_RESOLUTION = "needs_resolution";
-const KEY_DRIFT_PROBE = "eval.key_drift_probe";
+const KEY_DRIFT_PROBE = "test.key_drift_probe";
 
 const DEFAULT_HOOK_TIMEOUT_S = 60;
 const MS_PER_SECOND = 1000;

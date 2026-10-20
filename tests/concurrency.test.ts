@@ -66,7 +66,7 @@ function runnerSource(): string {
     "      content: 'Durable note about ' + fact.toLowerCase() + ' recorded during the concurrency verification run.',",
     "      type: 'semantic',",
     "      kind: 'fact',",
-    "      conflictKey: 'concurrency.' + fact.replaceAll(' ', '_'),",
+    "      conflictKey: 'test.concurrency_' + fact.replaceAll(' ', '_'),",
     "      cardinality: 'multi',",
     "      valueText: '',",
     "      keywords: '',",
