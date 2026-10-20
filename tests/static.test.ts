@@ -233,16 +233,20 @@ describe("recall docs", () => {
     );
   });
 
-  it("README hook table lists the PreToolUse tools hooks.json matches, and the skill says path anchors fire on Read, Edit and Write", () => {
+  it("README hook table lists the PreToolUse tools hooks.json matches", () => {
     const matchers = readJson<{ hooks: { PreToolUse: { matcher: string }[] } }>(
       "hooks",
       "hooks.json",
     ).hooks.PreToolUse.map((group) => group.matcher);
-    const skill = readFileSync(join(process.cwd(), "skills", "memory", "SKILL.md"), "utf8");
 
     expect(matchers).toHaveLength(1);
     expect(readme).toContain(`| \`PreToolUse\` (\`${matchers[0]?.replaceAll("|", "\\|")}\`) |`);
-    expect(skill).toContain("Read, Edit or Write");
+  });
+
+  it("skill says path anchors fire before Read, Edit and Write", () => {
+    const skill = readFileSync(join(process.cwd(), "skills", "memory", "SKILL.md"), "utf8");
+
+    expect(skill).toContain("before Read, Edit or Write, a project-relative path");
   });
 });
 
