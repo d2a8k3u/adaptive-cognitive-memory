@@ -224,6 +224,28 @@ describe("plugin commands", () => {
   });
 });
 
+describe("recall docs", () => {
+  const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
+
+  it("README states the observed subagent dedup scope", () => {
+    expect(readme).toContain(
+      "Dedup scope, observed 2026-10-20: subagent hooks carry the parent's `session_id`, so a row injected in the parent is skipped inside a subagent.",
+    );
+  });
+
+  it("README hook table lists the PreToolUse tools hooks.json matches, and the skill says path anchors fire on Read, Edit and Write", () => {
+    const matchers = readJson<{ hooks: { PreToolUse: { matcher: string }[] } }>(
+      "hooks",
+      "hooks.json",
+    ).hooks.PreToolUse.map((group) => group.matcher);
+    const skill = readFileSync(join(process.cwd(), "skills", "memory", "SKILL.md"), "utf8");
+
+    expect(matchers).toHaveLength(1);
+    expect(readme).toContain(`| \`PreToolUse\` (\`${matchers[0]?.replaceAll("|", "\\|")}\`) |`);
+    expect(skill).toContain("Read, Edit or Write");
+  });
+});
+
 describe("static dist gates", () => {
   it("ships no import path from the predecessor memory plugins (AC-17)", () => {
     const offenders = distJsFiles().filter((file) =>

@@ -42,7 +42,7 @@ Recalled constraints start with `Apply —`, procedures with `Follow —`. Apply
 - `conflict_key`: a stable lowercase dotted key, the same every time the same question is answered — `project.primary_database`, `test.command.backend`, `team.reviewers`.
 - `cardinality`: `single` when the slot holds one current value, `multi` when several coexist.
 - `value_text`: the slot's value in a few words (`PostgreSQL 15`); required for `single`.
-- `keywords` and `anchors` help recall find it. Before a Bash, Edit or Write call a memory is recalled only when an anchor matches exactly: a command head (`pytest`, `git commit`), a project-relative path or basename (`billing/tax.py`), a directory prefix ending in `/` (`migrations/versions/`) or an extension starting with `.` (`.vue`).
+- `keywords` and `anchors` help recall find it. Before a tool call a memory is recalled only when an anchor matches exactly: before Bash, a command head (`pytest`, `git commit`); before Read, Edit or Write, a project-relative path or basename (`billing/tax.py`), a directory prefix ending in `/` (`migrations/versions/`) or an extension starting with `.` (`.vue`) of the file.
 
 ## When the answer is needs_resolution
 
