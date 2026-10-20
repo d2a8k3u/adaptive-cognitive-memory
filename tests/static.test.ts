@@ -406,16 +406,34 @@ const RENDERED_LIMITS = [
   `${MAX_HEAD_WORDS} words`,
 ];
 
+const FIELD_ROW_LIMITS: readonly { readonly field: string; readonly limit: string }[] = [
+  { field: "title", limit: `${TITLE_MAX_CHARS} characters` },
+  { field: "abstract", limit: `${ABSTRACT_MAX_CHARS} characters` },
+  { field: "content", limit: `${CONTENT_MAX_CHARS} characters` },
+  { field: "conflict_key", limit: `${CONFLICT_KEY_MAX_CHARS} characters` },
+  { field: "cardinality + value_text", limit: `${VALUE_TEXT_MAX_CHARS} characters` },
+  { field: "keywords", limit: `${KEYWORDS_MAX_CHARS} characters` },
+  { field: "anchors", limit: `${ANCHORS_MAX_ITEMS} anchors` },
+  { field: "anchors", limit: `${ANCHOR_MAX_CHARS} characters` },
+];
+
+function fieldRow(reference: string, field: string): string {
+  return reference.split("\n").find((line) => line.startsWith(`| ${field} |`)) ?? "";
+}
+
 describe("authoring standard docs", () => {
-  it("the reference names every limit from its owner and every conflict key namespace", () => {
+  it("the reference names every limit from its owner in its field's row and every conflict key namespace", () => {
     const reference = authoringReference();
 
     expect({
-      missingLimits: RENDERED_LIMITS.filter((limit) => !reference.includes(limit)),
+      limitsMissingFromTheirRow: FIELD_ROW_LIMITS.filter(
+        ({ field, limit }) => !fieldRow(reference, field).includes(limit),
+      ).map(({ field, limit }) => `${field}: ${limit}`),
+      headWordCapMissing: !reference.includes(`${MAX_HEAD_WORDS} words`),
       missingNamespaces: CONFLICT_KEY_NAMESPACES.filter(
         (namespace) => !reference.includes(`| \`${namespace}\` |`),
       ),
-    }).toEqual({ missingLimits: [], missingNamespaces: [] });
+    }).toEqual({ limitsMissingFromTheirRow: [], headWordCapMissing: false, missingNamespaces: [] });
   });
 
   it("every good example passes the server checks and every bad example fails them", () => {

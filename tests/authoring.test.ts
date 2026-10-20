@@ -184,6 +184,7 @@ describe("conflictKeyProblem", () => {
 
   it.each([
     { reason: "a single segment", key: "database" },
+    { reason: "a single segment that begins with a namespace", key: "tests" },
     { reason: "a namespace outside the list", key: "billing.tax_rounding" },
     { reason: "an upper-case namespace", key: "Project.x" },
     { reason: "an upper-case topic", key: "project.Primary" },
