@@ -475,6 +475,11 @@ describe("parseImport", () => {
       error: /^line 2: state must be one of active, hypothesis, revoked/,
     },
     {
+      name: "a memory id longer than the tools accept",
+      text: fileOf(EXPORT_HEADER, { ...VALID_MEMORY, id: `${VALID_MEMORY.id}0` }),
+      error: /^line 2: id must be a non-empty string of at most 26 characters$/,
+    },
+    {
       name: "a title over the cap",
       text: fileOf(EXPORT_HEADER, { ...VALID_MEMORY, title: "t".repeat(201) }),
       error: /^line 2: title must be a string of at most 200 characters/,

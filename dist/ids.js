@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ID_MAX_CHARS = void 0;
 exports.newId = newId;
+exports.isMemoryId = isMemoryId;
 exports.projectIdentity = projectIdentity;
 exports.collectLocationFacts = collectLocationFacts;
 exports.resolveProjectId = resolveProjectId;
@@ -9,12 +11,16 @@ const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
 const ulid_1 = require("ulid");
 const ulid = (0, ulid_1.monotonicFactory)();
+exports.ID_MAX_CHARS = 26;
 const PROJECT_ID_HEX_CHARS = 16;
 const GIT_QUERY_TIMEOUT_MS = 2_000;
 const GIT_NOT_INSTALLED_CODE = "ENOENT";
 const DUBIOUS_OWNERSHIP = /detected dubious ownership in repository at '([^']+)'/;
 function newId() {
     return ulid();
+}
+function isMemoryId(value) {
+    return typeof value === "string" && value !== "" && value.length <= exports.ID_MAX_CHARS;
 }
 function projectIdentity(location) {
     return (0, node_crypto_1.createHash)("sha256")

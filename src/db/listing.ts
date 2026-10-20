@@ -5,7 +5,6 @@ import { VISIBLE_TO_PROJECT } from "./visibility";
 export const LIST_LIMIT_DEFAULT = 20;
 export const LIST_LIMIT_MAX = 50;
 export const LIST_PAGE_MAX_CHARS = 40_000;
-export const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
 export type ListPartition =
   | { readonly kind: "visible"; readonly projectId: string }

@@ -9,6 +9,7 @@ exports.planImport = planImport;
 const authoring_1 = require("./authoring");
 const cfg_1 = require("./cfg");
 const memories_1 = require("./db/memories");
+const ids_1 = require("./ids");
 const keys_1 = require("./keys");
 const policy_1 = require("./policy");
 const redact_1 = require("./redact");
@@ -29,7 +30,9 @@ function text(maxChars) {
             : `${field} must be a string of at most ${maxChars} characters`;
     };
 }
-const memoryId = (field, value) => typeof value === "string" && value !== "" ? undefined : `${field} must be a non-empty string`;
+const memoryId = (field, value) => (0, ids_1.isMemoryId)(value)
+    ? undefined
+    : `${field} must be a non-empty string of at most ${ids_1.ID_MAX_CHARS} characters`;
 const optionalMemoryId = (field, value) => value === null ? undefined : memoryId(field, value);
 function oneOf(values) {
     return (field, value) => typeof value === "string" && values.includes(value)

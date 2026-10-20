@@ -7,6 +7,7 @@ import {
   TITLE_MAX_CHARS,
 } from "./cfg";
 import { storedKeyProblem, storedKeys } from "./db/memories";
+import { ID_MAX_CHARS, isMemoryId } from "./ids";
 import { parseStoredAnchors } from "./keys";
 import {
   CARDINALITIES,
@@ -136,7 +137,9 @@ function text(maxChars?: number): Check {
 }
 
 const memoryId: Check = (field, value) =>
-  typeof value === "string" && value !== "" ? undefined : `${field} must be a non-empty string`;
+  isMemoryId(value)
+    ? undefined
+    : `${field} must be a non-empty string of at most ${ID_MAX_CHARS} characters`;
 
 const optionalMemoryId: Check = (field, value) =>
   value === null ? undefined : memoryId(field, value);

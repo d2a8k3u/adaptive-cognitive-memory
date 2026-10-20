@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import { monotonicFactory } from "ulid";
 
 const ulid = monotonicFactory();
+export const ID_MAX_CHARS = 26;
 const PROJECT_ID_HEX_CHARS = 16;
 const GIT_QUERY_TIMEOUT_MS = 2_000;
 const GIT_NOT_INSTALLED_CODE = "ENOENT";
@@ -25,6 +26,10 @@ type GitAnswer =
 
 export function newId(): string {
   return ulid();
+}
+
+export function isMemoryId(value: unknown): value is string {
+  return typeof value === "string" && value !== "" && value.length <= ID_MAX_CHARS;
 }
 
 export function projectIdentity(location: ProjectLocation): string {

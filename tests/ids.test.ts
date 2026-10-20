@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { collectLocationFacts, newId, projectIdentity } from "../src/ids";
+import { collectLocationFacts, isMemoryId, newId, projectIdentity } from "../src/ids";
 
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const ISOLATED_GIT_ENV: NodeJS.ProcessEnv = {
@@ -42,6 +42,16 @@ describe("newId", () => {
     const second = newId();
     expect(first).toMatch(ULID_PATTERN);
     expect(first < second).toBe(true);
+  });
+});
+
+describe("isMemoryId", () => {
+  it.each([
+    { name: "a 26-character legacy id", value: "zz-legacy-0000000000000001", accepted: true },
+    { name: "a 27-character id", value: "zz-legacy-00000000000000001", accepted: false },
+    { name: "an empty id", value: "", accepted: false },
+  ])("treats $name as a memory id: $accepted", ({ value, accepted }) => {
+    expect(isMemoryId(value)).toBe(accepted);
   });
 });
 

@@ -23,7 +23,6 @@ import {
   type ListPartition,
   type ListRequest,
   listMemories,
-  ULID_PATTERN,
 } from "./db/listing";
 import {
   type Candidate,
@@ -45,6 +44,7 @@ import { relate } from "./db/relations";
 import { statusFacts } from "./db/status";
 import { type DoctorReport, runDoctor } from "./doctor";
 import { harnessMarker } from "./harness";
+import { ID_MAX_CHARS, isMemoryId } from "./ids";
 import { type InstructionSources, readInstructionLines, restatedInstruction } from "./instructions";
 import { FEEDBACK_VERDICTS } from "./lifecycle";
 import {
@@ -76,7 +76,6 @@ export interface NeedsResolutionValue {
   allowed: readonly ResolutionAction[];
 }
 
-const ID_MAX_CHARS = 26;
 const SEARCH_LIMIT_MAX = 100;
 const FEEDBACK_IDS_MAX_ITEMS = 20;
 const ALL_PROJECTS = "all";
@@ -450,11 +449,11 @@ function optionalCursor(args: Record<string, unknown>): string | undefined | Too
   if (value === undefined) {
     return undefined;
   }
-  return isString(value) && ULID_PATTERN.test(value)
+  return isMemoryId(value)
     ? value
     : fieldError(
         "before",
-        "before must be the next_cursor of the previous page, a 26-character id",
+        `before must be the next_cursor of the previous page, a non-empty id of at most ${ID_MAX_CHARS} characters`,
       );
 }
 

@@ -135,12 +135,33 @@ describe("memory_list", () => {
     });
   });
 
+  it("pages one row at a time across legacy, transfer and ulid ids, visiting every row once", async () => {
+    const deps = openDeps();
+    const legacyId = "zz-legacy-1";
+    const transferId = "01J8TRANSFER0000000000VAL1";
+    insertRows(deps.env.db, [
+      { id: listId(1) },
+      { id: listId(2) },
+      { id: legacyId },
+      { id: transferId },
+    ]);
+
+    const pages = [await listed(deps, { limit: 1 })];
+    while (pages.length <= 4 && pages.at(-1)?.next_cursor !== undefined) {
+      pages.push(await listed(deps, { limit: 1, before: pages.at(-1)?.next_cursor }));
+    }
+
+    expect({ ids: pages.flatMap(idsOf), lastCursor: pages.at(-1)?.next_cursor }).toEqual({
+      ids: [legacyId, listId(2), listId(1), transferId],
+      lastCursor: undefined,
+    });
+  });
+
   it.each([
     { args: { limit: 0 }, field: "limit" },
     { args: { limit: 51 }, field: "limit" },
     { args: { limit: 1.5 }, field: "limit" },
-    { args: { before: "01K7" }, field: "before" },
-    { args: { before: "01J8TRANSFER0000000000VAL1" }, field: "before" },
+    { args: { before: `${listId(1)}0` }, field: "before" },
     { args: { state: "deleted" }, field: "state" },
     { args: { kind: "rumour" }, field: "kind" },
     { args: { type: "thought" }, field: "type" },

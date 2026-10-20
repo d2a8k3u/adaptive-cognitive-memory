@@ -22,12 +22,12 @@ const relations_1 = require("./db/relations");
 const status_1 = require("./db/status");
 const doctor_1 = require("./doctor");
 const harness_1 = require("./harness");
+const ids_1 = require("./ids");
 const instructions_1 = require("./instructions");
 const lifecycle_1 = require("./lifecycle");
 const policy_1 = require("./policy");
 const search_1 = require("./search");
 const status_2 = require("./status");
-const ID_MAX_CHARS = 26;
 const SEARCH_LIMIT_MAX = 100;
 const FEEDBACK_IDS_MAX_ITEMS = 20;
 const ALL_PROJECTS = "all";
@@ -168,8 +168,8 @@ function optionalResolution(args) {
         return { action };
     }
     const target = record.target;
-    if (typeof target !== "string" || target === "" || target.length > ID_MAX_CHARS) {
-        return fieldError("resolution", `resolution.target must be the id of the candidate to ${action}, at most ${ID_MAX_CHARS} characters`);
+    if (typeof target !== "string" || target === "" || target.length > ids_1.ID_MAX_CHARS) {
+        return fieldError("resolution", `resolution.target must be the id of the candidate to ${action}, at most ${ids_1.ID_MAX_CHARS} characters`);
     }
     return { action: action, target };
 }
@@ -300,9 +300,9 @@ function optionalCursor(args) {
     if (value === undefined) {
         return undefined;
     }
-    return isString(value) && listing_1.ULID_PATTERN.test(value)
+    return (0, ids_1.isMemoryId)(value)
         ? value
-        : fieldError("before", "before must be the next_cursor of the previous page, a 26-character id");
+        : fieldError("before", `before must be the next_cursor of the previous page, a non-empty id of at most ${ids_1.ID_MAX_CHARS} characters`);
 }
 function listPartition(args, projectId) {
     const value = args.project;
@@ -357,14 +357,14 @@ async function memoryList(deps, args) {
     return rejectionsAsToolErrors(() => (0, listing_1.listMemories)(deps.env.db, request));
 }
 async function memoryGet(deps, args) {
-    const id = requiredString(args, "id", ID_MAX_CHARS);
+    const id = requiredString(args, "id", ids_1.ID_MAX_CHARS);
     if (isToolError(id)) {
         return id;
     }
     return rejectionsAsToolErrors(() => (0, memories_1.get)(deps.env, visibleId(deps, id)));
 }
 async function memoryUpdate(deps, args) {
-    const id = requiredString(args, "id", ID_MAX_CHARS);
+    const id = requiredString(args, "id", ids_1.ID_MAX_CHARS);
     if (isToolError(id)) {
         return id;
     }
@@ -403,18 +403,18 @@ async function memoryUpdate(deps, args) {
     return rejectionsAsToolErrors(() => (0, memories_1.updateMemory)(deps.env, visibleId(deps, id), edits));
 }
 async function memoryDelete(deps, args) {
-    const id = requiredString(args, "id", ID_MAX_CHARS);
+    const id = requiredString(args, "id", ids_1.ID_MAX_CHARS);
     if (isToolError(id)) {
         return id;
     }
     return rejectionsAsToolErrors(() => (0, memories_1.deleteMemory)(deps.env, visibleId(deps, id)));
 }
 async function memoryRelate(deps, args) {
-    const sourceId = requiredString(args, "source_id", ID_MAX_CHARS);
+    const sourceId = requiredString(args, "source_id", ids_1.ID_MAX_CHARS);
     if (isToolError(sourceId)) {
         return sourceId;
     }
-    const targetId = requiredString(args, "target_id", ID_MAX_CHARS);
+    const targetId = requiredString(args, "target_id", ids_1.ID_MAX_CHARS);
     if (isToolError(targetId)) {
         return targetId;
     }
@@ -429,9 +429,9 @@ function requiredIds(args) {
     const valid = Array.isArray(value) &&
         value.length >= 1 &&
         value.length <= FEEDBACK_IDS_MAX_ITEMS &&
-        value.every((id) => typeof id === "string" && id !== "" && id.length <= ID_MAX_CHARS);
+        value.every((id) => typeof id === "string" && id !== "" && id.length <= ids_1.ID_MAX_CHARS);
     if (!valid) {
-        return fieldError("ids", `ids must be a list of 1 to ${FEEDBACK_IDS_MAX_ITEMS} memory ids of at most ${ID_MAX_CHARS} characters`);
+        return fieldError("ids", `ids must be a list of 1 to ${FEEDBACK_IDS_MAX_ITEMS} memory ids of at most ${ids_1.ID_MAX_CHARS} characters`);
     }
     return value;
 }
@@ -462,7 +462,7 @@ async function memoryDoctor(deps) {
 async function memoryStatus(deps) {
     return (0, status_2.statusReport)((0, status_1.statusFacts)(deps.env.db, deps.projectId), new Date().toISOString());
 }
-const ID_PROPERTY = { type: "string", maxLength: ID_MAX_CHARS };
+const ID_PROPERTY = { type: "string", maxLength: ids_1.ID_MAX_CHARS };
 const TYPE_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_TYPES] };
 const KIND_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_KINDS] };
 const KEYWORDS_PROPERTY = { type: "string", maxLength: authoring_1.KEYWORDS_MAX_CHARS };
