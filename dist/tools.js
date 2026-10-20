@@ -140,31 +140,19 @@ function valueTextFor(args, cardinality) {
     if (value === undefined) {
         return "";
     }
-    const valueText = writtenKey(value, isString, authoring_1.valueTextProblem);
-    if (isToolError(valueText)) {
-        return valueText;
-    }
-    return authoringError((0, authoring_1.valueTextProblem)(memories_1.storedKeys.valueText(valueText))) ?? valueText;
+    return writtenKey(value, isString, memories_1.storedKeyProblem.valueText);
 }
 function keywordsArgument(args) {
     if (args.keywords === undefined) {
         return undefined;
     }
-    const keywords = writtenKey(args.keywords, isString, authoring_1.keywordsProblem);
-    if (isToolError(keywords)) {
-        return keywords;
-    }
-    return authoringError((0, authoring_1.keywordsProblem)(memories_1.storedKeys.keywords(keywords))) ?? keywords;
+    return writtenKey(args.keywords, isString, memories_1.storedKeyProblem.keywords);
 }
 function anchorsArgument(args) {
     if (args.anchors === undefined) {
         return undefined;
     }
-    const anchors = writtenKey(args.anchors, isStringList, authoring_1.anchorsProblem);
-    if (isToolError(anchors)) {
-        return anchors;
-    }
-    return authoringError((0, authoring_1.redactedAnchorProblem)(anchors, memories_1.storedKeys.anchors(anchors))) ?? anchors;
+    return writtenKey(args.anchors, isStringList, memories_1.storedKeyProblem.anchors);
 }
 function optionalResolution(args) {
     const value = args.resolution;

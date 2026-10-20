@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.storedKeys = exports.MemoryRejection = void 0;
+exports.storedKeyProblem = exports.storedKeys = exports.MemoryRejection = void 0;
 exports.deriveAbstract = deriveAbstract;
 exports.passageText = passageText;
 exports.resolveMemoryId = resolveMemoryId;
@@ -13,6 +13,7 @@ exports.deleteMemory = deleteMemory;
 exports.singleKeyHolders = singleKeyHolders;
 exports.unembeddedActiveCount = unembeddedActiveCount;
 exports.slotRow = slotRow;
+const authoring_1 = require("../authoring");
 const cfg_1 = require("../cfg");
 const embeddings_1 = require("../embeddings");
 const ids_1 = require("../ids");
@@ -51,6 +52,29 @@ exports.storedKeys = {
     valueText: storedKeyText,
     keywords: storedKeyText,
     anchors: (anchors) => anchors.map(storedKeyText),
+};
+function isText(value) {
+    return typeof value === "string";
+}
+function isTextList(value) {
+    return Array.isArray(value) && value.every(isText);
+}
+function asStored(writtenProblem, isKey, storedProblem) {
+    return (value) => {
+        const problem = writtenProblem(value);
+        if (problem !== undefined) {
+            return problem;
+        }
+        if (!isKey(value)) {
+            throw new TypeError("an authoring check accepted a value of the wrong type");
+        }
+        return storedProblem(value);
+    };
+}
+exports.storedKeyProblem = {
+    valueText: asStored(authoring_1.valueTextProblem, isText, (text) => (0, authoring_1.valueTextProblem)(exports.storedKeys.valueText(text))),
+    keywords: asStored(authoring_1.keywordsProblem, isText, (text) => (0, authoring_1.keywordsProblem)(exports.storedKeys.keywords(text))),
+    anchors: asStored(authoring_1.anchorsProblem, isTextList, (anchors) => (0, authoring_1.redactedAnchorProblem)(anchors, exports.storedKeys.anchors(anchors))),
 };
 function deriveAbstract(content) {
     const text = content.trim();

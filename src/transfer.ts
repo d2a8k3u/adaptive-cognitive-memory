@@ -1,10 +1,4 @@
-import {
-  type AuthoringProblem,
-  anchorsProblem,
-  conflictKeyProblem,
-  keywordsProblem,
-  valueTextProblem,
-} from "./authoring";
+import { type AuthoringProblem, conflictKeyProblem } from "./authoring";
 import {
   ABSTRACT_MAX_CHARS,
   CONTENT_MAX_CHARS,
@@ -12,6 +6,7 @@ import {
   RELATION_TYPE_MAX_CHARS,
   TITLE_MAX_CHARS,
 } from "./cfg";
+import { storedKeyProblem, storedKeys } from "./db/memories";
 import { parseStoredAnchors } from "./keys";
 import {
   CARDINALITIES,
@@ -190,9 +185,9 @@ const MEMORY_FIELDS: Readonly<Record<Exclude<keyof MemoryLine, "record">, Check>
   content: text(CONTENT_MAX_CHARS),
   conflict_key: legacyOr(authoringCheck(conflictKeyProblem)),
   cardinality: oneOf(CARDINALITIES),
-  value_text: authoringCheck(valueTextProblem),
-  keywords: authoringCheck(keywordsProblem),
-  anchors: authoringCheck(anchorsProblem),
+  value_text: authoringCheck(storedKeyProblem.valueText),
+  keywords: authoringCheck(storedKeyProblem.keywords),
+  anchors: authoringCheck(storedKeyProblem.anchors),
   epistemic: oneOf(EPISTEMIC_STATES),
   origin: oneOf(MEMORY_ORIGINS),
   state: oneOf(MEMORY_STATES),
@@ -252,9 +247,9 @@ function redactedMemoryLine(line: MemoryLine): MemoryLine {
     title: redactWithin(line.title, TITLE_MAX_CHARS),
     abstract: redactWithin(line.abstract, ABSTRACT_MAX_CHARS),
     content: redactWithin(line.content, CONTENT_MAX_CHARS),
-    value_text: scrubbed(line.value_text),
-    keywords: scrubbed(line.keywords),
-    anchors: line.anchors.map(scrubbed),
+    value_text: storedKeys.valueText(line.value_text),
+    keywords: storedKeys.keywords(line.keywords),
+    anchors: storedKeys.anchors(line.anchors),
   };
 }
 

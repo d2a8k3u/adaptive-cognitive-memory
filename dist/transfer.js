@@ -8,6 +8,7 @@ exports.slotOf = slotOf;
 exports.planImport = planImport;
 const authoring_1 = require("./authoring");
 const cfg_1 = require("./cfg");
+const memories_1 = require("./db/memories");
 const keys_1 = require("./keys");
 const policy_1 = require("./policy");
 const redact_1 = require("./redact");
@@ -62,9 +63,9 @@ const MEMORY_FIELDS = {
     content: text(cfg_1.CONTENT_MAX_CHARS),
     conflict_key: legacyOr(authoringCheck(authoring_1.conflictKeyProblem)),
     cardinality: oneOf(policy_1.CARDINALITIES),
-    value_text: authoringCheck(authoring_1.valueTextProblem),
-    keywords: authoringCheck(authoring_1.keywordsProblem),
-    anchors: authoringCheck(authoring_1.anchorsProblem),
+    value_text: authoringCheck(memories_1.storedKeyProblem.valueText),
+    keywords: authoringCheck(memories_1.storedKeyProblem.keywords),
+    anchors: authoringCheck(memories_1.storedKeyProblem.anchors),
     epistemic: oneOf(policy_1.EPISTEMIC_STATES),
     origin: oneOf(policy_1.MEMORY_ORIGINS),
     state: oneOf(policy_1.MEMORY_STATES),
@@ -116,9 +117,9 @@ function redactedMemoryLine(line) {
         title: (0, redact_1.redactWithin)(line.title, cfg_1.TITLE_MAX_CHARS),
         abstract: (0, redact_1.redactWithin)(line.abstract, cfg_1.ABSTRACT_MAX_CHARS),
         content: (0, redact_1.redactWithin)(line.content, cfg_1.CONTENT_MAX_CHARS),
-        value_text: scrubbed(line.value_text),
-        keywords: scrubbed(line.keywords),
-        anchors: line.anchors.map(scrubbed),
+        value_text: memories_1.storedKeys.valueText(line.value_text),
+        keywords: memories_1.storedKeys.keywords(line.keywords),
+        anchors: memories_1.storedKeys.anchors(line.anchors),
     };
 }
 function redactedTransitionLine(line) {

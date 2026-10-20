@@ -2,15 +2,11 @@ import {
   ANCHOR_MAX_CHARS,
   ANCHORS_MAX_ITEMS,
   type AuthoringProblem,
-  anchorsProblem,
   CONFLICT_KEY_MAX_CHARS,
   CONFLICT_KEY_PATTERN,
   conflictKeyProblem,
   KEYWORDS_MAX_CHARS,
-  keywordsProblem,
-  redactedAnchorProblem,
   VALUE_TEXT_MAX_CHARS,
-  valueTextProblem,
 } from "./authoring";
 import {
   ABSTRACT_MAX_CHARS,
@@ -42,7 +38,7 @@ import {
   type StoreOutcome,
   type StoreResult,
   store,
-  storedKeys,
+  storedKeyProblem,
   updateMemory,
 } from "./db/memories";
 import { relate } from "./db/relations";
@@ -254,22 +250,14 @@ function valueTextFor(
   if (value === undefined) {
     return "";
   }
-  const valueText = writtenKey(value, isString, valueTextProblem);
-  if (isToolError(valueText)) {
-    return valueText;
-  }
-  return authoringError(valueTextProblem(storedKeys.valueText(valueText))) ?? valueText;
+  return writtenKey(value, isString, storedKeyProblem.valueText);
 }
 
 function keywordsArgument(args: Record<string, unknown>): string | undefined | ToolErrorValue {
   if (args.keywords === undefined) {
     return undefined;
   }
-  const keywords = writtenKey(args.keywords, isString, keywordsProblem);
-  if (isToolError(keywords)) {
-    return keywords;
-  }
-  return authoringError(keywordsProblem(storedKeys.keywords(keywords))) ?? keywords;
+  return writtenKey(args.keywords, isString, storedKeyProblem.keywords);
 }
 
 function anchorsArgument(
@@ -278,11 +266,7 @@ function anchorsArgument(
   if (args.anchors === undefined) {
     return undefined;
   }
-  const anchors = writtenKey(args.anchors, isStringList, anchorsProblem);
-  if (isToolError(anchors)) {
-    return anchors;
-  }
-  return authoringError(redactedAnchorProblem(anchors, storedKeys.anchors(anchors))) ?? anchors;
+  return writtenKey(args.anchors, isStringList, storedKeyProblem.anchors);
 }
 
 function optionalResolution(

@@ -1,3 +1,10 @@
+import {
+  type AuthoringProblem,
+  anchorsProblem,
+  keywordsProblem,
+  redactedAnchorProblem,
+  valueTextProblem,
+} from "../authoring";
 import { ABSTRACT_MAX_CHARS, CONTENT_MAX_CHARS, TITLE_MAX_CHARS } from "../cfg";
 import { embedPassage, modelCached } from "../embeddings";
 import { newId } from "../ids";
@@ -186,6 +193,43 @@ export const storedKeys = {
   valueText: storedKeyText,
   keywords: storedKeyText,
   anchors: (anchors: readonly string[]): string[] => anchors.map(storedKeyText),
+} as const;
+
+type KeyProblem = (value: unknown) => AuthoringProblem | undefined;
+
+function isText(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isTextList(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every(isText);
+}
+
+function asStored<Key>(
+  writtenProblem: KeyProblem,
+  isKey: (value: unknown) => value is Key,
+  storedProblem: (key: Key) => AuthoringProblem | undefined,
+): KeyProblem {
+  return (value) => {
+    const problem = writtenProblem(value);
+    if (problem !== undefined) {
+      return problem;
+    }
+    if (!isKey(value)) {
+      throw new TypeError("an authoring check accepted a value of the wrong type");
+    }
+    return storedProblem(value);
+  };
+}
+
+export const storedKeyProblem = {
+  valueText: asStored(valueTextProblem, isText, (text) =>
+    valueTextProblem(storedKeys.valueText(text)),
+  ),
+  keywords: asStored(keywordsProblem, isText, (text) => keywordsProblem(storedKeys.keywords(text))),
+  anchors: asStored(anchorsProblem, isTextList, (anchors) =>
+    redactedAnchorProblem(anchors, storedKeys.anchors(anchors)),
+  ),
 } as const;
 
 export function deriveAbstract(content: string): string {

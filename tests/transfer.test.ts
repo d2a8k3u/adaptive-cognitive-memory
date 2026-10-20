@@ -12,6 +12,46 @@ import { FAKE_SECRETS } from "./fixtures/secrets";
 const SECRET = FAKE_SECRETS.githubClassicLowercase;
 const SUPERSEDED_ID = "01J8TRANSFER0000000000OLD1";
 const REPLACEMENT_ID = "01J8TRANSFER0000000000REP1";
+const LABELED_SECRET = "token=abcdefgh";
+const URL_CREDENTIAL = "https://:p@";
+const SECRET_ANCHOR_ERROR = {
+  field: "anchors",
+  message:
+    "anchors[0] contains a secret; anchors match raw tool input, so a redacted anchor never fires",
+};
+const KEYS_REDACTION_WOULD_CHANGE = [
+  {
+    name: "two distinct secret anchors that redaction merges",
+    keys: { anchors: [FAKE_SECRETS.awsAccessKeyId, FAKE_SECRETS.awsAccessKeyIdNeighbour] },
+    error: SECRET_ANCHOR_ERROR,
+  },
+  {
+    name: "a 200-character anchor whose url credential redaction grows",
+    keys: { anchors: [`${URL_CREDENTIAL}${"x".repeat(200 - URL_CREDENTIAL.length)}`] },
+    error: SECRET_ANCHOR_ERROR,
+  },
+  {
+    name: "a 200-character anchor whose labeled secret redaction grows",
+    keys: { anchors: [`${"x".repeat(200 - LABELED_SECRET.length)}${LABELED_SECRET}`] },
+    error: SECRET_ANCHOR_ERROR,
+  },
+  {
+    name: "300-character keywords whose labeled secret redaction grows",
+    keys: { keywords: `${"w".repeat(300 - LABELED_SECRET.length - 1)} ${LABELED_SECRET}` },
+    error: {
+      field: "keywords",
+      message: "keywords must be a string of at most 300 characters",
+    },
+  },
+  {
+    name: "a 200-character value_text whose labeled secret redaction grows",
+    keys: { value_text: `${"v".repeat(200 - LABELED_SECRET.length)}${LABELED_SECRET}` },
+    error: {
+      field: "value_text",
+      message: "value_text must be a string of at most 200 characters",
+    },
+  },
+];
 
 interface MemorySeed {
   id: string;
@@ -178,7 +218,7 @@ describe("cli export and import", () => {
     });
   });
 
-  it("redacts a secret in every imported text field before it is stored", async () => {
+  it("redacts a secret in every imported text field but the anchors before it is stored", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     const target = pluginEnv();
@@ -196,7 +236,6 @@ describe("cli export and import", () => {
           content: `content ${secret}`,
           value_text: `value ${secret}`,
           keywords: `keywords ${secret}`,
-          anchors: [`anchor ${secret}`],
         },
         {
           record: "transition",
@@ -217,7 +256,7 @@ describe("cli export and import", () => {
     expect(
       withDb(target, (db) => ({
         memory: db
-          .prepare("SELECT title, abstract, content, value_text, keywords, anchors FROM memories")
+          .prepare("SELECT title, abstract, content, value_text, keywords FROM memories")
           .get(),
         evidence: db.prepare("SELECT evidence FROM transitions").pluck().get(),
       })),
@@ -228,7 +267,6 @@ describe("cli export and import", () => {
         content: `content ${masked}`,
         value_text: `value ${masked}`,
         keywords: `keywords ${masked}`,
-        anchors: JSON.stringify([`anchor ${masked}`]),
       },
       evidence: `evidence ${masked}`,
     });
@@ -316,20 +354,6 @@ describe("cli export and import", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const source = pluginEnv();
     const target = pluginEnv();
-    const labeledSecret = "token=abcdefgh";
-    const urlCredential = "https://:p@";
-    const secretAnchor = {
-      field: "anchors",
-      message:
-        "anchors[0] contains a secret; anchors match raw tool input, so a redacted anchor never fires",
-    };
-    const rejectedKeys = [
-      { anchors: [FAKE_SECRETS.awsAccessKeyId, FAKE_SECRETS.awsAccessKeyIdNeighbour] },
-      { anchors: [`${urlCredential}${"x".repeat(200 - urlCredential.length)}`] },
-      { anchors: [`${"x".repeat(200 - labeledSecret.length)}${labeledSecret}`] },
-      { keywords: `${"w".repeat(300 - labeledSecret.length - 1)} ${labeledSecret}` },
-      { value_text: `${"v".repeat(200 - labeledSecret.length)}${labeledSecret}` },
-    ];
     const opened = openDatabase(loadConfig(source));
     const projectDir = mkdtempSync(join(tmpdir(), "acm-transfer-project-"));
     const deps: ToolDeps = {
@@ -356,33 +380,19 @@ describe("cli export and import", () => {
         ...keys,
       });
     const outcomes = [];
-    for (const [index, keys] of rejectedKeys.entries()) {
+    for (const [index, { keys }] of KEYS_REDACTION_WOULD_CHANGE.entries()) {
       outcomes.push(await storeWith(index, keys));
     }
-    const kept = await storeWith(rejectedKeys.length, { keywords: `deploy ${labeledSecret}` });
+    const kept = await storeWith(KEYS_REDACTION_WOULD_CHANGE.length, {
+      keywords: `deploy ${LABELED_SECRET}`,
+    });
     opened.db.close();
     const file = join(mkdtempSync(join(tmpdir(), "acm-transfer-files-")), "keys.jsonl");
 
     const codes = [await exportTo(source, file), await importFrom(target, file)];
 
     expect({ outcomes, kept, codes }).toEqual({
-      outcomes: [
-        { error: secretAnchor },
-        { error: secretAnchor },
-        { error: secretAnchor },
-        {
-          error: {
-            field: "keywords",
-            message: "keywords must be a string of at most 300 characters",
-          },
-        },
-        {
-          error: {
-            field: "value_text",
-            message: "value_text must be a string of at most 200 characters",
-          },
-        },
-      ],
+      outcomes: KEYS_REDACTION_WOULD_CHANGE.map(({ error }) => ({ error })),
       kept: { id: expect.any(String), action: "created" },
       codes: [0, 0],
     });
@@ -505,6 +515,15 @@ describe("parseImport", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.ok ? [] : parsed.errors).toEqual([expect.stringMatching(error)]);
   });
+
+  it.each(KEYS_REDACTION_WOULD_CHANGE)(
+    "rejects $name with the store's message",
+    ({ keys, error }) => {
+      const parsed = parseImport(fileOf(EXPORT_HEADER, { ...VALID_MEMORY, ...keys }));
+
+      expect(parsed.ok ? [] : parsed.errors).toEqual([`line 2: ${error.message}`]);
+    },
+  );
 
   it("accepts a title of exactly 200 characters", () => {
     const parsed = parseImport(fileOf(EXPORT_HEADER, { ...VALID_MEMORY, title: "t".repeat(200) }));
