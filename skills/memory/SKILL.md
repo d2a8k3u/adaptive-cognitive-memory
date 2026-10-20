@@ -63,7 +63,9 @@ A rejection message names the resolution to use instead. An exact duplicate of a
 ## Reading and curating
 
 - Recall shows abstracts with the full id; read the body with `memory_get`.
-- `memory_update` edits title, abstract or content in place; revoked memories are immutable. Importance is derived from feedback, never typed.
+- `memory_list` browses memories newest first, without content, filtered by state, kind, type or scope; pass its `next_cursor` as `before` for the next page. `project: "all"` shows every project's memories, read-only.
+- `memory_update` edits title, abstract, content, keywords or anchors in place; keywords and anchors replace the stored value whole. Revoked memories are immutable, and scope or kind cannot change: store the memory again, then delete the old one. Importance is derived from feedback, never typed.
+- For a full review with the user, use the `memory-curate` skill.
 - `memory_relate` is for load-bearing connections only, at most 20 per memory.
 - `memory_status` shows what the memory holds and does for this project: counts, the recall switch, how often recall injects, open capture moments and the last injections.
 - `/memory-recall off` stops recall in this project while storing keeps working; `/memory-recall on` restores it.

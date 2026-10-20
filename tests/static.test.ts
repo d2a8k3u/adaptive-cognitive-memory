@@ -16,6 +16,7 @@ import {
   valueTextProblem,
 } from "../src/authoring";
 import { ABSTRACT_MAX_CHARS, CONTENT_MAX_CHARS, TITLE_MAX_CHARS } from "../src/cfg";
+import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, LIST_PAGE_MAX_CHARS } from "../src/db/listing";
 import { MAX_HEAD_WORDS } from "../src/keys";
 import { hostToolName, MEMORY_SERVER_NAME } from "../src/toolnames";
 import { TOOL_DEFINITIONS, type ToolDefinition } from "../src/tools";
@@ -501,6 +502,89 @@ describe("authoring standard docs", () => {
     expect(readmeLine("| `import <file>` |")).toContain(
       'every memory must pass the same key rules as `memory_store` (conflict key, value, keywords, anchors), except that a legacy empty `conflict_key` (`""`) is kept',
     );
+  });
+});
+
+const CURATE_SKILL_DIR = join(process.cwd(), "skills", "memory-curate");
+const CURATE_CONFIRMATION =
+  "Propose every change and wait for the user's confirmation before you delete, supersede or update a memory; never run this unattended.";
+const CURATE_CROSS_PROJECT =
+  'A memory that `memory_list` finds only with `project: "all"` belongs to another project: it is read-only here and can be changed only from a session in its own project.';
+
+function curateSkill(): string {
+  return readFileSync(join(CURATE_SKILL_DIR, "SKILL.md"), "utf8");
+}
+
+function frontmatter(text: string): string {
+  return text.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
+}
+
+describe("memory-curate skill", () => {
+  it("declares the name memory-curate, distinct from the predecessor plugin's memory-maintain, and a description", () => {
+    const header = frontmatter(curateSkill());
+
+    expect({
+      name: header.match(/^name: (.+)$/m)?.[1],
+      description: (header.match(/^description: >?([\s\S]*)$/m)?.[1] ?? "").trim() !== "",
+    }).toEqual({ name: "memory-curate", description: true });
+  });
+
+  it("names only registered memory tools", () => {
+    const registered = new Set(TOOL_DEFINITIONS.map((tool) => tool.name));
+    const named = [...curateSkill().matchAll(/memory_[a-z_]+/g)].map((match) => match[0]);
+
+    expect(named.length).toBeGreaterThan(0);
+    expect(named.filter((name) => !registered.has(name))).toEqual([]);
+  });
+
+  it("waits for the user's confirmation and keeps other projects' memories read-only", () => {
+    const text = curateSkill();
+
+    expect({
+      confirmation: text.includes(CURATE_CONFIRMATION),
+      crossProject: text.includes(CURATE_CROSS_PROJECT),
+    }).toEqual({ confirmation: true, crossProject: true });
+  });
+
+  it("links the authoring reference by a path that resolves and restates no limit", () => {
+    const text = curateSkill();
+    const linked = text.match(/\]\(([^)]*memory\/references\/authoring\.md)\)/)?.[1];
+
+    expect(text).toContain(AUTHORING_REFERENCE_PATH);
+    expect(linked !== undefined && existsSync(join(CURATE_SKILL_DIR, linked))).toBe(true);
+    expect(RENDERED_LIMITS.filter((limit) => text.includes(limit))).toEqual([]);
+  });
+});
+
+describe("browse and curate docs", () => {
+  it("the README memory_list row names the filters, the cursor, the limits from their owner and the read-only project all", () => {
+    const row = readmeLine("| `memory_list` |");
+
+    expect(row).toContain("`state`, `kind`, `type`, `scope`");
+    expect(row).toContain("`before` (the `next_cursor` of the previous page)");
+    expect(row).toContain(`\`limit\` (1–${LIST_LIMIT_MAX}, default ${LIST_LIMIT_DEFAULT})`);
+    expect(row).toContain('`project: "all"` lists every project\'s memories read-only');
+    expect(row).toContain(`${LIST_PAGE_MAX_CHARS.toLocaleString("en-US")} characters`);
+  });
+
+  it("the README memory_update row names the key edits and the fixed scope and kind, and the README names the curate skill", () => {
+    const row = readmeLine("| `memory_update` |");
+
+    expect(row).toContain("`keywords`, `anchors`");
+    expect(row).toContain("replace the stored value whole");
+    expect(row).toContain("`scope` or `kind`");
+    expect(readFileSync(join(process.cwd(), "README.md"), "utf8")).toContain("`memory-curate`");
+  });
+
+  it("the memory skill's curating section names memory_list, the key edits and the curate skill", () => {
+    const section = markdownSection(
+      readFileSync(join(process.cwd(), "skills", "memory", "SKILL.md"), "utf8"),
+      "## Reading and curating",
+    ).join("\n");
+
+    expect(section).toContain("`memory_list`");
+    expect(section).toContain("keywords or anchors");
+    expect(section).toContain("`memory-curate`");
   });
 });
 
