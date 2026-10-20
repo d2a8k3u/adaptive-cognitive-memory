@@ -4,6 +4,7 @@ exports.TOOL_DEFINITIONS = void 0;
 exports.isToolError = isToolError;
 exports.memoryStore = memoryStore;
 exports.memorySearch = memorySearch;
+exports.memoryList = memoryList;
 exports.memoryGet = memoryGet;
 exports.memoryUpdate = memoryUpdate;
 exports.memoryDelete = memoryDelete;
@@ -15,6 +16,7 @@ const authoring_1 = require("./authoring");
 const cfg_1 = require("./cfg");
 const database_1 = require("./db/database");
 const feedback_1 = require("./db/feedback");
+const listing_1 = require("./db/listing");
 const memories_1 = require("./db/memories");
 const relations_1 = require("./db/relations");
 const status_1 = require("./db/status");
@@ -28,6 +30,7 @@ const status_2 = require("./status");
 const ID_MAX_CHARS = 26;
 const SEARCH_LIMIT_MAX = 100;
 const FEEDBACK_IDS_MAX_ITEMS = 20;
+const ALL_PROJECTS = "all";
 function isToolError(value) {
     return typeof value === "object" && value !== null && "error" in value;
 }
@@ -303,6 +306,67 @@ async function memorySearch(deps, args) {
         };
     });
 }
+function optionalCursor(args) {
+    const value = args.before;
+    if (value === undefined) {
+        return undefined;
+    }
+    return isString(value) && listing_1.ULID_PATTERN.test(value)
+        ? value
+        : fieldError("before", "before must be the next_cursor of the previous page, a 26-character id");
+}
+function listPartition(args, projectId) {
+    const value = args.project;
+    if (value === undefined) {
+        return { kind: "visible", projectId };
+    }
+    return value === ALL_PROJECTS
+        ? { kind: "all" }
+        : fieldError("project", `project must be "${ALL_PROJECTS}" to list every project read-only, or left out`);
+}
+function parseListArgs(args, projectId) {
+    const state = optionalEnum(args, "state", policy_1.MEMORY_STATES);
+    if (isToolError(state)) {
+        return state;
+    }
+    const kind = optionalEnum(args, "kind", policy_1.MEMORY_KINDS);
+    if (isToolError(kind)) {
+        return kind;
+    }
+    const type = optionalEnum(args, "type", policy_1.MEMORY_TYPES);
+    if (isToolError(type)) {
+        return type;
+    }
+    const scope = optionalEnum(args, "scope", policy_1.MEMORY_SCOPES);
+    if (isToolError(scope)) {
+        return scope;
+    }
+    const before = optionalCursor(args);
+    if (isToolError(before)) {
+        return before;
+    }
+    const limit = optionalInt(args, "limit", 1, listing_1.LIST_LIMIT_MAX);
+    if (isToolError(limit)) {
+        return limit;
+    }
+    const partition = listPartition(args, projectId);
+    if (isToolError(partition)) {
+        return partition;
+    }
+    return {
+        partition,
+        filters: { state, kind, type, scope },
+        before,
+        limit: limit ?? listing_1.LIST_LIMIT_DEFAULT,
+    };
+}
+async function memoryList(deps, args) {
+    const request = parseListArgs(args, deps.projectId);
+    if (isToolError(request)) {
+        return request;
+    }
+    return rejectionsAsToolErrors(() => (0, listing_1.listMemories)(deps.env.db, request));
+}
 async function memoryGet(deps, args) {
     const id = requiredString(args, "id", ID_MAX_CHARS);
     if (isToolError(id)) {
@@ -394,6 +458,7 @@ async function memoryStatus(deps) {
 }
 const ID_PROPERTY = { type: "string", maxLength: ID_MAX_CHARS };
 const TYPE_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_TYPES] };
+const KIND_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_KINDS] };
 const SCOPE_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_SCOPES] };
 const TITLE_PROPERTY = { type: "string", maxLength: cfg_1.TITLE_MAX_CHARS };
 const CONTENT_PROPERTY = { type: "string", maxLength: cfg_1.CONTENT_MAX_CHARS };
@@ -408,7 +473,7 @@ exports.TOOL_DEFINITIONS = [
                 title: TITLE_PROPERTY,
                 content: CONTENT_PROPERTY,
                 type: TYPE_PROPERTY,
-                kind: { type: "string", enum: [...policy_1.MEMORY_KINDS] },
+                kind: KIND_PROPERTY,
                 conflict_key: {
                     type: "string",
                     maxLength: authoring_1.CONFLICT_KEY_MAX_CHARS,
@@ -451,6 +516,23 @@ exports.TOOL_DEFINITIONS = [
             required: ["query"],
         },
         run: memorySearch,
+    },
+    {
+        name: "memory_list",
+        description: 'List memories newest first, without content. For the next page pass next_cursor as before; project "all" lists every project read-only.',
+        inputSchema: {
+            type: "object",
+            properties: {
+                state: { type: "string", enum: [...policy_1.MEMORY_STATES] },
+                kind: KIND_PROPERTY,
+                type: TYPE_PROPERTY,
+                scope: SCOPE_PROPERTY,
+                before: ID_PROPERTY,
+                limit: { type: "integer", minimum: 1, maximum: listing_1.LIST_LIMIT_MAX },
+                project: { type: "string", enum: [ALL_PROJECTS] },
+            },
+        },
+        run: memoryList,
     },
     {
         name: "memory_get",

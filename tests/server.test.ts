@@ -149,7 +149,7 @@ beforeAll(() => {
 }, 200_000);
 
 describe("server", () => {
-  it("lists the nine memory tools", async () => {
+  it("lists the ten memory tools", async () => {
     const { client } = await connect();
     const listed = await client.listTools();
     expect(listed.tools.map((tool) => tool.name).sort()).toEqual([
@@ -157,6 +157,7 @@ describe("server", () => {
       "memory_doctor",
       "memory_feedback",
       "memory_get",
+      "memory_list",
       "memory_relate",
       "memory_search",
       "memory_status",

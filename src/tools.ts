@@ -21,6 +21,15 @@ import {
 import { isStorageRejection } from "./db/database";
 import { type FeedbackMemory, recordFeedback } from "./db/feedback";
 import {
+  LIST_LIMIT_DEFAULT,
+  LIST_LIMIT_MAX,
+  type ListPage,
+  type ListPartition,
+  type ListRequest,
+  listMemories,
+  ULID_PATTERN,
+} from "./db/listing";
+import {
   type Candidate,
   deleteMemory,
   get,
@@ -46,6 +55,7 @@ import {
   CARDINALITIES,
   MEMORY_KINDS,
   MEMORY_SCOPES,
+  MEMORY_STATES,
   MEMORY_TYPES,
   RESOLUTION_ACTIONS,
   type ResolutionAction,
@@ -73,6 +83,7 @@ export interface NeedsResolutionValue {
 const ID_MAX_CHARS = 26;
 const SEARCH_LIMIT_MAX = 100;
 const FEEDBACK_IDS_MAX_ITEMS = 20;
+const ALL_PROJECTS = "all";
 
 export function isToolError(value: unknown): value is ToolErrorValue {
   return typeof value === "object" && value !== null && "error" in value;
@@ -449,6 +460,86 @@ export interface SearchToolResult {
   degraded?: DegradedFlags;
 }
 
+function optionalCursor(args: Record<string, unknown>): string | undefined | ToolErrorValue {
+  const value = args.before;
+  if (value === undefined) {
+    return undefined;
+  }
+  return isString(value) && ULID_PATTERN.test(value)
+    ? value
+    : fieldError(
+        "before",
+        "before must be the next_cursor of the previous page, a 26-character id",
+      );
+}
+
+function listPartition(
+  args: Record<string, unknown>,
+  projectId: string,
+): ListPartition | ToolErrorValue {
+  const value = args.project;
+  if (value === undefined) {
+    return { kind: "visible", projectId };
+  }
+  return value === ALL_PROJECTS
+    ? { kind: "all" }
+    : fieldError(
+        "project",
+        `project must be "${ALL_PROJECTS}" to list every project read-only, or left out`,
+      );
+}
+
+function parseListArgs(
+  args: Record<string, unknown>,
+  projectId: string,
+): ListRequest | ToolErrorValue {
+  const state = optionalEnum(args, "state", MEMORY_STATES);
+  if (isToolError(state)) {
+    return state;
+  }
+  const kind = optionalEnum(args, "kind", MEMORY_KINDS);
+  if (isToolError(kind)) {
+    return kind;
+  }
+  const type = optionalEnum(args, "type", MEMORY_TYPES);
+  if (isToolError(type)) {
+    return type;
+  }
+  const scope = optionalEnum(args, "scope", MEMORY_SCOPES);
+  if (isToolError(scope)) {
+    return scope;
+  }
+  const before = optionalCursor(args);
+  if (isToolError(before)) {
+    return before;
+  }
+  const limit = optionalInt(args, "limit", 1, LIST_LIMIT_MAX);
+  if (isToolError(limit)) {
+    return limit;
+  }
+  const partition = listPartition(args, projectId);
+  if (isToolError(partition)) {
+    return partition;
+  }
+  return {
+    partition,
+    filters: { state, kind, type, scope },
+    before,
+    limit: limit ?? LIST_LIMIT_DEFAULT,
+  };
+}
+
+export async function memoryList(
+  deps: ToolDeps,
+  args: Record<string, unknown>,
+): Promise<ListPage | ToolErrorValue> {
+  const request = parseListArgs(args, deps.projectId);
+  if (isToolError(request)) {
+    return request;
+  }
+  return rejectionsAsToolErrors(() => listMemories(deps.env.db, request));
+}
+
 export async function memoryGet(
   deps: ToolDeps,
   args: Record<string, unknown>,
@@ -588,6 +679,7 @@ export interface ToolDefinition {
 
 const ID_PROPERTY = { type: "string", maxLength: ID_MAX_CHARS };
 const TYPE_PROPERTY = { type: "string", enum: [...MEMORY_TYPES] };
+const KIND_PROPERTY = { type: "string", enum: [...MEMORY_KINDS] };
 const SCOPE_PROPERTY = { type: "string", enum: [...MEMORY_SCOPES] };
 const TITLE_PROPERTY = { type: "string", maxLength: TITLE_MAX_CHARS };
 const CONTENT_PROPERTY = { type: "string", maxLength: CONTENT_MAX_CHARS };
@@ -604,7 +696,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
         title: TITLE_PROPERTY,
         content: CONTENT_PROPERTY,
         type: TYPE_PROPERTY,
-        kind: { type: "string", enum: [...MEMORY_KINDS] },
+        kind: KIND_PROPERTY,
         conflict_key: {
           type: "string",
           maxLength: CONFLICT_KEY_MAX_CHARS,
@@ -648,6 +740,24 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
       required: ["query"],
     },
     run: memorySearch,
+  },
+  {
+    name: "memory_list",
+    description:
+      'List memories newest first, without content. For the next page pass next_cursor as before; project "all" lists every project read-only.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        state: { type: "string", enum: [...MEMORY_STATES] },
+        kind: KIND_PROPERTY,
+        type: TYPE_PROPERTY,
+        scope: SCOPE_PROPERTY,
+        before: ID_PROPERTY,
+        limit: { type: "integer", minimum: 1, maximum: LIST_LIMIT_MAX },
+        project: { type: "string", enum: [ALL_PROJECTS] },
+      },
+    },
+    run: memoryList,
   },
   {
     name: "memory_get",

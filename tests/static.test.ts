@@ -18,6 +18,7 @@ import {
 import { ABSTRACT_MAX_CHARS, CONTENT_MAX_CHARS, TITLE_MAX_CHARS } from "../src/cfg";
 import { MAX_HEAD_WORDS } from "../src/keys";
 import { hostToolName, MEMORY_SERVER_NAME } from "../src/toolnames";
+import { TOOL_DEFINITIONS, type ToolDefinition } from "../src/tools";
 import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
 
 const DIST_DIR = join(process.cwd(), "dist");
@@ -503,6 +504,32 @@ describe("authoring standard docs", () => {
   });
 });
 
+const LIST_TOOL_MAX_CHARS = 600;
+const DESCRIPTION_MAX_CHARS = 4096;
+const ALL_TOOLS_MAX_CHARS = 5500;
+
+function definitionChars(tool: ToolDefinition): number {
+  return tool.description.length + JSON.stringify(tool.inputSchema).length;
+}
+
+describe("tool definition size (NFR-12)", () => {
+  it("keeps memory_list within 600 characters, every description under 4 096 and all tools within 5 500", () => {
+    const listTool = TOOL_DEFINITIONS.find((tool) => tool.name === "memory_list");
+
+    expect(listTool === undefined ? Infinity : definitionChars(listTool)).toBeLessThanOrEqual(
+      LIST_TOOL_MAX_CHARS,
+    );
+    expect(
+      TOOL_DEFINITIONS.filter((tool) => tool.description.length >= DESCRIPTION_MAX_CHARS).map(
+        (tool) => tool.name,
+      ),
+    ).toEqual([]);
+    expect(
+      TOOL_DEFINITIONS.reduce((chars, tool) => chars + definitionChars(tool), 0),
+    ).toBeLessThanOrEqual(ALL_TOOLS_MAX_CHARS);
+  });
+});
+
 describe("static dist gates", () => {
   it("ships no import path from the predecessor memory plugins (AC-17)", () => {
     const offenders = distJsFiles().filter((file) =>
@@ -533,10 +560,12 @@ describe("static dist gates", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("loads no LLM or API client in the hook path (AC-21)", () => {
-    const closure = hookClosure();
+  it("loads no LLM or API client in the hook path or the memory listing (AC-21)", () => {
+    const listing = join(DIST_DIR, "db", "listing.js");
+    const closure = [HOOK_ENTRY, listing].flatMap((entry) => hookClosure(entry));
     expect(closure).toContain(join(DIST_DIR, "search.js"));
     expect(closure).toContain(join(DIST_DIR, "embeddings.js"));
+    expect(closure).toContain(listing);
     const offenders: string[] = [];
     for (const file of closure) {
       for (const specifier of specifiersOf(readFileSync(file, "utf8"))) {

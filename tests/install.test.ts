@@ -13,6 +13,7 @@ const EXPECTED_TOOLS = [
   "memory_doctor",
   "memory_feedback",
   "memory_get",
+  "memory_list",
   "memory_relate",
   "memory_search",
   "memory_status",
@@ -21,7 +22,7 @@ const EXPECTED_TOOLS = [
 ];
 
 describe("install", () => {
-  it("installs from the committed tree within 60 s and lists the nine tools over stdio", {
+  it("installs from the committed tree within 60 s and lists the ten tools over stdio", {
     timeout: 240_000,
   }, async () => {
     const cloneDir = mkdtempSync(join(tmpdir(), "acm-install-"));

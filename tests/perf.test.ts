@@ -1,8 +1,9 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { type OpenedDb, openDatabase } from "../src/db/database";
+import { LIST_LIMIT_MAX, type ListRequest, listMemories } from "../src/db/listing";
 import type { MemoryType } from "../src/db/memories";
 import { resolveProjectId } from "../src/ids";
 import { recall } from "../src/search";
@@ -19,6 +20,8 @@ const READ_RUNS = 50;
 const READ_P95_CAP_MS = 300;
 const READ_ANCHOR = "billing/tax.py";
 const READ_ANCHORED_ID = `01J8PERF${"2".padStart(18, "0")}`;
+const LIST_WALKS = 3;
+const LIST_P95_CAP_MS = 20;
 const SIZE_CAP_BYTES = 25 * 1024 * 1024;
 const HOOK_TIMEOUT_FLOOR_S = 5;
 const RECALL_PROMPT = "how should we handle database migrations under load";
@@ -261,6 +264,54 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
         `search p95 @${SEED_ROWS}: ${Math.round(searchP95)} ms (cap ${SEARCH_P95_CAP_MS})`,
       );
       expect(searchP95).toBeLessThanOrEqual(SEARCH_P95_CAP_MS);
+    } finally {
+      opened.db.close();
+    }
+  });
+
+  it("memory_list pages hold p95 under 20 ms with one statement per page", {
+    timeout: 60_000,
+  }, () => {
+    const opened: OpenedDb = openDatabase(seedConfig(pluginData, testModelCacheDir));
+    try {
+      const prepare = vi.spyOn(opened.db, "prepare");
+      const walks: readonly Omit<ListRequest, "before">[] = [
+        {
+          partition: { kind: "visible", projectId },
+          filters: { state: "active" },
+          limit: LIST_LIMIT_MAX,
+        },
+        { partition: { kind: "all" }, filters: {}, limit: LIST_LIMIT_MAX },
+      ];
+      const pageMs: number[] = [];
+      const listedPerWalk: number[] = [];
+      for (let walk = 0; walk < LIST_WALKS; walk += 1) {
+        for (const request of walks) {
+          let before: string | undefined;
+          let listed = 0;
+          do {
+            const startedAt = performance.now();
+            const page = listMemories(opened.db, { ...request, before });
+            pageMs.push(performance.now() - startedAt);
+            listed += page.rows.length;
+            before = page.next_cursor;
+          } while (before !== undefined);
+          listedPerWalk.push(listed);
+        }
+      }
+      const listP95 = percentile(pageMs, 0.95);
+      console.log(
+        `NFR-10 memory_list page p95 @${SEED_ROWS}: ${listP95.toFixed(2)} ms (cap ${LIST_P95_CAP_MS}) over ${pageMs.length} pages, ${prepare.mock.calls.length} statements`,
+      );
+
+      expect({
+        listed: listedPerWalk,
+        statements: prepare.mock.calls.length,
+      }).toEqual({
+        listed: Array.from({ length: LIST_WALKS * walks.length }, () => SEED_ROWS),
+        statements: pageMs.length,
+      });
+      expect(listP95).toBeLessThanOrEqual(LIST_P95_CAP_MS);
     } finally {
       opened.db.close();
     }
