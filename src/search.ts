@@ -60,6 +60,13 @@ export interface EarlierRequest {
   readonly now: string;
 }
 
+export interface TicketRequest {
+  readonly projectId: string;
+  readonly ticket: string;
+  readonly now: string;
+  readonly limit: number;
+}
+
 export interface PromptRequest {
   readonly projectId: string;
   readonly modelCacheDir: string;
@@ -82,6 +89,7 @@ export interface ToolRequest {
 }
 
 export const DEFAULT_RECALL_LIMIT = 10;
+export const TICKET_ROWS_MAX = 3;
 
 const RRF_K = 60;
 const FTS_QUERY_MAX_TERMS = 32;
@@ -92,6 +100,7 @@ const ACTIVE_STATE = "active";
 const RECALLABLE_ROW = "state = 'active' AND (invalid_at IS NULL OR invalid_at > ?)";
 const RECALLABLE_MEMORY = "m.state = 'active' AND (m.invalid_at IS NULL OR m.invalid_at > ?)";
 const KEY_COLUMNS_FILTER = "{conflict_key keywords}";
+const TICKET_COLUMNS_FILTER = "{keywords}";
 const MEMORY_FIELDS = `m.id, m.kind, m.epistemic, m.scope, m.abstract,
   COALESCE(m.valid_from, m.created_at) AS validFrom, m.conflict_key AS conflictKey, m.keywords,
   m.anchors`;
@@ -245,6 +254,25 @@ export function sessionEarlierMemories(db: Db, request: EarlierRequest): Recalle
     .all(request.sessionId, request.now, request.projectId) as StoredMemory[];
 }
 
+export function ticketCandidates(db: Db, request: TicketRequest): RecalledMemory[] {
+  return db
+    .prepare(
+      `SELECT ${MEMORY_FIELDS} FROM memories m
+       WHERE ${RECALLABLE_MEMORY} AND ${VISIBLE_TO_PROJECT}
+         AND (${anchorMembership(1)}
+              OR m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?))
+       ORDER BY m.importance DESC, m.id
+       LIMIT ?`,
+    )
+    .all(
+      request.now,
+      request.projectId,
+      request.ticket,
+      `${TICKET_COLUMNS_FILTER} : ${ftsPhrase(request.ticket)}`,
+      request.limit,
+    ) as StoredMemory[];
+}
+
 export async function promptCandidates(
   source: RecallSource,
   request: PromptRequest,
@@ -339,20 +367,23 @@ function memoriesByIds(db: Db, ids: readonly string[], now: string): StoredMemor
     .all(now, ...distinct) as StoredMemory[];
 }
 
+function anchorMembership(anchorCount: number): string {
+  const placeholders = Array.from({ length: anchorCount }, () => "?").join(", ");
+  return `EXISTS (
+    SELECT 1 FROM json_each(CASE WHEN json_valid(m.anchors) THEN m.anchors ELSE '[]' END)
+    WHERE value IN (${placeholders})
+  )`;
+}
+
 function anchoredIds(db: Db, request: ToolRequest): string[] {
   const keys = request.lookup.anchors;
   if (keys.length === 0) {
     return [];
   }
-  const placeholders = keys.map(() => "?").join(", ");
   const rows = db
     .prepare(
       `SELECT m.id FROM memories m
-       WHERE ${RECALLABLE_MEMORY} AND ${VISIBLE_TO_PROJECT}
-         AND EXISTS (
-           SELECT 1 FROM json_each(CASE WHEN json_valid(m.anchors) THEN m.anchors ELSE '[]' END)
-           WHERE value IN (${placeholders})
-         )`,
+       WHERE ${RECALLABLE_MEMORY} AND ${VISIBLE_TO_PROJECT} AND ${anchorMembership(keys.length)}`,
     )
     .all(request.now, request.projectId, ...keys) as { id: string }[];
   return rows.map((row) => row.id);

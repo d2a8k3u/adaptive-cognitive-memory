@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_RECALL_LIMIT = void 0;
+exports.TICKET_ROWS_MAX = exports.DEFAULT_RECALL_LIMIT = void 0;
 exports.sessionStartLimit = sessionStartLimit;
 exports.anyTermMatchExpression = anyTermMatchExpression;
 exports.ftsMatchExpression = ftsMatchExpression;
@@ -8,6 +8,7 @@ exports.rrfFuse = rrfFuse;
 exports.recall = recall;
 exports.pinnedCandidates = pinnedCandidates;
 exports.sessionEarlierMemories = sessionEarlierMemories;
+exports.ticketCandidates = ticketCandidates;
 exports.promptCandidates = promptCandidates;
 exports.toolCandidates = toolCandidates;
 const cfg_1 = require("./cfg");
@@ -19,6 +20,7 @@ const keys_1 = require("./keys");
 const prompt_1 = require("./prompt");
 const session_1 = require("./session");
 exports.DEFAULT_RECALL_LIMIT = 10;
+exports.TICKET_ROWS_MAX = 3;
 const RRF_K = 60;
 const FTS_QUERY_MAX_TERMS = 32;
 const KNN_LIMIT = 10;
@@ -28,6 +30,7 @@ const ACTIVE_STATE = "active";
 const RECALLABLE_ROW = "state = 'active' AND (invalid_at IS NULL OR invalid_at > ?)";
 const RECALLABLE_MEMORY = "m.state = 'active' AND (m.invalid_at IS NULL OR m.invalid_at > ?)";
 const KEY_COLUMNS_FILTER = "{conflict_key keywords}";
+const TICKET_COLUMNS_FILTER = "{keywords}";
 const MEMORY_FIELDS = `m.id, m.kind, m.epistemic, m.scope, m.abstract,
   COALESCE(m.valid_from, m.created_at) AS validFrom, m.conflict_key AS conflictKey, m.keywords,
   m.anchors`;
@@ -120,6 +123,16 @@ function sessionEarlierMemories(db, request) {
        ORDER BY s.lastAt DESC, m.id`)
         .all(request.sessionId, request.now, request.projectId);
 }
+function ticketCandidates(db, request) {
+    return db
+        .prepare(`SELECT ${MEMORY_FIELDS} FROM memories m
+       WHERE ${RECALLABLE_MEMORY} AND ${visibility_1.VISIBLE_TO_PROJECT}
+         AND (${anchorMembership(1)}
+              OR m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?))
+       ORDER BY m.importance DESC, m.id
+       LIMIT ?`)
+        .all(request.now, request.projectId, request.ticket, `${TICKET_COLUMNS_FILTER} : ${ftsPhrase(request.ticket)}`, request.limit);
+}
 async function promptCandidates(source, request) {
     const filter = { projectId: request.projectId };
     const match = anyTermMatchExpression(request.tokens, FTS_QUERY_MAX_TERMS);
@@ -195,19 +208,21 @@ function memoriesByIds(db, ids, now) {
        WHERE ${RECALLABLE_MEMORY} AND m.id IN (${placeholders}) ORDER BY m.id`)
         .all(now, ...distinct);
 }
+function anchorMembership(anchorCount) {
+    const placeholders = Array.from({ length: anchorCount }, () => "?").join(", ");
+    return `EXISTS (
+    SELECT 1 FROM json_each(CASE WHEN json_valid(m.anchors) THEN m.anchors ELSE '[]' END)
+    WHERE value IN (${placeholders})
+  )`;
+}
 function anchoredIds(db, request) {
     const keys = request.lookup.anchors;
     if (keys.length === 0) {
         return [];
     }
-    const placeholders = keys.map(() => "?").join(", ");
     const rows = db
         .prepare(`SELECT m.id FROM memories m
-       WHERE ${RECALLABLE_MEMORY} AND ${visibility_1.VISIBLE_TO_PROJECT}
-         AND EXISTS (
-           SELECT 1 FROM json_each(CASE WHEN json_valid(m.anchors) THEN m.anchors ELSE '[]' END)
-           WHERE value IN (${placeholders})
-         )`)
+       WHERE ${RECALLABLE_MEMORY} AND ${visibility_1.VISIBLE_TO_PROJECT} AND ${anchorMembership(keys.length)}`)
         .all(request.now, request.projectId, ...keys);
     return rows.map((row) => row.id);
 }

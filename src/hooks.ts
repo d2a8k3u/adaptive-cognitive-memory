@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { readAutoMemory } from "./automemory";
+import { ticketId } from "./branch";
 import { PROMPT_GATE, PROMPT_MIN_CONTENT_TOKENS, TOOL_GATE } from "./calibration";
 import { checkpoint, cueLine, detectCue, signalDetail } from "./capture";
 import { type Config, loadConfig } from "./cfg";
@@ -96,6 +97,11 @@ interface Selection {
 interface HookReply {
   readonly context: string;
   readonly notice?: string;
+}
+
+interface StartLocation {
+  readonly projectId: string;
+  readonly ticket: string | undefined;
 }
 
 function isHookEvent(value: unknown): value is HookEvent {
@@ -215,17 +221,29 @@ function keepHistoryBounded(db: Db, now: string): void {
 async function sessionStartRecall(
   opened: OpenedDb,
   scope: HookScope,
-  projectId: string,
+  location: StartLocation,
   source: string | undefined,
 ): Promise<string> {
-  const { pinnedCandidates, sessionEarlierMemories, sessionStartLimit } = await import(
-    "./search.js"
-  );
+  const {
+    pinnedCandidates,
+    sessionEarlierMemories,
+    sessionStartLimit,
+    TICKET_ROWS_MAX,
+    ticketCandidates,
+  } = await import("./search.js");
   const budgetTokens = scope.config.budgetTokens;
-  const request = { projectId, now: scope.now };
+  const request = { projectId: location.projectId, now: scope.now };
   const rows = sessionStartMemories({
     source,
     pinned: pinnedCandidates(opened.db, request),
+    ticket:
+      location.ticket === undefined
+        ? []
+        : ticketCandidates(opened.db, {
+            ...request,
+            ticket: location.ticket,
+            limit: TICKET_ROWS_MAX,
+          }),
     earlier:
       scope.sessionId === undefined
         ? []
@@ -278,11 +296,11 @@ async function sessionStartReply(scope: HookScope, source: string | undefined): 
 
 function sessionStartText(scope: HookScope, source: string | undefined): Promise<string> {
   const facts = collectLocationFacts(scope.projectDir);
-  const projectId = projectIdentity(facts);
+  const location = { projectId: projectIdentity(facts), ticket: ticketId(facts.branch) };
   const routing = lessonRouting(scope, facts, source);
   return withDatabase(scope.config, async (opened) => {
-    const recall = recallEnabled(opened.db, projectId)
-      ? await sessionStartRecall(opened, scope, projectId, source)
+    const recall = recallEnabled(opened.db, location.projectId)
+      ? await sessionStartRecall(opened, scope, location, source)
       : "";
     keepHistoryBounded(opened.db, scope.now);
     return contextLines([routing, recall]);

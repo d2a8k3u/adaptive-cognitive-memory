@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { monotonicFactory } from "ulid";
 
 const ulid = monotonicFactory();
@@ -9,6 +10,14 @@ const PROJECT_ID_HEX_CHARS = 16;
 const GIT_QUERY_TIMEOUT_MS = 2_000;
 const GIT_NOT_INSTALLED_CODE = "ENOENT";
 const DUBIOUS_OWNERSHIP = /detected dubious ownership in repository at '([^']+)'/;
+const HEAD_FILE = "HEAD";
+const BRANCH_REF_PREFIX = "ref: refs/heads/";
+const UNREADABLE_HEAD_CODES: ReadonlySet<string> = new Set([
+  "ENOENT",
+  "ENOTDIR",
+  "EACCES",
+  "EISDIR",
+]);
 
 export interface ProjectLocation {
   readonly realpath: string;
@@ -17,10 +26,11 @@ export interface ProjectLocation {
 
 export interface LocationFacts extends ProjectLocation {
   readonly dubiousRepository: string | undefined;
+  readonly branch: string | undefined;
 }
 
 type GitAnswer =
-  | { readonly kind: "repository"; readonly commonDir: string }
+  | { readonly kind: "repository"; readonly commonDir: string; readonly gitDir: string }
   | { readonly kind: "outside" }
   | { readonly kind: "dubious_ownership"; readonly repository: string };
 
@@ -41,11 +51,12 @@ export function projectIdentity(location: ProjectLocation): string {
 
 export function collectLocationFacts(dir: string): LocationFacts {
   const realpath = realpathSync(dir);
-  const answer = queryGitCommonDir(realpath);
+  const answer = queryGitLocation(realpath);
   return {
     realpath,
     gitCommonDir: answer.kind === "repository" ? realpathSync(answer.commonDir) : undefined,
     dubiousRepository: answer.kind === "dubious_ownership" ? answer.repository : undefined,
+    branch: answer.kind === "repository" ? headBranch(answer.gitDir) : undefined,
   };
 }
 
@@ -53,14 +64,51 @@ export function resolveProjectId(dir: string): string {
   return projectIdentity(collectLocationFacts(dir));
 }
 
-function queryGitCommonDir(dir: string): GitAnswer {
+function headBranch(gitDir: string): string | undefined {
+  const head = readHead(gitDir);
+  return head?.startsWith(BRANCH_REF_PREFIX) ? head.slice(BRANCH_REF_PREFIX.length) : undefined;
+}
+
+function readHead(gitDir: string): string | undefined {
   try {
-    const commonDir = execFileSync(
-      "git",
-      ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: GIT_QUERY_TIMEOUT_MS },
-    ).trim();
-    return { kind: "repository", commonDir };
+    return readFileSync(join(gitDir, HEAD_FILE), "utf8").trim();
+  } catch (error) {
+    if (headUnreadable(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function headUnreadable(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    UNREADABLE_HEAD_CODES.has(error.code)
+  );
+}
+
+function repositoryAnswer(stdout: string): GitAnswer {
+  const lines = stdout.trimEnd().split("\n");
+  const [commonDir, gitDir] = lines;
+  if (lines.length !== 2 || commonDir === undefined || gitDir === undefined) {
+    throw new Error(
+      `git rev-parse answered ${lines.length} lines instead of the common dir and the git dir`,
+    );
+  }
+  return { kind: "repository", commonDir, gitDir };
+}
+
+function queryGitLocation(dir: string): GitAnswer {
+  try {
+    return repositoryAnswer(
+      execFileSync(
+        "git",
+        ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: GIT_QUERY_TIMEOUT_MS },
+      ),
+    );
   } catch (error) {
     if (gitNotInstalled(error)) {
       return { kind: "outside" };

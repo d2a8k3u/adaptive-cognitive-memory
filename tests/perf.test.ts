@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,7 @@ import { type OpenedDb, openDatabase } from "../src/db/database";
 import { LIST_LIMIT_MAX, type ListRequest, listMemories } from "../src/db/listing";
 import type { MemoryType } from "../src/db/memories";
 import { resolveProjectId } from "../src/ids";
-import { recall } from "../src/search";
+import { recall, TICKET_ROWS_MAX } from "../src/search";
 import { testModelCacheDir } from "../vitest.config";
 import { runProcess, type SeedMemory, seedConfig, seedMemories } from "./fixtures/seed";
 
@@ -19,9 +20,20 @@ const SEARCH_P95_CAP_MS = 100;
 const READ_RUNS = 50;
 const READ_P95_CAP_MS = 300;
 const READ_ANCHOR = "billing/tax.py";
-const READ_ANCHORED_ID = `01J8PERF${"2".padStart(18, "0")}`;
+const READ_ANCHORED_ID = perfMemoryId(2);
 const LIST_WALKS = 3;
 const LIST_P95_CAP_MS = 20;
+const SESSION_START_RUNS = 50;
+const SESSION_START_P95_CAP_MS = 300;
+const PINNED_EVERY_ROWS = 50;
+const TICKET = "TOUCH-4945";
+const TICKET_ANCHORED_IDS = [7, 13, 21].map(perfMemoryId);
+const TICKET_KEYWORDED_IDS = [33, 41].map(perfMemoryId);
+const TICKET_ROW_IDS = [...TICKET_ANCHORED_IDS, ...TICKET_KEYWORDED_IDS];
+const GIT_ISOLATION: NodeJS.ProcessEnv = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+};
 const SIZE_CAP_BYTES = 25 * 1024 * 1024;
 const HOOK_TIMEOUT_FLOOR_S = 5;
 const RECALL_PROMPT = "how should we handle database migrations under load";
@@ -64,6 +76,10 @@ const QUALIFIERS = [
   "postmortem",
 ];
 
+function perfMemoryId(index: number): string {
+  return `01J8PERF${String(index).padStart(18, "0")}`;
+}
+
 function recallTarget(projectId: string): SeedMemory {
   return {
     id: `01J8PERF${"TARGET".padStart(18, "0")}`,
@@ -85,7 +101,7 @@ function seedRows(projectId: string): SeedMemory[] {
     const topic = TOPICS[index % TOPICS.length]!;
     const qualifier = QUALIFIERS[Math.floor(index / TOPICS.length) % QUALIFIERS.length]!;
     rows.push({
-      id: `01J8PERF${String(index).padStart(18, "0")}`,
+      id: perfMemoryId(index),
       projectId,
       scope: index % 5 === 0 ? "user" : "project",
       type: MEMORY_TYPES[index % MEMORY_TYPES.length]!,
@@ -316,6 +332,81 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
       opened.db.close();
     }
   });
+
+  it.skipIf(process.env.CI === "true")(
+    "spawned SessionStart on a ticket branch p95 stays under 300 ms",
+    { timeout: 180_000 },
+    async () => {
+      const repo = realpathSync(mkdtempSync(join(tmpdir(), "acm-perf-ticket-")));
+      for (const args of [
+        ["init", "-q", "-b", "main"],
+        ["commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
+        ["checkout", "-q", "-b", `fix/${TICKET}/perf`],
+      ]) {
+        execFileSync(
+          "git",
+          ["-c", "user.name=acm", "-c", "user.email=acm@example.invalid", "-C", repo, ...args],
+          { env: { ...process.env, ...GIT_ISOLATION }, stdio: "ignore" },
+        );
+      }
+      const ticketData = mkdtempSync(join(tmpdir(), "acm-perf-ticket-data-"));
+      const config = seedConfig(ticketData, testModelCacheDir);
+      await seedMemories(config, seedRows(resolveProjectId(repo)));
+      const opened: OpenedDb = openDatabase(config);
+      try {
+        opened.db
+          .prepare(
+            `UPDATE memories SET anchors = json_array('src/' || id || '.py'),
+               kind = CASE WHEN rowid % ? = 0 THEN 'constraint' ELSE kind END`,
+          )
+          .run(PINNED_EVERY_ROWS);
+        const ticketed = opened.db.prepare(
+          "UPDATE memories SET anchors = ?, keywords = ? WHERE id = ?",
+        );
+        TICKET_ANCHORED_IDS.forEach((id) => {
+          ticketed.run(JSON.stringify([TICKET]), "", id);
+        });
+        TICKET_KEYWORDED_IDS.forEach((id) => {
+          ticketed.run("[]", `${TICKET} guide list`, id);
+        });
+      } finally {
+        opened.db.close();
+      }
+      const ticketEnv = {
+        CLAUDE_PLUGIN_DATA: ticketData,
+        ACM_MODEL_CACHE_DIR: testModelCacheDir,
+        PATH: process.env.PATH,
+        ...GIT_ISOLATION,
+      };
+      const startMs: number[] = [];
+      for (let index = 0; index < SESSION_START_RUNS; index += 1) {
+        const runStartedAt = performance.now();
+        const run = await runProcess({
+          command: process.execPath,
+          args: [distEntry("hooks.js")],
+          env: ticketEnv,
+          stdinText: JSON.stringify({
+            hook_event_name: "SessionStart",
+            source: "startup",
+            cwd: repo,
+            session_id: `perf-start-${index}`,
+          }),
+          timeoutMs: 30_000,
+        });
+        startMs.push(performance.now() - runStartedAt);
+        expect(run.code).toBe(0);
+        expect(run.stderr).toBe("");
+        expect(TICKET_ROW_IDS.filter((id) => run.stdout.includes(id))).toHaveLength(
+          TICKET_ROWS_MAX,
+        );
+      }
+      const startP95 = percentile(startMs, 0.95);
+      console.log(
+        `NFR-17 SessionStart on a ticket branch p95 @${SEED_ROWS}: ${Math.round(startP95)} ms (cap ${SESSION_START_P95_CAP_MS}), max ${Math.round(Math.max(...startMs))} ms over ${SESSION_START_RUNS} runs`,
+      );
+      expect(startP95).toBeLessThanOrEqual(SESSION_START_P95_CAP_MS);
+    },
+  );
 
   it("1000 memories with vectors and FTS stay under 25 MB", { timeout: 60_000 }, () => {
     const config = seedConfig(pluginData, testModelCacheDir);

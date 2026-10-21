@@ -649,6 +649,7 @@ describe("static dist gates", () => {
     const closure = [HOOK_ENTRY, listing].flatMap((entry) => hookClosure(entry));
     expect(closure).toContain(join(DIST_DIR, "search.js"));
     expect(closure).toContain(join(DIST_DIR, "embeddings.js"));
+    expect(closure).toContain(join(DIST_DIR, "branch.js"));
     expect(closure).toContain(listing);
     const offenders: string[] = [];
     for (const file of closure) {

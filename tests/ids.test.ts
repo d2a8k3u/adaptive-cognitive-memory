@@ -1,8 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { collectLocationFacts, isMemoryId, newId, projectIdentity } from "../src/ids";
 
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -140,5 +147,74 @@ describe("collectLocationFacts", () => {
     expect(() => collectLocationFacts(plain)).toThrowError(
       expect.objectContaining({ signal: "SIGKILL" }),
     );
+  });
+});
+
+describe("collectLocationFacts branch", () => {
+  const ticketBranch = "fix/TOUCH-4945/guide-list-search";
+  let root: string;
+  let unborn: string;
+  let worktrees: string;
+
+  beforeAll(() => {
+    root = tempDir("acm-ids-branch-");
+    git(root, "init", "-q", "-b", "main");
+    git(root, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init");
+    git(root, "checkout", "-q", "-b", ticketBranch);
+    worktrees = tempDir("acm-ids-branch-worktrees-");
+    git(root, "worktree", "add", "-q", "-b", "feat/WT-1", join(worktrees, "linked"));
+    git(root, "worktree", "add", "-q", "--detach", join(worktrees, "detached"));
+    unborn = tempDir("acm-ids-unborn-");
+    git(unborn, "init", "-q", "-b", "main");
+  });
+
+  it.each([
+    { state: "a normal repository", dir: () => root, repository: () => root, branch: ticketBranch },
+    {
+      state: "a linked worktree",
+      dir: () => join(worktrees, "linked"),
+      repository: () => root,
+      branch: "feat/WT-1",
+    },
+    {
+      state: "a detached HEAD",
+      dir: () => join(worktrees, "detached"),
+      repository: () => root,
+      branch: undefined,
+    },
+    { state: "an unborn HEAD", dir: () => unborn, repository: () => unborn, branch: "main" },
+  ])("keeps the identity and reports the branch of $state", ({ dir, repository, branch }) => {
+    expect(collectLocationFacts(dir())).toEqual({
+      realpath: dir(),
+      gitCommonDir: join(repository(), ".git"),
+      branch,
+    });
+  });
+
+  it("reads the branch with the one git process it already spends on the common dir", () => {
+    const calls = join(tempDir("acm-ids-git-calls-"), "calls");
+    const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+    const counting = fakeGitDir(`#!/bin/sh\necho call >> '${calls}'\nexec '${realGit}' "$@"\n`);
+    vi.stubEnv("PATH", `${counting}:${process.env.PATH}`);
+
+    const facts = collectLocationFacts(root);
+
+    expect({ gitProcesses: readFileSync(calls, "utf8").split("\n").length - 1, facts }).toEqual({
+      gitProcesses: 1,
+      facts: { realpath: root, gitCommonDir: join(root, ".git"), branch: ticketBranch },
+    });
+  });
+
+  it("keeps the identity and reports no branch when the git dir git names has no HEAD", () => {
+    const plain = tempDir("acm-ids-headless-");
+    const commonDir = tempDir("acm-ids-headless-common-");
+    const gitDir = tempDir("acm-ids-headless-gitdir-");
+    vi.stubEnv("PATH", fakeGitDir(`#!/bin/sh\necho '${commonDir}'\necho '${gitDir}'\n`));
+
+    expect(collectLocationFacts(plain)).toEqual({
+      realpath: plain,
+      gitCommonDir: commonDir,
+      branch: undefined,
+    });
   });
 });

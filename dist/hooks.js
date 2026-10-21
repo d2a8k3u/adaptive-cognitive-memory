@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const node_child_process_1 = require("node:child_process");
 const node_path_1 = require("node:path");
 const automemory_1 = require("./automemory");
+const branch_1 = require("./branch");
 const calibration_1 = require("./calibration");
 const capture_1 = require("./capture");
 const cfg_1 = require("./cfg");
@@ -125,13 +126,20 @@ function keepHistoryBounded(db, now) {
         (0, signals_1.pruneSessionHistory)(db, (0, retention_1.daysBefore)(now, retention_1.SESSION_HISTORY_RETENTION_DAYS));
     }).immediate();
 }
-async function sessionStartRecall(opened, scope, projectId, source) {
-    const { pinnedCandidates, sessionEarlierMemories, sessionStartLimit } = await import("./search.js");
+async function sessionStartRecall(opened, scope, location, source) {
+    const { pinnedCandidates, sessionEarlierMemories, sessionStartLimit, TICKET_ROWS_MAX, ticketCandidates, } = await import("./search.js");
     const budgetTokens = scope.config.budgetTokens;
-    const request = { projectId, now: scope.now };
+    const request = { projectId: location.projectId, now: scope.now };
     const rows = (0, session_1.sessionStartMemories)({
         source,
         pinned: pinnedCandidates(opened.db, request),
+        ticket: location.ticket === undefined
+            ? []
+            : ticketCandidates(opened.db, {
+                ...request,
+                ticket: location.ticket,
+                limit: TICKET_ROWS_MAX,
+            }),
         earlier: scope.sessionId === undefined
             ? []
             : sessionEarlierMemories(opened.db, { ...request, sessionId: scope.sessionId }),
@@ -174,11 +182,11 @@ async function sessionStartReply(scope, source) {
 }
 function sessionStartText(scope, source) {
     const facts = (0, ids_1.collectLocationFacts)(scope.projectDir);
-    const projectId = (0, ids_1.projectIdentity)(facts);
+    const location = { projectId: (0, ids_1.projectIdentity)(facts), ticket: (0, branch_1.ticketId)(facts.branch) };
     const routing = lessonRouting(scope, facts, source);
     return withDatabase(scope.config, async (opened) => {
-        const recall = (0, projects_1.recallEnabled)(opened.db, projectId)
-            ? await sessionStartRecall(opened, scope, projectId, source)
+        const recall = (0, projects_1.recallEnabled)(opened.db, location.projectId)
+            ? await sessionStartRecall(opened, scope, location, source)
             : "";
         keepHistoryBounded(opened.db, scope.now);
         return contextLines([routing, recall]);
