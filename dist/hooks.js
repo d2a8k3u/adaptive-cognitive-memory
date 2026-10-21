@@ -8,9 +8,11 @@ const calibration_1 = require("./calibration");
 const capture_1 = require("./capture");
 const cfg_1 = require("./cfg");
 const events_1 = require("./db/events");
+const failures_1 = require("./db/failures");
 const injections_1 = require("./db/injections");
 const projects_1 = require("./db/projects");
 const signals_1 = require("./db/signals");
+const failure_1 = require("./failure");
 const gate_1 = require("./gate");
 const ids_1 = require("./ids");
 const inject_1 = require("./inject");
@@ -31,7 +33,7 @@ const HOOK_EVENTS = [
     "PostToolUseFailure",
     "Stop",
 ];
-const SESSION_EVENTS = ["PostToolUse", "PostToolUseFailure", "Stop"];
+const SESSION_EVENTS = ["PostToolUse", "Stop"];
 const CLI_ENTRY = (0, node_path_1.join)(version_1.PLUGIN_ROOT, "dist", "cli.js");
 const BASH_TOOL = "Bash";
 const FEEDBACK_TOOL = (0, toolnames_1.hostToolName)("memory_feedback");
@@ -173,9 +175,11 @@ function statuslineAtSessionStart(opened, scope, recallOn) {
     });
 }
 function keepHistoryBounded(db, now) {
+    const cutoff = (0, retention_1.daysBefore)(now, retention_1.SESSION_HISTORY_RETENTION_DAYS);
     db.transaction(() => {
         (0, events_1.pruneRecallEvents)(db, retention_1.RECALL_EVENTS_KEPT);
-        (0, signals_1.pruneSessionHistory)(db, (0, retention_1.daysBefore)(now, retention_1.SESSION_HISTORY_RETENTION_DAYS));
+        (0, signals_1.pruneSessionHistory)(db, cutoff);
+        (0, failures_1.pruneFailureRecalls)(db, cutoff);
     }).immediate();
 }
 async function sessionStartRecall(opened, scope, location, source) {
@@ -286,21 +290,23 @@ function promptText(scope, prompt) {
         return contextLines([cue === undefined ? "" : (0, capture_1.cueLine)(cue.kind), recall]);
     });
 }
-async function toolRecall(opened, scope, projectId, lookup) {
-    if (lookup === undefined) {
-        return recordAbstention(opened, scope, "PreToolUse");
-    }
+async function gatedToolRows(opened, scope, projectId, lookup, gate) {
     const { toolCandidates } = await import("./search.js");
     const candidates = toolCandidates(opened.db, {
         projectId,
         lookup,
-        keywordSignal: calibration_1.TOOL_GATE.keywordSignal,
+        keywordSignal: gate.keywordSignal,
         now: scope.now,
     });
-    const rows = (0, gate_1.selectToolMemories)(candidates, calibration_1.TOOL_GATE, alreadyInjected(opened, scope));
+    return (0, gate_1.selectToolMemories)(candidates, gate, alreadyInjected(opened, scope));
+}
+async function toolRecall(opened, scope, projectId, lookup) {
+    if (lookup === undefined) {
+        return recordAbstention(opened, scope, "PreToolUse");
+    }
     return injectAndRecord(opened, scope, {
         event: "PreToolUse",
-        rows,
+        rows: await gatedToolRows(opened, scope, projectId, lookup, calibration_1.TOOL_GATE),
         budgetTokens: scope.config.pretoolBudgetTokens,
     });
 }
@@ -344,13 +350,50 @@ function postToolText(scope, input) {
     }
     return silently(config, ({ db }) => (0, signals_1.resolveCommand)(db, { sessionId, head, at: now }));
 }
+function claimAndRecord(opened, scope, failure, injection) {
+    return opened.db
+        .transaction(() => {
+        const claimed = (0, failures_1.claimFailureRecall)(opened.db, {
+            sessionId: failure.sessionId,
+            head: failure.head,
+            at: scope.now,
+        });
+        recordRecall(opened, scope, "PostToolUseFailure", claimed ? injection.injectedIds : []);
+        return claimed ? injection.text : "";
+    })
+        .immediate();
+}
+async function failureRecall(opened, scope, failure) {
+    const lookup = failure.error === undefined ? undefined : (0, failure_1.failureLookup)((0, failure_1.failureSignature)(failure.error));
+    if (lookup === undefined) {
+        return recordAbstention(opened, scope, "PostToolUseFailure");
+    }
+    const rows = await gatedToolRows(opened, scope, failure.projectId, lookup, calibration_1.FAILURE_GATE);
+    const injection = (0, inject_1.renderInjection)(rows, scope.config.pretoolBudgetTokens);
+    if (injection.injectedIds.length === 0) {
+        return recordAbstention(opened, scope, "PostToolUseFailure");
+    }
+    return claimAndRecord(opened, scope, failure, injection);
+}
 function failedToolText(scope, input) {
-    const { config, sessionId, now } = scope;
     const head = input.is_interrupt === true ? undefined : bashHead(input);
-    if (head === undefined) {
+    const sessionId = scope.sessionId;
+    if (head === undefined || sessionId === undefined) {
         return Promise.resolve("");
     }
-    return silently(config, ({ db }) => (0, signals_1.recordCommandFailure)(db, { sessionId, head, at: now }));
+    const failure = {
+        sessionId,
+        head,
+        projectId: (0, ids_1.resolveProjectId)(scope.projectDir),
+        error: stringField(input.error),
+    };
+    return withDatabase(scope.config, async (opened) => {
+        (0, signals_1.recordCommandFailure)(opened.db, { sessionId, head, at: scope.now });
+        const recallOn = (0, projects_1.recallEnabled)(opened.db, failure.projectId);
+        const recall = recallOn ? await failureRecall(opened, scope, failure) : "";
+        updateBadge(opened, scope, "PostToolUseFailure", recallOn);
+        return recall;
+    });
 }
 function stopText(scope, stopHookActive) {
     return withDatabase(scope.config, async ({ db }) => db
@@ -368,8 +411,6 @@ function sessionEventText(event, input, scope) {
     switch (event) {
         case "PostToolUse":
             return postToolText(scope, input);
-        case "PostToolUseFailure":
-            return failedToolText(scope, input);
         case "Stop":
             return stopText(scope, input.stop_hook_active === true);
     }
@@ -392,6 +433,9 @@ async function dispatch(event, input, env) {
     }
     if (event === "PreToolUse") {
         return contextOnly(toolText(scope, (0, keys_1.toolLookup)(stringField(input.tool_name) ?? "", input.tool_input, projectDir)));
+    }
+    if (event === "PostToolUseFailure") {
+        return contextOnly(failedToolText(scope, input));
     }
     return sessionStartReply(scope, stringField(input.source));
 }

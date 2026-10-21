@@ -282,6 +282,29 @@ describe("recall docs", () => {
     );
   });
 
+  it("README error recall section names the trigger, the anchor-only match, the once-per-head rule, the budget, redaction and an error code", () => {
+    const section = markdownSection(readme, "### Recall on a failed Bash command").join("\n");
+
+    expect(section).toContain("`PostToolUseFailure`");
+    expect(section).toContain("only when one of its anchors equals a term");
+    expect(section).toContain("its conflict key and keywords are not matched");
+    expect(section).toContain("once per session and command head");
+    expect(section).toContain("`pretool_budget_tokens`");
+    expect(section).toContain("redacted");
+    expect(section).toContain("`SQLITE_BUSY`");
+    expect(section).toContain("command head alone never");
+  });
+
+  it("skill says to anchor an error lesson on its stable tokens, that only anchors match on an error and that a command head alone never recalls it", () => {
+    const skill = readFileSync(join(process.cwd(), "skills", "memory", "SKILL.md"), "utf8");
+
+    expect(skill).toContain(
+      "A lesson about an error: put its stable tokens — the code, class name or module name (`SQLITE_BUSY`, `ModuleNotFoundError`, `express`) — into `anchors`",
+    );
+    expect(skill).toContain("only through an anchor equal to a token of its error");
+    expect(skill).toContain("a command head alone never recalls it");
+  });
+
   it("README branch-aware section names the ticket row cap from its owner, the exact match and the unchanged no-ticket start", () => {
     const section = markdownSection(readme, "### Branch-aware session start").join("\n");
 
@@ -703,6 +726,8 @@ describe("static dist gates", () => {
     expect(closure).toContain(join(DIST_DIR, "search.js"));
     expect(closure).toContain(join(DIST_DIR, "embeddings.js"));
     expect(closure).toContain(join(DIST_DIR, "branch.js"));
+    expect(closure).toContain(join(DIST_DIR, "failure.js"));
+    expect(closure).toContain(join(DIST_DIR, "db", "failures.js"));
     expect(closure).toContain(join(DIST_DIR, "statusline.js"));
     expect(closure).toContain(join(DIST_DIR, "statusline", "badge.js"));
     expect(closure).toContain(listing);

@@ -4,6 +4,7 @@ import {
   type OpenSignalFact,
   RECALL_RATE_WINDOW,
   type ReasonCount,
+  type RecallEventCount,
   STATUS_LIST_LIMIT,
   type StatusFacts,
 } from "../status";
@@ -29,13 +30,14 @@ function transitionCounts(db: Db, projectId: string): ReasonCount[] {
     .all(projectId) as ReasonCount[];
 }
 
-function recallEventCounts(db: Db): StatusFacts["recallEvents"] {
+function recallEventCounts(db: Db): RecallEventCount[] {
   return db
     .prepare(
-      `SELECT count(*) AS events, coalesce(sum(injected > 0), 0) AS injecting
-       FROM (SELECT injected FROM recall_events ORDER BY id DESC LIMIT ?)`,
+      `SELECT event, count(*) AS events, coalesce(sum(injected > 0), 0) AS injecting
+       FROM (SELECT event, injected FROM recall_events ORDER BY id DESC LIMIT ?)
+       GROUP BY event ORDER BY event`,
     )
-    .get(RECALL_RATE_WINDOW) as StatusFacts["recallEvents"];
+    .all(RECALL_RATE_WINDOW) as RecallEventCount[];
 }
 
 function receiptInjections(db: Db): StatusFacts["receiptInjections"] {

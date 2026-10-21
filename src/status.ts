@@ -1,4 +1,5 @@
 import type { SignalKind } from "./capture";
+import { RECALL_EVENT_NAMES, type RecallEventName } from "./db/events";
 import {
   MEMORY_KINDS,
   MEMORY_SCOPES,
@@ -39,12 +40,23 @@ export interface InjectionFact {
   readonly at: string;
 }
 
+export interface RecallEventCount {
+  readonly event: RecallEventName;
+  readonly events: number;
+  readonly injecting: number;
+}
+
+interface EventTally {
+  readonly events: number;
+  readonly injecting: number;
+}
+
 export interface StatusFacts {
   readonly projectId: string;
   readonly recallEnabled: boolean;
   readonly memoryCounts: readonly MemoryCount[];
   readonly transitionCounts: readonly ReasonCount[];
-  readonly recallEvents: { readonly events: number; readonly injecting: number };
+  readonly recallEvents: readonly RecallEventCount[];
   readonly receiptInjections: { readonly memories: number; readonly neverUsed: number };
   readonly openSignals: readonly OpenSignalFact[];
   readonly recentInjections: readonly InjectionFact[];
@@ -62,6 +74,7 @@ export interface StatusReport {
     readonly events: number;
     readonly injecting: number;
     readonly rate: number | null;
+    readonly by_event: Record<RecallEventName, EventTally>;
   };
   readonly receipt_sessions: {
     readonly memories_injected: number;
@@ -106,8 +119,25 @@ function ageSeconds(openedAt: string, now: string): number {
   return Math.floor((Date.parse(now) - Date.parse(openedAt)) / MS_PER_SECOND);
 }
 
+function tallyOf(counts: readonly RecallEventCount[]): EventTally {
+  return counts.reduce(
+    (sum, row) => ({ events: sum.events + row.events, injecting: sum.injecting + row.injecting }),
+    { events: 0, injecting: 0 },
+  );
+}
+
+function tallyByEvent(counts: readonly RecallEventCount[]): Record<RecallEventName, EventTally> {
+  return Object.fromEntries(
+    RECALL_EVENT_NAMES.map((event) => [
+      event,
+      tallyOf(counts.filter((row) => row.event === event)),
+    ]),
+  ) as Record<RecallEventName, EventTally>;
+}
+
 export function statusReport(facts: StatusFacts, now: string): StatusReport {
-  const { recallEvents, receiptInjections } = facts;
+  const { receiptInjections } = facts;
+  const recallEvents = tallyOf(facts.recallEvents);
   return {
     project: { id: facts.projectId, recall: facts.recallEnabled ? "on" : "off" },
     memories: Object.fromEntries(
@@ -119,6 +149,7 @@ export function statusReport(facts: StatusFacts, now: string): StatusReport {
       events: recallEvents.events,
       injecting: recallEvents.injecting,
       rate: ratio(recallEvents.injecting, recallEvents.events),
+      by_event: tallyByEvent(facts.recallEvents),
     },
     receipt_sessions: {
       memories_injected: receiptInjections.memories,

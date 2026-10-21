@@ -1,5 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -21,6 +28,11 @@ const READ_RUNS = 50;
 const READ_P95_CAP_MS = 300;
 const READ_ANCHOR = "billing/tax.py";
 const READ_ANCHORED_ID = perfMemoryId(2);
+const FAILURE_RUNS = 50;
+const FAILURE_P95_CAP_MS = 300;
+const FAILURE_ANCHOR = "SQLITE_BUSY";
+const FAILURE_ANCHORED_ID = perfMemoryId(3);
+const UNREACHABLE_MODEL_HOST = "http://127.0.0.1:9/";
 const LIST_WALKS = 3;
 const LIST_P95_CAP_MS = 20;
 const SESSION_START_RUNS = 50;
@@ -250,6 +262,56 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
         `NFR-13 PreToolUse Read p95 @${SEED_ROWS}: ${Math.round(readP95)} ms (cap ${READ_P95_CAP_MS}), max ${Math.round(Math.max(...readMs))} ms over ${READ_RUNS} runs`,
       );
       expect(readP95).toBeLessThanOrEqual(READ_P95_CAP_MS);
+    },
+  );
+
+  it.skipIf(process.env.CI === "true")(
+    "spawned PostToolUseFailure p95 stays under 300 ms with an empty model cache and the network refused",
+    { timeout: 120_000 },
+    async () => {
+      const opened: OpenedDb = openDatabase(seedConfig(pluginData, testModelCacheDir));
+      try {
+        opened.db
+          .prepare("UPDATE memories SET anchors = ? WHERE id = ?")
+          .run(JSON.stringify([FAILURE_ANCHOR]), FAILURE_ANCHORED_ID);
+      } finally {
+        opened.db.close();
+      }
+      const emptyModelCache = mkdtempSync(join(tmpdir(), "acm-perf-no-model-"));
+      const failureEnv: NodeJS.ProcessEnv = {
+        CLAUDE_PLUGIN_DATA: pluginData,
+        ACM_MODEL_CACHE_DIR: emptyModelCache,
+        ACM_MODEL_REMOTE_HOST: UNREACHABLE_MODEL_HOST,
+        CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false",
+      };
+      const failureMs: number[] = [];
+      for (let index = 0; index < FAILURE_RUNS; index += 1) {
+        const runStartedAt = performance.now();
+        const run = await runProcess({
+          command: process.execPath,
+          args: [distEntry("hooks.js")],
+          env: failureEnv,
+          stdinText: JSON.stringify({
+            hook_event_name: "PostToolUseFailure",
+            cwd: projectDir,
+            session_id: `perf-failure-${index}`,
+            tool_name: "Bash",
+            tool_input: { command: "uv run pytest -q" },
+            error: `Exit code 1\nsqlite3.OperationalError: ${FAILURE_ANCHOR}: database is locked`,
+          }),
+          timeoutMs: 30_000,
+        });
+        failureMs.push(performance.now() - runStartedAt);
+        expect(run.code).toBe(0);
+        expect(run.stderr).toBe("");
+        expect(run.stdout).toContain(FAILURE_ANCHORED_ID);
+      }
+      const failureP95 = percentile(failureMs, 0.95);
+      console.log(
+        `NFR-8 PostToolUseFailure p95 @${SEED_ROWS}: ${Math.round(failureP95)} ms (cap ${FAILURE_P95_CAP_MS}), max ${Math.round(Math.max(...failureMs))} ms over ${FAILURE_RUNS} runs`,
+      );
+      expect(readdirSync(emptyModelCache)).toEqual([]);
+      expect(failureP95).toBeLessThanOrEqual(FAILURE_P95_CAP_MS);
     },
   );
 

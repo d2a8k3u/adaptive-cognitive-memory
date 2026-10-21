@@ -1,6 +1,13 @@
 import type { Db } from "./database";
 
-export type RecallEventName = "SessionStart" | "UserPromptSubmit" | "PreToolUse";
+export const RECALL_EVENT_NAMES = [
+  "SessionStart",
+  "UserPromptSubmit",
+  "PreToolUse",
+  "PostToolUseFailure",
+] as const;
+
+export type RecallEventName = (typeof RECALL_EVENT_NAMES)[number];
 
 export interface RecallEvent {
   readonly sessionId: string | undefined;

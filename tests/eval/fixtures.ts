@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { conflictKeyProblem } from "../../src/authoring";
+import { failureSignature } from "../../src/failure";
+import { commandHead } from "../../src/keys";
 import {
   type JsonRecord,
   optionalString,
@@ -28,6 +30,18 @@ export const NEGATIVE_CATEGORIES = [
   "other_project",
 ] as const;
 export const TOOL_NAMES = ["Bash", "Edit", "Write", "Read"] as const;
+export const ERROR_NEGATIVE_CATEGORIES = [
+  "tdd_red",
+  "lint",
+  "generic_exit",
+  "interrupt",
+  "repeat_head",
+  "head_only",
+  "other_project",
+  "secret",
+] as const;
+export const ERROR_POSITIVE_CATEGORIES = ["head_not_used_up"] as const;
+const ERROR_CATEGORIES = [...ERROR_NEGATIVE_CATEGORIES, ...ERROR_POSITIVE_CATEGORIES] as const;
 export const CUE_ORIGINS = ["human", "harness"] as const;
 export const CUE_LABELS = ["correction", "remember", "neutral"] as const;
 export const HARNESS_MARKERS = [
@@ -46,6 +60,8 @@ export type Kind = (typeof KINDS)[number];
 export type Cardinality = (typeof CARDINALITIES)[number];
 export type NegativeCategory = (typeof NEGATIVE_CATEGORIES)[number];
 export type ToolName = (typeof TOOL_NAMES)[number];
+export type ErrorNegativeCategory = (typeof ERROR_NEGATIVE_CATEGORIES)[number];
+export type ErrorCaseCategory = (typeof ERROR_CATEGORIES)[number];
 export type CueOrigin = (typeof CUE_ORIGINS)[number];
 export type CueLabel = (typeof CUE_LABELS)[number];
 
@@ -100,6 +116,17 @@ export interface PretoolCase {
   readonly project: string;
   readonly tool_name: ToolName;
   readonly tool_input: Readonly<Record<string, string>>;
+  readonly gold: readonly string[];
+}
+
+export interface ErrorCase {
+  readonly id: string;
+  readonly project: string;
+  readonly session: string;
+  readonly tool_input: Readonly<Record<string, string>>;
+  readonly error: string;
+  readonly is_interrupt: boolean;
+  readonly category: ErrorCaseCategory | null;
   readonly gold: readonly string[];
 }
 
@@ -171,6 +198,7 @@ export const FIXTURE_FILES = [
   "contradictions.json",
   "capture-cues.json",
   "redaction.json",
+  "errors.json",
 ] as const;
 
 type FixtureFile = (typeof FIXTURE_FILES)[number];
@@ -254,6 +282,28 @@ function parsePretool(record: JsonRecord, path: string): PretoolCase {
   };
 }
 
+function requireBoolean(record: JsonRecord, key: string, path: string): boolean {
+  const value = record[key];
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${path}.${key} must be a boolean`);
+  }
+  return value;
+}
+
+function parseErrorCase(record: JsonRecord, path: string): ErrorCase {
+  return {
+    id: requireString(record, "id", path),
+    project: requireString(record, "project", path),
+    session: requireString(record, "session", path),
+    tool_input: parseToolInput(record.tool_input, `${path}.tool_input`),
+    error: requireString(record, "error", path),
+    is_interrupt: requireBoolean(record, "is_interrupt", path),
+    category:
+      record.category === null ? null : requireEnum(record, "category", ERROR_CATEGORIES, path),
+    gold: requireStringArray(record, "gold", path),
+  };
+}
+
 function parseProbe(value: unknown, path: string): Probe {
   const record = requireRecord(value, path);
   return {
@@ -330,6 +380,12 @@ export function redactionSamples(dir: string): RedactionSample[] {
   );
 }
 
+export function errorCases(dir: string): ErrorCase[] {
+  return records(readFixture(dir, "errors.json"), "errors").map((record, index) =>
+    parseErrorCase(record, `errors[${index}]`),
+  );
+}
+
 export function loadFixtures(dir: string): Fixtures {
   const prompts = requireRecord(readFixture(dir, "prompts.json"), "prompts");
   return {
@@ -372,6 +428,8 @@ export const MINIMUM_SIZES = {
   czechShare: 0.3,
   pretool: 60,
   pretoolNegatives: 15,
+  pretoolReadNegatives: 35,
+  errorNegatives: 35,
   supersession: 100,
   contradictions: 20,
   cues: 150,
@@ -757,9 +815,94 @@ export function sizeProblems(fixtures: Fixtures): string[] {
       fixtures.pretool.filter((item) => item.gold.length === 0).length,
       minimum.pretoolNegatives,
     ),
+    ...atLeast(
+      "pretool Read negatives",
+      fixtures.pretool.filter((item) => item.tool_name === "Read" && item.gold.length === 0).length,
+      minimum.pretoolReadNegatives,
+    ),
     ...atLeast("supersession", fixtures.supersession.length, minimum.supersession),
     ...atLeast("contradictions", fixtures.contradictions.length, minimum.contradictions),
     ...atLeast("capture cues", fixtures.cues.length, minimum.cues),
     ...atLeast("redaction", fixtures.redaction.length, minimum.redaction),
+  ];
+}
+
+function isNegativeCategory(category: ErrorCaseCategory | null): boolean {
+  return ERROR_NEGATIVE_CATEGORIES.some((negative) => negative === category);
+}
+
+function errorLabelProblems(item: ErrorCase): string[] {
+  const problems: string[] = [];
+  if (isNegativeCategory(item.category) !== (item.gold.length === 0)) {
+    problems.push(
+      `${item.id}: a negative names a negative category and no gold, a positive gold and no negative category`,
+    );
+  }
+  if ((item.category === "interrupt") !== item.is_interrupt) {
+    problems.push(`${item.id}: only interrupt negatives set is_interrupt`);
+  }
+  if (item.tool_input.command === undefined) {
+    problems.push(`${item.id}: Bash input lacks command`);
+  }
+  return problems;
+}
+
+function injectsThroughAnchor(
+  item: ErrorCase,
+  memoriesById: ReadonlyMap<string, FixtureMemory>,
+): boolean {
+  const terms = new Set(failureSignature(item.error).terms);
+  return (
+    !item.is_interrupt &&
+    item.gold.some((goldId) =>
+      (memoriesById.get(goldId)?.anchors ?? []).some((anchor) => terms.has(anchor)),
+    )
+  );
+}
+
+function repeatHeadProblems(
+  cases: readonly ErrorCase[],
+  memoriesById: ReadonlyMap<string, FixtureMemory>,
+): string[] {
+  return cases.flatMap((item, index) => {
+    if (item.category !== "repeat_head") {
+      return [];
+    }
+    const head = commandHead(item.tool_input);
+    const headUsedUp = cases
+      .slice(0, index)
+      .some(
+        (earlier) =>
+          earlier.session === item.session &&
+          commandHead(earlier.tool_input) === head &&
+          injectsThroughAnchor(earlier, memoriesById),
+      );
+    return headUsedUp
+      ? []
+      : [
+          `${item.id}: repeat_head follows no case of session ${item.session} and head ${head} that injects through an anchor equal to one of its terms`,
+        ];
+  });
+}
+
+export function errorCaseProblems(cases: readonly ErrorCase[], fixtures: Fixtures): string[] {
+  const keys = new Set(fixtures.corpus.projects.map((project) => project.key));
+  const memoriesById = new Map(fixtures.corpus.memories.map((memory) => [memory.id, memory]));
+  return [
+    ...duplicateProblems("errors", idsOf(cases)),
+    ...cases.flatMap((item) => [
+      ...projectProblems(item.id, item.project, keys),
+      ...goldProblems(item.id, item.project, item.gold, memoriesById),
+      ...errorLabelProblems(item),
+    ]),
+    ...repeatHeadProblems(cases, memoriesById),
+    ...ERROR_NEGATIVE_CATEGORIES.filter(
+      (category) => !cases.some((item) => item.category === category),
+    ).map((category) => `errors: no ${category} negatives`),
+    ...atLeast(
+      "error negatives",
+      cases.filter((item) => item.gold.length === 0).length,
+      MINIMUM_SIZES.errorNegatives,
+    ),
   ];
 }

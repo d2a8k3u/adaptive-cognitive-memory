@@ -6,11 +6,16 @@ import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DB_FILENAME } from "../../src/cfg";
 import { DEMOTION_MIN_RECEIPTED_INJECTIONS } from "../../src/lifecycle";
+import { redact } from "../../src/redact";
 import { testModelCacheDir } from "../../vitest.config";
 import { buildCorpusWorld, ownersOf, projectKeys, type StoredWorld, storeAll } from "./corpus";
 import {
   type CaptureCue,
   type ContradictionCase,
+  ERROR_NEGATIVE_CATEGORIES,
+  type ErrorCase,
+  errorCaseProblems,
+  errorCases,
   type Fixtures,
   LANGS,
   type Lang,
@@ -236,9 +241,15 @@ interface SummaryRow {
   readonly entry: MetricEntry;
 }
 
+interface GoldObservation {
+  readonly item: { readonly gold: readonly string[] };
+  readonly observation: Observation;
+}
+
 interface RunState {
   readonly meta: RunMeta;
   readonly fixtures: Fixtures;
+  readonly errors: readonly ErrorCase[];
   readonly plugin: PluginUnderTest;
   readonly sample: number | undefined;
   readonly problems: readonly string[];
@@ -613,6 +624,32 @@ function goldHit(injected: readonly string[], gold: readonly string[]): boolean 
   return recallAtK(injected, gold, Number.POSITIVE_INFINITY) > 0;
 }
 
+function deliveredMetrics(observed: readonly GoldObservation[]): Record<string, MetricEntry> {
+  const summary = injectionSummary(
+    observed.map(({ item, observation }) => ({ injected: observation.injected, gold: item.gold })),
+  );
+  return {
+    tool_recall_hit_delivered: ratioMetric(summary.goldHit),
+    negative_false_injection_rate_delivered: ratioMetric(summary.falseInjection),
+    precision_all_injected: ratioMetric(summary.precisionAll),
+    f05_precision_all_vs_tool_recall: valueMetric(summary.f05),
+    non_gold_rows_per_case: { value: summary.nonGoldRowsPerCase ?? null, n: observed.length },
+  };
+}
+
+function casesBySession(cases: readonly ErrorCase[]): ErrorCase[][] {
+  const bySession = new Map<string, ErrorCase[]>();
+  for (const item of cases) {
+    bySession.set(item.session, [...(bySession.get(item.session) ?? []), item]);
+  }
+  return [...bySession.values()];
+}
+
+function redactedParts(text: string): string[] {
+  const visible = redact(text).text;
+  return text.split(/\s+/).filter((part) => part !== "" && !visible.includes(part));
+}
+
 interface RecallObservation {
   readonly item: RecallCase;
   readonly observation: Observation;
@@ -807,12 +844,18 @@ describe("memory evaluation at the host boundary", () => {
   beforeAll(async () => {
     const sample = sampleLimit(process.env.EVAL_SAMPLE);
     const fixtures = loadFixtures(FIXTURE_DIR);
+    const errors = errorCases(FIXTURE_DIR);
     state = {
       meta: runMeta(sample),
       fixtures,
+      errors,
       plugin: loadPlugin(REPO_ROOT),
       sample,
-      problems: [...referenceProblems(fixtures), ...sizeProblems(fixtures)],
+      problems: [
+        ...referenceProblems(fixtures),
+        ...sizeProblems(fixtures),
+        ...errorCaseProblems(errors, fixtures),
+      ],
       summary: [],
       latencies: [],
       disposables: [],
@@ -1155,23 +1198,6 @@ describe("memory evaluation at the host boundary", () => {
     );
     appendRecords(records);
     const negatives = observed.filter(({ item }) => item.gold.length === 0);
-    const deliveredSummary = (subset: typeof observed) =>
-      injectionSummary(
-        subset.map(({ item, observation }) => ({
-          injected: observation.injected,
-          gold: item.gold,
-        })),
-      );
-    const deliveredMetrics = (subset: typeof observed) => {
-      const summary = deliveredSummary(subset);
-      return {
-        tool_recall_hit_delivered: ratioMetric(summary.goldHit),
-        negative_false_injection_rate_delivered: ratioMetric(summary.falseInjection),
-        precision_all_injected: ratioMetric(summary.precisionAll),
-        f05_precision_all_vs_tool_recall: valueMetric(summary.f05),
-        non_gold_rows_per_case: { value: summary.nonGoldRowsPerCase ?? null, n: subset.length },
-      };
-    };
     for (const split of PRETOOL_SPLITS) {
       writeAggregate(
         state,
@@ -1200,6 +1226,77 @@ describe("memory evaluation at the host boundary", () => {
       ...observationDistributions(observed.map(({ observation }) => observation)),
     });
     expect(records).toHaveLength(cases.length);
+  });
+
+  it("errors: PostToolUseFailure on realistic Bash failures, negatives by category", async () => {
+    const { corpus } = requireWorlds(state);
+    const sessions = sampleEvenly(casesBySession(state.errors), state.sample);
+    const observed = (
+      await mapPool(sessions, HOOK_POOL_SIZE, async (session) => {
+        const sessionId = randomUUID();
+        const results: { item: ErrorCase; observation: Observation }[] = [];
+        for (const item of session) {
+          const root = projectDirs(corpus.world, item.project).root;
+          results.push({
+            item,
+            observation: await observe(state, corpus.world, corpus.owners, {
+              event: "PostToolUseFailure",
+              cwd: root,
+              projectDir: root,
+              sessionId,
+              fields: {
+                tool_name: "Bash",
+                tool_input: item.tool_input,
+                tool_use_id: `toolu_eval_${randomUUID().replaceAll("-", "")}`,
+                error: item.error,
+                is_interrupt: item.is_interrupt,
+              },
+            }),
+          });
+        }
+        return results;
+      })
+    ).flat();
+    const records = observed.map(({ item, observation }) =>
+      hookCaseRecord(
+        state,
+        "errors",
+        item.id,
+        { split: null, lang: null, category: item.category ?? "positive", gold: item.gold },
+        observation,
+        {
+          project: item.project,
+          session: item.session,
+          gold_hit: item.gold.length > 0 && goldHit(observation.injected, item.gold),
+          printed_gold_hit: item.gold.length > 0 && goldHit(observation.printed, item.gold),
+        },
+      ),
+    );
+    appendRecords(records);
+    const negatives = observed.filter(({ item }) => item.gold.length === 0);
+    writeAggregate(state, "errors", {
+      ...deliveredMetrics(observed),
+      ...Object.fromEntries(
+        ERROR_NEGATIVE_CATEGORIES.map((category) => [
+          `negative_false_injection_rate_${category}`,
+          ratioMetric(
+            falseInjectionRate(
+              negatives
+                .filter(({ item }) => item.category === category)
+                .map(({ observation }) => observation.injected),
+            ),
+          ),
+        ]),
+      ),
+      ...observationDistributions(observed.map(({ observation }) => observation)),
+    });
+    const leakedSecrets = observed.flatMap(({ item, observation }) =>
+      redactedParts(item.error)
+        .filter((part) => observation.run.stdout.includes(part))
+        .map((part) => `${item.id}: ${part}`),
+    );
+    expect(records).toHaveLength(sessions.flat().length);
+    expect(leakedSecrets).toEqual([]);
   });
 
   it("identity: the same positive prompts from a nested subdirectory", async () => {

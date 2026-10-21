@@ -503,6 +503,10 @@ describe("badge state written by the recall hooks (FR-26, FR-28)", () => {
   it.each([
     { event: "SessionStart", recallHook: sessionStartEvent },
     { event: "PreToolUse", recallHook: readEvent },
+    {
+      event: "PostToolUseFailure",
+      recallHook: (sessionId: string) => bashEvent(sessionId, "PostToolUseFailure"),
+    },
   ])("$event writes mem off once recall is off for the project", async ({ recallHook }) => {
     const { env, snippet } = await enabledWorld();
     const sessionId = "6a7b8c9d-3333-4e5f-8a9b-recalloffpath";

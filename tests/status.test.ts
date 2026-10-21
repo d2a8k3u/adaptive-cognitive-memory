@@ -1,5 +1,11 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { type StatusFacts, statusReport } from "../src/status";
+import { loadConfig } from "../src/cfg";
+import { openDatabase } from "../src/db/database";
+import { statusFacts } from "../src/db/status";
+import { RECALL_RATE_WINDOW, type StatusFacts, statusReport } from "../src/status";
 
 const NOW = "2026-10-14T12:00:00.000Z";
 
@@ -10,7 +16,7 @@ const EMPTY_FACTS: StatusFacts = {
   recallEnabled: true,
   memoryCounts: [],
   transitionCounts: [],
-  recallEvents: { events: 0, injecting: 0 },
+  recallEvents: [],
   receiptInjections: { memories: 0, neverUsed: 0 },
   openSignals: [],
   recentInjections: [],
@@ -30,7 +36,10 @@ describe("statusReport", () => {
         { reason: "superseded", count: 3 },
         { reason: "feedback_wrong", count: 1 },
       ],
-      recallEvents: { events: 8, injecting: 2 },
+      recallEvents: [
+        { event: "PostToolUseFailure", events: 3, injecting: 1 },
+        { event: "UserPromptSubmit", events: 5, injecting: 1 },
+      ],
       receiptInjections: { memories: 5, neverUsed: 2 },
       openSignals: [
         {
@@ -65,7 +74,18 @@ describe("statusReport", () => {
         },
       },
       transitions: { superseded: 3, feedback_wrong: 1 },
-      recall_events: { window: 500, events: 8, injecting: 2, rate: 0.25 },
+      recall_events: {
+        window: 500,
+        events: 8,
+        injecting: 2,
+        rate: 0.25,
+        by_event: {
+          SessionStart: { events: 0, injecting: 0 },
+          UserPromptSubmit: { events: 5, injecting: 1 },
+          PreToolUse: { events: 0, injecting: 0 },
+          PostToolUseFailure: { events: 3, injecting: 1 },
+        },
+      },
       receipt_sessions: { memories_injected: 5, never_used: 2, share: 0.4 },
       open_signals: [
         { session_id: "session-a", kind: "correction", detail: "don't", age_seconds: 90 },
@@ -87,5 +107,35 @@ describe("statusReport", () => {
     expect(report.recall_events.rate).toBeNull();
     expect(report.receipt_sessions.share).toBeNull();
     expect(report.project).toEqual({ id: "proj-a1b2c3", recall: "on" });
+  });
+});
+
+describe("statusFacts", () => {
+  it("counts the newest recall events per event name, leaving older ones out of the window", () => {
+    const opened = openDatabase(
+      loadConfig({ CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-status-")) }),
+    );
+    try {
+      const insert = opened.db.prepare(
+        "INSERT INTO recall_events (session_id, event, at, injected) VALUES ('s', ?, ?, ?)",
+      );
+      insert.run("SessionStart", NOW, 4);
+      const failures = 200;
+      for (let index = 0; index < RECALL_RATE_WINDOW; index += 1) {
+        const event = index < failures ? "PostToolUseFailure" : "PreToolUse";
+        insert.run(event, NOW, index % 4 === 0 ? 1 : 0);
+      }
+
+      expect(statusFacts(opened.db, "proj-status").recallEvents).toEqual([
+        { event: "PostToolUseFailure", events: failures, injecting: failures / 4 },
+        {
+          event: "PreToolUse",
+          events: RECALL_RATE_WINDOW - failures,
+          injecting: (RECALL_RATE_WINDOW - failures) / 4,
+        },
+      ]);
+    } finally {
+      opened.db.close();
+    }
   });
 });

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/cfg";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import { pruneRecallEvents } from "../src/db/events";
+import { pruneFailureRecalls } from "../src/db/failures";
 import { pruneSessionHistory } from "../src/db/signals";
 
 const CUTOFF = "2026-09-14T00:00:00.000Z";
@@ -68,5 +69,20 @@ describe("pruneSessionHistory", () => {
       "open since long ago",
     ]);
     expect(db.prepare("SELECT head FROM command_failures").pluck().all()).toEqual(["pytest"]);
+  });
+});
+
+describe("pruneFailureRecalls", () => {
+  it("drops failure claims from before the cutoff and keeps the one claimed at it", () => {
+    const { db } = freshDb();
+    const claim = db.prepare(
+      "INSERT INTO failure_recalls (session_id, head, recalled_at) VALUES ('s', ?, ?)",
+    );
+    claim.run("pytest", CUTOFF);
+    claim.run("npm test", JUST_BEFORE_CUTOFF);
+
+    pruneFailureRecalls(db, CUTOFF);
+
+    expect(db.prepare("SELECT head FROM failure_recalls").pluck().all()).toEqual(["pytest"]);
   });
 });

@@ -1101,7 +1101,18 @@ describe("tools", () => {
       belief: 0,
     });
     expect(report.transitions).toEqual({ feedback_wrong: 1 });
-    expect(report.recall_events).toEqual({ window: 500, events: 500, injecting: 100, rate: 0.2 });
+    expect(report.recall_events).toEqual({
+      window: 500,
+      events: 500,
+      injecting: 100,
+      rate: 0.2,
+      by_event: {
+        SessionStart: { events: 0, injecting: 0 },
+        UserPromptSubmit: { events: 500, injecting: 100 },
+        PreToolUse: { events: 0, injecting: 0 },
+        PostToolUseFailure: { events: 0, injecting: 0 },
+      },
+    });
     expect(report.receipt_sessions).toEqual({ memories_injected: 2, never_used: 1, share: 0.5 });
     expect(report.open_signals.map((open) => [open.session_id, open.detail])).toEqual([
       ["session-b", "newer open"],

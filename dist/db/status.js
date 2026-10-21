@@ -18,9 +18,10 @@ function transitionCounts(db, projectId) {
 }
 function recallEventCounts(db) {
     return db
-        .prepare(`SELECT count(*) AS events, coalesce(sum(injected > 0), 0) AS injecting
-       FROM (SELECT injected FROM recall_events ORDER BY id DESC LIMIT ?)`)
-        .get(status_1.RECALL_RATE_WINDOW);
+        .prepare(`SELECT event, count(*) AS events, coalesce(sum(injected > 0), 0) AS injecting
+       FROM (SELECT event, injected FROM recall_events ORDER BY id DESC LIMIT ?)
+       GROUP BY event ORDER BY event`)
+        .all(status_1.RECALL_RATE_WINDOW);
 }
 function receiptInjections(db) {
     return db

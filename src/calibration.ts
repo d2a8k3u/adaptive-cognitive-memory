@@ -66,6 +66,11 @@ export const TOOL_GATE: ToolGate = {
   keywordSignal: false,
 };
 
+export const FAILURE_GATE: ToolGate = {
+  kinds: MEMORY_KINDS,
+  keywordSignal: false,
+};
+
 export const CALIBRATION_METRICS = {
   userPromptSubmit: {
     f05: 0.5085,

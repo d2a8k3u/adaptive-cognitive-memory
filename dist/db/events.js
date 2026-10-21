@@ -1,7 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.RECALL_EVENT_NAMES = void 0;
 exports.recordRecallEvent = recordRecallEvent;
 exports.pruneRecallEvents = pruneRecallEvents;
+exports.RECALL_EVENT_NAMES = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUseFailure",
+];
 function recordRecallEvent(db, recallEvent) {
     db.prepare("INSERT INTO recall_events (session_id, event, at, injected) VALUES (?, ?, ?, ?)").run(recallEvent.sessionId ?? null, recallEvent.event, recallEvent.at, recallEvent.injected);
 }

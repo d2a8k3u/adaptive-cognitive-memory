@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.STATUS_LIST_LIMIT = exports.RECALL_RATE_WINDOW = void 0;
 exports.statusReport = statusReport;
+const events_1 = require("./db/events");
 const policy_1 = require("./policy");
 exports.RECALL_RATE_WINDOW = 500;
 exports.STATUS_LIST_LIMIT = 10;
@@ -21,8 +22,18 @@ function stateCounts(counts, scope) {
 function ageSeconds(openedAt, now) {
     return Math.floor((Date.parse(now) - Date.parse(openedAt)) / MS_PER_SECOND);
 }
+function tallyOf(counts) {
+    return counts.reduce((sum, row) => ({ events: sum.events + row.events, injecting: sum.injecting + row.injecting }), { events: 0, injecting: 0 });
+}
+function tallyByEvent(counts) {
+    return Object.fromEntries(events_1.RECALL_EVENT_NAMES.map((event) => [
+        event,
+        tallyOf(counts.filter((row) => row.event === event)),
+    ]));
+}
 function statusReport(facts, now) {
-    const { recallEvents, receiptInjections } = facts;
+    const { receiptInjections } = facts;
+    const recallEvents = tallyOf(facts.recallEvents);
     return {
         project: { id: facts.projectId, recall: facts.recallEnabled ? "on" : "off" },
         memories: Object.fromEntries(policy_1.MEMORY_SCOPES.map((scope) => [scope, stateCounts(facts.memoryCounts, scope)])),
@@ -32,6 +43,7 @@ function statusReport(facts, now) {
             events: recallEvents.events,
             injecting: recallEvents.injecting,
             rate: ratio(recallEvents.injecting, recallEvents.events),
+            by_event: tallyByEvent(facts.recallEvents),
         },
         receipt_sessions: {
             memories_injected: receiptInjections.memories,

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CALIBRATION_METRICS = exports.TOOL_GATE = exports.PROMPT_GATE = exports.PROMPT_MIN_CONTENT_TOKENS = exports.CALIBRATION_RUN = exports.CALIBRATED_EMBEDDING = void 0;
+exports.CALIBRATION_METRICS = exports.FAILURE_GATE = exports.TOOL_GATE = exports.PROMPT_GATE = exports.PROMPT_MIN_CONTENT_TOKENS = exports.CALIBRATION_RUN = exports.CALIBRATED_EMBEDDING = void 0;
 const policy_1 = require("./policy");
 exports.CALIBRATED_EMBEDDING = {
     modelId: "Xenova/multilingual-e5-small",
@@ -53,6 +53,10 @@ exports.PROMPT_GATE = {
     maxRows: 3,
 };
 exports.TOOL_GATE = {
+    kinds: policy_1.MEMORY_KINDS,
+    keywordSignal: false,
+};
+exports.FAILURE_GATE = {
     kinds: policy_1.MEMORY_KINDS,
     keywordSignal: false,
 };
