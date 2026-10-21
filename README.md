@@ -30,6 +30,6 @@ Requirements: Claude Code and Node.js ≥ 22. To start, follow [Install](docs/in
 
 ### Developing the plugin
 
-- [Development](docs/development.md): where everything lives, checks, the test suite and the real-session eval
+- [Development](docs/development.md): where everything lives, checks, the test suite, performance gates and the real-session eval
 - [Storage](docs/storage.md): the database tables, project ids, concurrency and schema versions
 - [Contributing](CONTRIBUTING.md)

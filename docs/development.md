@@ -23,7 +23,13 @@ npm run check        # tsc + biome + vitest run
 npm run eval         # retrieval and capture evaluation at the host boundary
 ```
 
-The suite covers the store pipeline, scope isolation, budgeted injection, redaction, tool contracts, hook spawning against the committed `dist`, concurrency and kill -9 durability, export/import round trips, the doctor, native-module and newer-schema fail-open, install and static gates, and a two-session end-to-end recall run. The perf gate measures the warm `UserPromptSubmit` hook at 1000 memories against a 750 ms p95 budget (hooks.json timeout 5 s).
+`npm run check` runs what CI runs before the build: strict `tsc`, the `biome` lint and format gate (warnings are errors) and the full vitest suite. The first test run downloads the embedding model (about 135 MB) from Hugging Face, so it needs a network connection; later runs work offline.
+
+The suite covers the store pipeline, scope isolation, budgeted injection, redaction, tool contracts, hook spawning against the committed `dist`, concurrency and kill -9 durability, export/import round trips, the doctor, native-module and newer-schema fail-open, install and static gates, and a two-session end-to-end recall run.
+
+## Performance gates
+
+The hook latency caps in `tests/perf.test.ts` are measured on real hardware and skipped when `CI=true`, because shared CPU makes the numbers meaningless. The warm `UserPromptSubmit` hook at 1000 memories has a 750 ms p95 budget (hooks.json timeout 5 s). If you change the recall or hook path, run `npm run check` on your machine and compare the printed p95 numbers against the budgets in `tests/perf.test.ts`.
 
 ## Real-session eval
 
