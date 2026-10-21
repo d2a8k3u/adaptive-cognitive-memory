@@ -1,8 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.vecTableDdl = exports.schemaV5Ddl = exports.schemaV4Ddl = exports.schemaV3Ddl = exports.schemaV2Ddl = exports.baselineDdl = exports.SchemaTooNewError = exports.SCHEMA_VERSION = void 0;
+exports.vecTableDdl = exports.schemaV6Ddl = exports.schemaV5Ddl = exports.schemaV4Ddl = exports.schemaV3Ddl = exports.schemaV2Ddl = exports.baselineDdl = exports.SchemaTooNewError = exports.SCHEMA_VERSION = void 0;
 const cfg_1 = require("../cfg");
-exports.SCHEMA_VERSION = 5;
+const events_1 = require("./events");
+exports.SCHEMA_VERSION = 6;
 class SchemaTooNewError extends Error {
 }
 exports.SchemaTooNewError = SchemaTooNewError;
@@ -173,6 +174,26 @@ exports.schemaV5Ddl = [
     project_id TEXT PRIMARY KEY NOT NULL,
     recall_enabled INTEGER NOT NULL CHECK (recall_enabled IN (0, 1)),
     updated_at TEXT NOT NULL
+  )`,
+];
+const RECALL_EVENT_CHECK_LIST = events_1.RECALL_EVENT_NAMES.map((event) => `'${event}'`).join(", ");
+exports.schemaV6Ddl = [
+    `CREATE TABLE recall_events_v6 (
+    id INTEGER PRIMARY KEY,
+    session_id TEXT,
+    event TEXT NOT NULL CHECK (event IN (${RECALL_EVENT_CHECK_LIST})),
+    at TEXT NOT NULL,
+    injected INTEGER NOT NULL CHECK (injected >= 0)
+  )`,
+    `INSERT INTO recall_events_v6 (id, session_id, event, at, injected)
+    SELECT id, session_id, event, at, injected FROM recall_events`,
+    "DROP TABLE recall_events",
+    "ALTER TABLE recall_events_v6 RENAME TO recall_events",
+    `CREATE TABLE failure_recalls (
+    session_id TEXT NOT NULL,
+    head TEXT NOT NULL CHECK (length(head) <= ${cfg_1.SIGNAL_DETAIL_MAX_CHARS}),
+    recalled_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, head)
   )`,
 ];
 exports.vecTableDdl = `CREATE VIRTUAL TABLE memories_vec USING vec0(

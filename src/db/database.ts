@@ -12,6 +12,7 @@ import {
   schemaV3Ddl,
   schemaV4Ddl,
   schemaV5Ddl,
+  schemaV6Ddl,
   vecTableDdl,
 } from "./schema";
 
@@ -45,6 +46,7 @@ const migrationSteps: readonly MigrationStep[] = [
   { version: 3, apply: migrateToV3 },
   { version: 4, apply: (db) => execAll(db, schemaV4Ddl) },
   { version: 5, apply: (db) => execAll(db, schemaV5Ddl) },
+  { version: 6, apply: (db) => execAll(db, schemaV6Ddl) },
 ];
 
 function execAll(db: Db, statements: readonly string[]): void {

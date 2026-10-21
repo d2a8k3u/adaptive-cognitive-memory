@@ -23,6 +23,7 @@ import {
   schemaV2Ddl,
   schemaV3Ddl,
   schemaV4Ddl,
+  schemaV5Ddl,
   vecTableDdl,
 } from "../src/db/schema";
 import { PLUGIN_VERSION } from "../src/version";
@@ -221,6 +222,82 @@ function createV4Database(dbPath: string): void {
     }
     raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '4')").run();
     insertMemory(raw, memoryRow({ id: "mem-v4" }));
+  } finally {
+    raw.close();
+  }
+}
+
+const V5_RECALL_EVENTS = [
+  { id: 7, session_id: "s1", event: "SessionStart", at: "2026-10-14T00:00:00.000Z", injected: 2 },
+  {
+    id: 9,
+    session_id: null,
+    event: "UserPromptSubmit",
+    at: "2026-10-14T00:01:00.000Z",
+    injected: 0,
+  },
+  { id: 12, session_id: "s1", event: "PreToolUse", at: "2026-10-14T00:02:00.000Z", injected: 1 },
+] as const;
+
+function createV5Database(dbPath: string): void {
+  const raw = new Database(dbPath);
+  try {
+    raw.loadExtension(getLoadablePath());
+    for (const statement of [
+      ...baselineDdl,
+      ...schemaV2Ddl,
+      ...schemaV3Ddl,
+      ...schemaV4Ddl,
+      ...schemaV5Ddl,
+      vecTableDdl,
+    ]) {
+      raw.exec(statement);
+    }
+    raw
+      .prepare(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', '5'), ('writer_version', '0.1.1')",
+      )
+      .run();
+    insertMemory(raw, memoryRow({ id: "mem-v5" }));
+    const recallEvent = raw.prepare(
+      "INSERT INTO recall_events (id, session_id, event, at, injected) VALUES (@id, @session_id, @event, @at, @injected)",
+    );
+    for (const row of V5_RECALL_EVENTS) {
+      recallEvent.run(row);
+    }
+    raw
+      .prepare(
+        "INSERT INTO command_failures (session_id, head, failed_at) VALUES ('s1', 'pytest', '2026-10-14T00:03:00.000Z')",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO project_settings (project_id, recall_enabled, updated_at) VALUES ('proj-a', 0, '2026-10-14T00:04:00.000Z')",
+      )
+      .run();
+  } finally {
+    raw.close();
+  }
+}
+
+function tableRowCounts(db: Db): Record<string, number> {
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+    .pluck()
+    .all() as string[];
+  return Object.fromEntries(
+    tables.map((table) => [
+      table,
+      db.prepare(`SELECT count(*) FROM "${table}"`).pluck().get() as number,
+    ]),
+  );
+}
+
+function v5TableRowCounts(dbPath: string): Record<string, number> {
+  const raw = new Database(dbPath);
+  try {
+    raw.loadExtension(getLoadablePath());
+    return tableRowCounts(raw);
   } finally {
     raw.close();
   }
@@ -539,7 +616,7 @@ describe("schema v5 migration", () => {
 
     const opened = openDatabase(config);
     try {
-      expect(metaValue(opened.db, "schema_version")).toBe("5");
+      expect(metaValue(opened.db, "schema_version")).toBe(String(SCHEMA_VERSION));
       expect(opened.db.prepare("SELECT id FROM memories").all()).toEqual([{ id: "mem-v4" }]);
       const recallEvent = opened.db.prepare(
         "INSERT INTO recall_events (session_id, event, at, injected) VALUES (?, ?, '2026-10-14T00:00:00.000Z', ?)",
@@ -561,6 +638,43 @@ describe("schema v5 migration", () => {
       recallSwitch.run("proj-b", 1);
       expect(() => recallSwitch.run("proj-c", 2)).toThrow(/CHECK constraint failed/);
       expect(() => recallSwitch.run("proj-a", 1)).toThrow(/UNIQUE constraint failed/);
+    } finally {
+      opened.db.close();
+    }
+  });
+});
+
+describe("schema v6 migration", () => {
+  it("migrates a v5 database: recall events rebuilt with the failure event and their ids, failure claims added, every row kept", () => {
+    const config = tempConfig();
+    createV5Database(config.dbPath);
+    const before = v5TableRowCounts(config.dbPath);
+
+    const opened = openDatabase(config);
+    try {
+      expect(metaValue(opened.db, "schema_version")).toBe("6");
+      expect(tableRowCounts(opened.db)).toEqual({ ...before, failure_recalls: 0 });
+      expect(
+        opened.db
+          .prepare("SELECT id, session_id, event, at, injected FROM recall_events ORDER BY id")
+          .all(),
+      ).toEqual(V5_RECALL_EVENTS);
+      const recallEvent = opened.db.prepare(
+        "INSERT INTO recall_events (session_id, event, at, injected) VALUES ('s2', ?, '2026-10-21T00:00:00.000Z', ?)",
+      );
+      expect(Number(recallEvent.run("PostToolUseFailure", 1).lastInsertRowid)).toBe(13);
+      for (const [event, injected, failure] of [
+        ["Stop", 0, /CHECK constraint failed/],
+        ["PostToolUseFailure", -1, /CHECK constraint failed/],
+      ] as const) {
+        expect(() => recallEvent.run(event, injected), event).toThrow(failure);
+      }
+      const claim = opened.db.prepare(
+        "INSERT INTO failure_recalls (session_id, head, recalled_at) VALUES ('s1', ?, '2026-10-21T00:00:00.000Z')",
+      );
+      claim.run("x".repeat(200));
+      expect(() => claim.run("x".repeat(201))).toThrow(/CHECK constraint failed/);
+      expect(() => claim.run("x".repeat(200))).toThrow(/UNIQUE constraint failed/);
     } finally {
       opened.db.close();
     }

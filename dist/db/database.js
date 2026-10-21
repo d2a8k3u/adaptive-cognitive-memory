@@ -33,6 +33,7 @@ const migrationSteps = [
     { version: 3, apply: migrateToV3 },
     { version: 4, apply: (db) => execAll(db, schema_1.schemaV4Ddl) },
     { version: 5, apply: (db) => execAll(db, schema_1.schemaV5Ddl) },
+    { version: 6, apply: (db) => execAll(db, schema_1.schemaV6Ddl) },
 ];
 function execAll(db, statements) {
     for (const statement of statements) {
