@@ -1,13 +1,22 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUDGET_MIN_TOKENS, loadConfig } from "../src/cfg";
 import { openDatabase } from "../src/db/database";
+import type { RecalledMemory } from "../src/gate";
 import { projectIdentity, resolveProjectId } from "../src/ids";
 import type { MemoryKind } from "../src/policy";
 import { sessionStartLimit } from "../src/search";
+import { type PinnedCandidate, sessionStartMemories } from "../src/session";
 import { testModelCacheDir } from "../vitest.config";
 import { type ProcessResult, runProcess } from "./fixtures/seed";
 
@@ -104,6 +113,14 @@ const TICKET_ROWS: readonly SeededRow[] = [
     importance: 0.5,
     projectId: FOREIGN_PROJECT_ID,
   },
+  {
+    id: seededId("INPROSE"),
+    kind: "fact",
+    anchors: [],
+    keywords: "guide list release notes",
+    abstract: `the ${TICKET} fix shipped in the release notes`,
+    importance: 0.5,
+  },
 ];
 
 const BASELINE_CONTEXT = [
@@ -152,12 +169,32 @@ function repository(...steps: readonly (readonly string[])[]): string {
   return dir;
 }
 
-function failingGitPath(): string {
-  const dir = tempDir("acm-branch-failing-git-");
+function gitShimPath(script: string): string {
+  const dir = tempDir("acm-branch-git-shim-");
   const path = join(dir, "git");
-  writeFileSync(path, "#!/bin/sh\necho 'fatal: unable to read the repository' >&2\nexit 1\n");
+  writeFileSync(path, `#!/bin/sh\n${script}`);
   chmodSync(path, 0o755);
   return dir;
+}
+
+function failingGitPath(): string {
+  return gitShimPath("echo 'fatal: unable to read the repository' >&2\nexit 1\n");
+}
+
+function countingGitPath(calls: string): string {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  return gitShimPath(`echo call >> '${calls}'\nexec '${realGit}' "$@"\n`);
+}
+
+function recalledRow(id: string, kind: MemoryKind): RecalledMemory {
+  return {
+    id,
+    kind,
+    epistemic: "verified",
+    scope: "project",
+    abstract: `abstract ${id}`,
+    validFrom: "2026-10-13T00:00:00.000Z",
+  };
 }
 
 function checkedOut(dir: string): Checkout {
@@ -318,6 +355,47 @@ describe("SessionStart on a ticket branch", () => {
 
     expect(onMain.stdout).toContain(seededId("PINNED0"));
     expect(onTicketBranch).toEqual(onMain);
+  });
+
+  it("spends one git process per session start on the project and its branch", async () => {
+    const calls = join(tempDir("acm-branch-git-calls-"), "calls");
+    const checkout = {
+      ...checkedOut(repository(COMMIT, ON_TICKET_BRANCH)),
+      path: countingGitPath(calls),
+    };
+
+    const result = await sessionStartIn(checkout, [TICKET_ANCHORED]);
+
+    expect({
+      injected: injectedSeededIds(result),
+      gitProcesses: readFileSync(calls, "utf8").split("\n").length - 1,
+    }).toEqual({ injected: [TICKET_ANCHORED.id], gitProcesses: 1 });
+  });
+});
+
+describe("session start order with ticket rows", () => {
+  it("puts the ticket rows after the pinned rows and before the carried rows, each once, and cuts the tail at the limit", () => {
+    const pinnedRule: PinnedCandidate = {
+      ...recalledRow("p-rule", "constraint"),
+      importance: 0.5,
+      createdAt: "2026-10-13T00:00:00.000Z",
+      lastActivityAt: "2026-10-13T00:00:00.000Z",
+    };
+
+    const rows = sessionStartMemories({
+      source: "resume",
+      pinned: [pinnedRule],
+      ticket: [recalledRow("t-first", "fact"), pinnedRule, recalledRow("t-second", "fact")],
+      earlier: [
+        recalledRow("t-first", "fact"),
+        recalledRow("c-carried", "fact"),
+        recalledRow("c-cut", "fact"),
+      ],
+      recentEventTimes: [],
+      limit: 4,
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["p-rule", "t-first", "t-second", "c-carried"]);
   });
 });
 

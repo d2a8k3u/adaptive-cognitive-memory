@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -216,5 +217,14 @@ describe("collectLocationFacts branch", () => {
       gitCommonDir: commonDir,
       branch: undefined,
     });
+  });
+
+  it("lets a HEAD read failure other than a missing or unreadable file propagate", () => {
+    const plain = tempDir("acm-ids-looping-");
+    const gitDir = tempDir("acm-ids-looping-gitdir-");
+    symlinkSync(join(gitDir, "HEAD"), join(gitDir, "HEAD"));
+    vi.stubEnv("PATH", fakeGitDir(`#!/bin/sh\necho '${gitDir}'\necho '${gitDir}'\n`));
+
+    expect(() => collectLocationFacts(plain)).toThrow(/ELOOP/);
   });
 });
