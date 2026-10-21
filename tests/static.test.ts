@@ -666,6 +666,53 @@ describe("browse and curate docs", () => {
   });
 });
 
+const MARKDOWN_LINK_TARGET = /\]\(([^)\s]+)\)/g;
+const URL_SCHEME = /^[a-z]+:/;
+
+function headingSlugs(text: string): Set<string> {
+  return new Set(
+    text
+      .split("\n")
+      .filter((line) => /^#{1,6} /.test(line))
+      .map((line) =>
+        line
+          .replace(/^#+ /, "")
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N} _-]/gu, "")
+          .replaceAll(" ", "-"),
+      ),
+  );
+}
+
+function linkResolves(file: string, target: string): boolean {
+  const [path = "", anchor] = target.split("#");
+  const linked = path === "" ? file : join(dirname(file), path);
+  if (!existsSync(linked)) {
+    return false;
+  }
+  return anchor === undefined || headingSlugs(readFileSync(linked, "utf8")).has(anchor);
+}
+
+describe("docs links", () => {
+  it("every relative link in the README, CONTRIBUTING and docs points at an existing file and heading", () => {
+    const markdownFiles = [
+      join(process.cwd(), "README.md"),
+      join(process.cwd(), "CONTRIBUTING.md"),
+      ...readdirSync(DOCS_DIR)
+        .filter((name) => name.endsWith(".md"))
+        .map((name) => join(DOCS_DIR, name)),
+    ];
+    const broken = markdownFiles.flatMap((file) =>
+      [...readFileSync(file, "utf8").matchAll(MARKDOWN_LINK_TARGET)]
+        .map((match) => match[1] ?? "")
+        .filter((target) => !URL_SCHEME.test(target) && !linkResolves(file, target))
+        .map((target) => `${relative(process.cwd(), file)} → ${target}`),
+    );
+
+    expect(broken).toEqual([]);
+  });
+});
+
 const LIST_TOOL_MAX_CHARS = 600;
 const DESCRIPTION_MAX_CHARS = 4096;
 const ALL_TOOLS_MAX_CHARS = 5500;
