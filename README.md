@@ -154,7 +154,7 @@ Every check has `status` `ok`, `warn` or `fail` (`ok: false` only for `fail`), a
 
 ## Statusline badge
 
-The badge is opt-in: until you run `/memory-statusline on`, no hook or command writes a statusline file. `on` installs a small shim and an enabled marker in `${CLAUDE_PLUGIN_DATA}/statusline/` and prints one line for your own statusline command; the plugin never reads or writes any `settings.json`. While the badge is on, each recall hook (session start, prompt, pre-tool) writes its session's badge state there: one file per session, replaced atomically, so a reader never sees a torn file. Session start prunes state files older than 30 days and reinstalls the shim after a plugin update.
+The badge is opt-in: until you run `/memory-statusline on`, no hook or command writes a statusline file. `on` installs a small shim and an enabled marker in `${CLAUDE_PLUGIN_DATA}/statusline/` and prints one line for your own statusline command; the badge never reads or writes any `settings.json`. While the badge is on, each recall hook (session start, prompt, pre-tool) writes its session's badge state there: one file per session, replaced atomically, so a reader never sees a torn file. Session start prunes state files older than 30 days and reinstalls the shim after a plugin update.
 
 The badge is one line of at most 40 characters, `mem <n> · last <event> <hh:mm>` (the distinct memories injected in this session, the last recall event and its local time), or `mem off` while recall is off for the project. The shim reads only node built-ins and its own files, never the database. It prints nothing and exits 0 when there is nothing to show: badge off, unknown session, missing or unreadable state, malformed stdin.
 
