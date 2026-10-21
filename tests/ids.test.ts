@@ -109,6 +109,18 @@ describe("collectLocationFacts", () => {
     expect(collectLocationFacts(nested).realpath).toBe(nested);
   });
 
+  it("keeps the common git dir identity and reports no branch when the repository path contains a newline", () => {
+    const root = tempDir("acm-ids-line\nbreak-");
+    git(root, "init", "-q", "-b", "main");
+
+    expect(collectLocationFacts(root)).toEqual({
+      realpath: root,
+      gitCommonDir: join(root, ".git"),
+      dubiousRepository: undefined,
+      branch: undefined,
+    });
+  });
+
   it("reports the real path and no git dir outside a repository", () => {
     const linkedPath = mkdtempSync(join(tmpdir(), "acm-ids-plain-"));
 

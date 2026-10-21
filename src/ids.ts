@@ -8,6 +8,7 @@ const ulid = monotonicFactory();
 export const ID_MAX_CHARS = 26;
 const PROJECT_ID_HEX_CHARS = 16;
 const GIT_QUERY_TIMEOUT_MS = 2_000;
+const LOCATION_LINE_COUNT = 2;
 const GIT_NOT_INSTALLED_CODE = "ENOENT";
 const DUBIOUS_OWNERSHIP = /detected dubious ownership in repository at '([^']+)'/;
 const HEAD_FILE = "HEAD";
@@ -30,7 +31,11 @@ export interface LocationFacts extends ProjectLocation {
 }
 
 type GitAnswer =
-  | { readonly kind: "repository"; readonly commonDir: string; readonly gitDir: string }
+  | {
+      readonly kind: "repository";
+      readonly commonDir: string;
+      readonly gitDir: string | undefined;
+    }
   | { readonly kind: "outside" }
   | { readonly kind: "dubious_ownership"; readonly repository: string };
 
@@ -56,7 +61,10 @@ export function collectLocationFacts(dir: string): LocationFacts {
     realpath,
     gitCommonDir: answer.kind === "repository" ? realpathSync(answer.commonDir) : undefined,
     dubiousRepository: answer.kind === "dubious_ownership" ? answer.repository : undefined,
-    branch: answer.kind === "repository" ? headBranch(answer.gitDir) : undefined,
+    branch:
+      answer.kind === "repository" && answer.gitDir !== undefined
+        ? headBranch(answer.gitDir)
+        : undefined,
   };
 }
 
@@ -89,25 +97,30 @@ function headUnreadable(error: unknown): boolean {
   );
 }
 
-function repositoryAnswer(stdout: string): GitAnswer {
+function unambiguousLocation(stdout: string): GitAnswer | undefined {
   const lines = stdout.trimEnd().split("\n");
   const [commonDir, gitDir] = lines;
-  if (lines.length !== 2 || commonDir === undefined || gitDir === undefined) {
-    throw new Error(
-      `git rev-parse answered ${lines.length} lines instead of the common dir and the git dir`,
-    );
-  }
-  return { kind: "repository", commonDir, gitDir };
+  return lines.length === LOCATION_LINE_COUNT && commonDir !== undefined && gitDir !== undefined
+    ? { kind: "repository", commonDir, gitDir }
+    : undefined;
+}
+
+function revParse(dir: string, ...queries: readonly string[]): string {
+  return execFileSync("git", ["-C", dir, "rev-parse", "--path-format=absolute", ...queries], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: GIT_QUERY_TIMEOUT_MS,
+  });
 }
 
 function queryGitLocation(dir: string): GitAnswer {
   try {
-    return repositoryAnswer(
-      execFileSync(
-        "git",
-        ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: GIT_QUERY_TIMEOUT_MS },
-      ),
+    return (
+      unambiguousLocation(revParse(dir, "--git-common-dir", "--git-dir")) ?? {
+        kind: "repository",
+        commonDir: revParse(dir, "--git-common-dir").trim(),
+        gitDir: undefined,
+      }
     );
   } catch (error) {
     if (gitNotInstalled(error)) {

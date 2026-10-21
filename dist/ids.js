@@ -15,6 +15,7 @@ const ulid = (0, ulid_1.monotonicFactory)();
 exports.ID_MAX_CHARS = 26;
 const PROJECT_ID_HEX_CHARS = 16;
 const GIT_QUERY_TIMEOUT_MS = 2_000;
+const LOCATION_LINE_COUNT = 2;
 const GIT_NOT_INSTALLED_CODE = "ENOENT";
 const DUBIOUS_OWNERSHIP = /detected dubious ownership in repository at '([^']+)'/;
 const HEAD_FILE = "HEAD";
@@ -44,7 +45,9 @@ function collectLocationFacts(dir) {
         realpath,
         gitCommonDir: answer.kind === "repository" ? (0, node_fs_1.realpathSync)(answer.commonDir) : undefined,
         dubiousRepository: answer.kind === "dubious_ownership" ? answer.repository : undefined,
-        branch: answer.kind === "repository" ? headBranch(answer.gitDir) : undefined,
+        branch: answer.kind === "repository" && answer.gitDir !== undefined
+            ? headBranch(answer.gitDir)
+            : undefined,
     };
 }
 function resolveProjectId(dir) {
@@ -71,17 +74,27 @@ function headUnreadable(error) {
         typeof error.code === "string" &&
         UNREADABLE_HEAD_CODES.has(error.code));
 }
-function repositoryAnswer(stdout) {
+function unambiguousLocation(stdout) {
     const lines = stdout.trimEnd().split("\n");
     const [commonDir, gitDir] = lines;
-    if (lines.length !== 2 || commonDir === undefined || gitDir === undefined) {
-        throw new Error(`git rev-parse answered ${lines.length} lines instead of the common dir and the git dir`);
-    }
-    return { kind: "repository", commonDir, gitDir };
+    return lines.length === LOCATION_LINE_COUNT && commonDir !== undefined && gitDir !== undefined
+        ? { kind: "repository", commonDir, gitDir }
+        : undefined;
+}
+function revParse(dir, ...queries) {
+    return (0, node_child_process_1.execFileSync)("git", ["-C", dir, "rev-parse", "--path-format=absolute", ...queries], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: GIT_QUERY_TIMEOUT_MS,
+    });
 }
 function queryGitLocation(dir) {
     try {
-        return repositoryAnswer((0, node_child_process_1.execFileSync)("git", ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: GIT_QUERY_TIMEOUT_MS }));
+        return (unambiguousLocation(revParse(dir, "--git-common-dir", "--git-dir")) ?? {
+            kind: "repository",
+            commonDir: revParse(dir, "--git-common-dir").trim(),
+            gitDir: undefined,
+        });
     }
     catch (error) {
         if (gitNotInstalled(error)) {
