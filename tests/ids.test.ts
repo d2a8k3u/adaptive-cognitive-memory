@@ -121,6 +121,22 @@ describe("collectLocationFacts", () => {
     });
   });
 
+  it("names a repository git refuses on the fallback common dir query as it does on the first query", () => {
+    const plain = tempDir("acm-ids-fallback-dubious-");
+    vi.stubEnv(
+      "PATH",
+      fakeGitDir(
+        `#!/bin/sh\ncase "$*" in\n*--git-dir*) printf '%s\\n' /repo/new line/.git /repo/new line/.git ;;\n*) echo "fatal: detected dubious ownership in repository at '${plain}'" >&2; exit 128 ;;\nesac\n`,
+      ),
+    );
+
+    expect(collectLocationFacts(plain)).toEqual({
+      realpath: plain,
+      gitCommonDir: undefined,
+      dubiousRepository: plain,
+    });
+  });
+
   it("reports the real path and no git dir outside a repository", () => {
     const linkedPath = mkdtempSync(join(tmpdir(), "acm-ids-plain-"));
 
