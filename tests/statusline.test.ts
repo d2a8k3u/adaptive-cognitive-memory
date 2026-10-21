@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   utimesSync,
@@ -19,7 +20,13 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/cfg";
 import { openDatabase } from "../src/db/database";
 import { resolveProjectId } from "../src/ids";
-import { enableStatusline, refreshShim, statuslinePaths, writeBadgeState } from "../src/statusline";
+import {
+  disableStatusline,
+  enableStatusline,
+  refreshShim,
+  statuslinePaths,
+  writeBadgeState,
+} from "../src/statusline";
 import {
   type BadgeSessionId,
   type BadgeState,
@@ -42,8 +49,9 @@ const USER_STATUS_LINE = `${JSON.stringify(
   2,
 )}\n`;
 const STATE_SESSION_ID = "5f0c2c1e-4b8e-4d7a-9a51-2f1e8c3d7b60";
+const HALF_HOUR_OFFSET_TIME_ZONE = "Asia/Kolkata";
 const STATE_AT = "2026-10-20T09:05:00.000Z";
-const STATE_LINE = "mem 2 · last UserPromptSubmit 09:05\n";
+const STATE_LINE = "mem 2 · last UserPromptSubmit 14:35\n";
 const PROJECT_DIR = realpathSync(mkdtempSync(join(tmpdir(), "acm-statusline-project-")));
 const ANCHORED_PATH = "billing/tax.py";
 const ANCHORED_IDS = [
@@ -113,7 +121,7 @@ function pluginEnv(pluginData: string, home: string): NodeJS.ProcessEnv {
     ACM_MODEL_REMOTE_HOST: UNREACHABLE_MODEL_HOST,
     CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false",
     PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
-    TZ: "UTC",
+    TZ: HALF_HOUR_OFFSET_TIME_ZONE,
   };
 }
 
@@ -330,14 +338,23 @@ describe("statusline on (FR-24)", () => {
     { input: "a backtick", character: "`" },
     { input: "a backslash", character: "\\" },
     { input: "a line break", character: "\n" },
-  ])("refuses a plugin data path holding $input before writing anything", ({ character }) => {
-    const pluginData = mkdtempSync(join(tmpdir(), `acm-statusline-${character}-`));
+  ])(
+    "on and off refuse a plugin data path holding $input before touching its statusline files",
+    ({ character }) => {
+      const pluginData = mkdtempSync(join(tmpdir(), `acm-statusline-${character}-`));
+      const statuslineDir = join(pluginData, "statusline");
 
-    expect(() => enableStatusline(pluginData, Buffer.from("shim"), STATE_AT)).toThrow(
-      /cannot be quoted in the statusline snippet/,
-    );
-    expect(existsSync(join(pluginData, "statusline"))).toBe(false);
-  });
+      expect(() => enableStatusline(pluginData, Buffer.from("shim"), STATE_AT)).toThrow(
+        /cannot be quoted in the statusline snippet/,
+      );
+      expect(existsSync(statuslineDir)).toBe(false);
+      mkdirSync(statuslineDir);
+      expect(() => disableStatusline(pluginData)).toThrow(
+        /cannot be quoted in the statusline snippet/,
+      );
+      expect(existsSync(statuslineDir)).toBe(true);
+    },
+  );
 
   it("feeds the badge through a script that captures stdin once and replays it into the snippet", async () => {
     const { pluginData, env, snippet } = await enabledWorld();
@@ -411,10 +428,15 @@ describe("badge shim (FR-26, FR-27)", () => {
       },
     },
     {
-      input: "a session_id that climbs out of sessions/",
+      input: "a session_id that climbs out of sessions/ to a valid state",
       arrange: ({ pluginData }: EnabledWorld) => {
         writeState(pluginData);
-        return statuslineInput("../enabled");
+        const climbed = `${STATE_SESSION_ID}.json`;
+        renameSync(
+          join(pluginData, "statusline", "sessions", climbed),
+          join(pluginData, "statusline", climbed),
+        );
+        return statuslineInput(`../${STATE_SESSION_ID}`);
       },
     },
     {
@@ -449,6 +471,13 @@ describe("badge shim (FR-26, FR-27)", () => {
         return statuslineInput(STATE_SESSION_ID);
       },
     },
+    {
+      input: "state last_at not a timestamp",
+      arrange: ({ pluginData }: EnabledWorld) => {
+        writeState(pluginData, { last_at: "yesterday" });
+        return statuslineInput(STATE_SESSION_ID);
+      },
+    },
   ])("prints nothing and exits 0 when $input", async ({ arrange }) => {
     expect(await statuslineAfter(arrange)).toEqual(SILENT);
   });
@@ -469,6 +498,23 @@ describe("badge state written by the recall hooks (FR-26, FR-28)", () => {
     expect(ANCHORED_IDS.filter((id) => read.stdout.includes(id))).toEqual(ANCHORED_IDS);
     expect(counted.stdout).toMatch(/^mem 3 · last PreToolUse \d{2}:\d{2}\n$/);
     expect(off).toEqual({ code: 0, stdout: "mem off\n", stderr: "" });
+  });
+
+  it.each([
+    { event: "SessionStart", recallHook: sessionStartEvent },
+    { event: "PreToolUse", recallHook: readEvent },
+  ])("$event writes mem off once recall is off for the project", async ({ recallHook }) => {
+    const { env, snippet } = await enabledWorld();
+    const sessionId = "6a7b8c9d-3333-4e5f-8a9b-recalloffpath";
+    expect((await hook(env, bashEvent(sessionId, "PreToolUse"))).code).toBe(0);
+    const before = await shell(env, snippet, statuslineInput(sessionId));
+    expect((await cli(env, ["recall", "off"], PROJECT_DIR)).code).toBe(0);
+
+    expect((await hook(env, recallHook(sessionId))).code).toBe(0);
+    const after = await shell(env, snippet, statuslineInput(sessionId));
+
+    expect(before.stdout).toMatch(/^mem 0 · last PreToolUse \d{2}:\d{2}\n$/);
+    expect(after).toEqual({ code: 0, stdout: "mem off\n", stderr: "" });
   });
 
   it("keeps the injection and names the fs error in one stderr line when the badge cannot be written", async () => {
@@ -569,9 +615,10 @@ describe("default off (FR-25)", () => {
     }
     await cli(env, ["doctor"], PROJECT_DIR);
 
-    expect([...hookRuns, ...commandRuns].map((run) => run.code)).toEqual(
-      [...events, ...commands].map(() => 0),
+    expect(hookRuns.map(({ code, stderr }) => ({ code, stderr }))).toEqual(
+      events.map(() => ({ code: 0, stderr: "" })),
     );
+    expect(commandRuns.map((run) => run.code)).toEqual(commands.map(() => 0));
     expect(existsSync(join(pluginData, "statusline"))).toBe(false);
   });
 });
@@ -647,7 +694,7 @@ describe("statusline off (FR-29)", () => {
     const afterOff = await hook(env, bashEvent(sessionId, "PreToolUse"));
 
     expect(off).toEqual({ code: 0, stdout: `${snippetFor(pluginData)}\n`, stderr: "" });
-    expect(afterOff.code).toBe(0);
+    expect(afterOff).toEqual({ code: 0, stdout: "", stderr: "" });
     expect(existsSync(join(pluginData, "statusline"))).toBe(false);
     expect(readFileSync(settings, "utf8")).toBe(USER_STATUS_LINE);
     expect(statSync(settings).mtimeMs).toBe(mtimeBefore);
