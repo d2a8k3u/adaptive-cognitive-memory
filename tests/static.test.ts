@@ -20,6 +20,7 @@ import { ABSTRACT_MAX_CHARS, CONTENT_MAX_CHARS, TITLE_MAX_CHARS } from "../src/c
 import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, LIST_PAGE_MAX_CHARS } from "../src/db/listing";
 import { MAX_HEAD_WORDS } from "../src/keys";
 import { TICKET_ROWS_MAX } from "../src/search";
+import { snippetLine } from "../src/statusline";
 import { hostToolName, MEMORY_SERVER_NAME } from "../src/toolnames";
 import { TOOL_DEFINITIONS, type ToolDefinition } from "../src/tools";
 import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
@@ -239,6 +240,7 @@ describe("plugin commands", () => {
     expect(invoking.map(({ name }) => name).sort()).toEqual([
       "memory-doctor.md",
       "memory-recall.md",
+      "memory-statusline.md",
     ]);
     for (const { name, text } of invoking) {
       const withPluginData = `CLAUDE_PLUGIN_DATA="\${CLAUDE_PLUGIN_DATA}" ${cliInvocation}`;
@@ -578,6 +580,32 @@ describe("memory-curate skill", () => {
     expect(text).toContain(AUTHORING_REFERENCE_PATH);
     expect(linked !== undefined && existsSync(join(CURATE_SKILL_DIR, linked))).toBe(true);
     expect(RENDERED_LIMITS.filter((limit) => text.includes(limit))).toEqual([]);
+  });
+});
+
+const REPLAY_PREFIX = `printf '%s' "$input" | `;
+
+describe("statusline docs (FR-30)", () => {
+  const placeholderSnippet = snippetLine("<plugin data dir>/statusline/badge.cjs");
+
+  it("README statusline section shows the opt-in command, the snippet in its replay form, and off plus removing the line before uninstall", () => {
+    const section = markdownSection(
+      readFileSync(join(process.cwd(), "README.md"), "utf8"),
+      "## Statusline badge",
+    ).join("\n");
+
+    expect(section).toContain("`/memory-statusline on`");
+    expect(section).toContain(`${REPLAY_PREFIX}${placeholderSnippet}`);
+    expect(section).toContain("never reads or writes any `settings.json`");
+    expect(section).toContain(
+      "run `/memory-statusline off` and remove the line from your statusline script",
+    );
+  });
+
+  it("the memory-statusline command shows the replay form of the line it prints", () => {
+    const command = readFileSync(join(process.cwd(), "commands", "memory-statusline.md"), "utf8");
+
+    expect(command).toContain(`${REPLAY_PREFIX}<the line>`);
   });
 });
 
