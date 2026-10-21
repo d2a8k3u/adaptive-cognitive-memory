@@ -26,7 +26,7 @@ export interface PinnedCandidate extends RecalledMemory {
 export interface SessionStartInput {
   readonly source: string | undefined;
   readonly pinned: readonly PinnedCandidate[];
-  readonly ticket?: readonly RecalledMemory[];
+  readonly ticket: readonly RecalledMemory[];
   readonly earlier: readonly RecalledMemory[];
   readonly recentEventTimes: readonly string[];
   readonly limit: number;
@@ -83,7 +83,7 @@ export function sessionStartMemories(input: SessionStartInput): RecalledMemory[]
   const carried = REINJECTING_SOURCES.has(input.source ?? "") ? input.earlier : [];
   return firstOccurrences([
     ...rankedPinned(input.pinned, input.recentEventTimes),
-    ...(input.ticket ?? []),
+    ...input.ticket,
     ...carried,
   ]).slice(0, input.limit);
 }

@@ -53,7 +53,7 @@ function sessionStartMemories(input) {
     const carried = REINJECTING_SOURCES.has(input.source ?? "") ? input.earlier : [];
     return firstOccurrences([
         ...rankedPinned(input.pinned, input.recentEventTimes),
-        ...(input.ticket ?? []),
+        ...input.ticket,
         ...carried,
     ]).slice(0, input.limit);
 }

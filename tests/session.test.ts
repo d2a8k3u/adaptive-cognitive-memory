@@ -61,6 +61,7 @@ describe("sessionStartMemories", () => {
     const rows = sessionStartMemories({
       source: "startup",
       pinned: candidates,
+      ticket: [],
       earlier: [recalled("e-fact")],
       recentEventTimes: staleTimes,
       limit: 10,
@@ -75,6 +76,7 @@ describe("sessionStartMemories", () => {
       const rows = sessionStartMemories({
         source,
         pinned: candidates,
+        ticket: [],
         earlier: [
           recalled("e-procedure", "procedure"),
           recalled("p-fresh-old"),
@@ -92,6 +94,7 @@ describe("sessionStartMemories", () => {
     const rows = sessionStartMemories({
       source: "compact",
       pinned: candidates,
+      ticket: [],
       earlier: [recalled("e-fact")],
       recentEventTimes: staleTimes,
       limit: 2,
