@@ -1,0 +1,52 @@
+# Recall
+
+Hooks inject one-line abstracts under a token budget at session start, on every user prompt, before tool calls and after a failed Bash command; Claude expands a memory's full body with `memory_get` using the full id on the recalled line.
+
+## What Claude sees
+
+Injection shape (abstracts only, never content; token estimate = chars/4; never more than 9,500 characters whatever the budget, since the host truncates additional context above 10,000):
+
+```
+Native auto memory is also on: store durable lessons with memory_store, not in the auto-memory MEMORY.md.
+memory degraded (model missing) — run /memory-doctor
+<memory>
+Recalled memory from earlier sessions; verify it against the current code. Apply or follow each line, or say why it does not apply, then send memory_feedback with the ids.
+Constraints:
+- Apply — release only from the main branch (valid from 2026-10-13 · project · 01K7Q3M5X8R2C9V4N6B1T0ZJHD)
+Preferences:
+- prefer pnpm for new TypeScript projects (valid from 2026-10-02 · user · 01K6ZP2Y7W3N8D5Q1F4H9GX0RB)
+Project facts:
+- deploys go to the ECS cluster (valid from 2026-10-10 · project · 01K7JD9C4T6M1Q8W2Z5R3N7BXA)
+Procedures:
+- Follow — run uv run pytest -q from the repository root (valid from 2026-10-11 · project · 01K7MA0F3H8B6Y2K9V1D4S7CWE)
+</memory>
+```
+
+The first line appears only at session start while native auto memory is on, the second only when a prompt's recall ran degraded; sections appear only when non-empty. Constraints start with `Apply —`, procedures with `Follow —`.
+
+## When recall runs
+
+| Event | Behaviour | Budget |
+|---|---|---|
+| `SessionStart` | the active constraints and preferences of the user and the project, ranked by derived importance, then rows injected fewer than 500 injection events ago, then recency; on a branch carrying a ticket id then up to 3 rows keyed with it (see below); on `resume` and `compact` also every row injected earlier in the session | `recall_budget_tokens` (1200) |
+| `UserPromptSubmit` | admission first (slash commands, acknowledgements and prompts with fewer than 3 content words inject nothing and never load the model), then vector KNN + FTS5 candidates through a calibrated gate per prompt language: a row must reach an absolute cosine floor (English 0.857, Czech 0.792) and stand out from the mean cosine of the prompt's 10 nearest memories by a margin (English 0.017, Czech 0.013), or reach a lower threshold when its key or keywords match the prompt (English 0.853, Czech 0.781); with fewer than 10 memories in the partition the margin is not computed and a plain cosine threshold applies (English 0.851, Czech 0.788); beliefs and unverified rows also need a key hit; at most 3 rows | `recall_budget_tokens` (1200) |
+| `PreToolUse` (`Bash\|Edit\|Write\|Read`) | no embedding: the Bash command head (`pytest`, `git commit`, `uv run pytest` → also `pytest`) or the read or edited path (relative path, basename, directory prefixes, extensions) matched exactly against each memory's anchors | `pretool_budget_tokens` (300) |
+| `PostToolUseFailure` (`Bash`) | no embedding: terms of the redacted error text matched exactly against each memory's anchors, once per session and command head (see below) | `pretool_budget_tokens` (300) |
+
+Rows already injected in the session since its latest SessionStart are skipped. Dedup scope, observed 2026-10-20: subagent hooks carry the parent's `session_id`, so a row injected in the parent is skipped inside a subagent.
+
+The gate's operating point is measured, not chosen: `npm run eval:sweep` scores the grid on the calibration split (240 positive and 207 negative prompts over partitions of 115 memories) and picks the highest F0.5 among points whose gold hit holds a per-language floor and whose false-injection rate is no worse than the previous gate's in either language; the frozen point lives in `src/calibration.ts`, and a test pins it to the live embedding model and query/passage inputs. It was confirmed once on a fresh, separately written set of 240 positive and 120 negative prompts: precision 44.2% (previous gate 32.2%), gold hit 53.8% (57.9%), false injections 3/120 (8/120), non-gold rows per prompt 0.46 (0.82). The margin makes the gate more conservative as a store grows denser.
+
+An embedding run has a 1.5 s deadline per event; without a query vector `UserPromptSubmit` injects only the degraded warning, which names `embedding timeout` when the deadline passed and `model missing` when the model failed.
+
+## Turning recall off
+
+`/memory-recall off` turns recall off for the current project (its git repository, or its directory outside git): the hooks inject no memories there while capture, the Stop checkpoint, `memory_store` and `memory_search` keep working. `/memory-recall on` restores it.
+
+## Branch-aware session start
+
+Session start reads the current branch inside the `git rev-parse` call that already resolves the project (`--git-common-dir --git-dir`, then the `HEAD` file of the git dir), so no git process is added. The ticket id is the first token of 2–10 letters or digits, a hyphen and 1–6 digits in the branch name, upper-cased: `fix/TOUCH-4945/guide-list-search` and `fix/touch-4945-x` both give `TOUCH-4945`. Words of the branch name are never used. When there is a ticket, up to 3 memories of the project and the user are added after the pinned constraints and preferences and before the rows carried over on `resume` and `compact`, the most important first, within the same budget and the same SessionStart recall event. A memory matches only when one of its anchors equals the ticket id or its keywords hold it as a phrase (`TOUCH-4945` or `touch 4945`); `touch` alone or `TOUCH-49450` never match, and another project's memories never do. A version-like name such as `release-2026` reads as the ticket `RELEASE-2026` and matches only memories keyed with exactly that id. On `main`, a detached HEAD, outside git or when git fails, session start is unchanged. A repository on the reftable ref format keeps no branch in its `HEAD` file, so it gets no ticket rows. In a repository whose path holds a newline the two-line answer is ambiguous, so the project is resolved by one more `git rev-parse --git-common-dir`, with the same id as before, and it gets no ticket rows. To make a lesson come back on its ticket's branch, put the ticket id, upper-case as it appears in the branch, into both `keywords` and `anchors`.
+
+## Recall on a failed Bash command
+
+When a Bash command fails (`PostToolUseFailure`, not an interrupt), the hook takes signature terms from the error text Claude Code passes, redacted first and cut to its first 500 characters, at most 32 of them: error class names (`TypeError`, `ModuleNotFoundError`), upper-case codes (`ENOENT`, `SQLITE_BUSY`, `ECONNREFUSED`, `E401`), the module name after `Cannot find module`, `No module named` or `could not resolve`, and path basenames (`tax.py`). The `Exit code N` line, `:line:col` suffixes, hex runs of 7 or more, durations, timestamps, absolute path prefixes, colour codes, the redaction marker and status words such as `ERROR`, `ERR`, `FAIL` or `PASS` never become terms. A visible memory is injected only when one of its anchors equals a term; its conflict key and keywords are not matched on this path, and the command head alone never admits a row, so a memory anchored only on `pytest` comes back after a failing `pytest` only when the error text itself names `pytest`. Recall runs once per session and command head: the first failure of `pytest` that injects something uses up `pytest` for the rest of the session, even after it passes, while a failure that injects nothing leaves it unused. It shares the PreToolUse budget (`pretool_budget_tokens`), skips rows already injected since the session's latest start, does nothing while recall is off and loads no model. The error text is never stored; only the command head is, as before, for the resolution moment. To make a lesson come back on its error, put the code, class name or module name into `anchors`.

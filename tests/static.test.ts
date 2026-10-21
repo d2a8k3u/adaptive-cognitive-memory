@@ -27,6 +27,7 @@ import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
 
 const DIST_DIR = join(process.cwd(), "dist");
 const HOOK_ENTRY = join(DIST_DIR, "hooks.js");
+const DOCS_DIR = join(process.cwd(), "docs");
 
 const NET_MODULES = new Set([
   "net",
@@ -250,22 +251,22 @@ describe("plugin commands", () => {
 });
 
 describe("recall docs", () => {
-  const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
+  const recall = docText("recall.md");
 
-  it("README states the observed subagent dedup scope", () => {
-    expect(readme).toContain(
+  it("recall doc states the observed subagent dedup scope", () => {
+    expect(recall).toContain(
       "Dedup scope, observed 2026-10-20: subagent hooks carry the parent's `session_id`, so a row injected in the parent is skipped inside a subagent.",
     );
   });
 
-  it("README hook table lists the PreToolUse tools hooks.json matches", () => {
+  it("recall doc hook table lists the PreToolUse tools hooks.json matches", () => {
     const matchers = readJson<{ hooks: { PreToolUse: { matcher: string }[] } }>(
       "hooks",
       "hooks.json",
     ).hooks.PreToolUse.map((group) => group.matcher);
 
     expect(matchers).toHaveLength(1);
-    expect(readme).toContain(`| \`PreToolUse\` (\`${matchers[0]?.replaceAll("|", "\\|")}\`) |`);
+    expect(recall).toContain(`| \`PreToolUse\` (\`${matchers[0]?.replaceAll("|", "\\|")}\`) |`);
   });
 
   it("skill says path anchors fire before Read, Edit and Write", () => {
@@ -282,8 +283,8 @@ describe("recall docs", () => {
     );
   });
 
-  it("README error recall section names the trigger, the anchor-only match, the once-per-head rule, the budget, redaction and an error code", () => {
-    const section = markdownSection(readme, "### Recall on a failed Bash command").join("\n");
+  it("recall doc error recall section names the trigger, the anchor-only match, the once-per-head rule, the budget, redaction and an error code", () => {
+    const section = markdownSection(recall, "## Recall on a failed Bash command").join("\n");
 
     expect(section).toContain("`PostToolUseFailure`");
     expect(section).toContain("only when one of its anchors equals a term");
@@ -305,8 +306,8 @@ describe("recall docs", () => {
     expect(skill).toContain("a command head alone never recalls it");
   });
 
-  it("README branch-aware section names the ticket row cap from its owner, the exact match and the unchanged no-ticket start", () => {
-    const section = markdownSection(readme, "### Branch-aware session start").join("\n");
+  it("recall doc branch-aware section names the ticket row cap from its owner, the exact match and the unchanged no-ticket start", () => {
+    const section = markdownSection(recall, "## Branch-aware session start").join("\n");
 
     expect(section).toContain(`up to ${TICKET_ROWS_MAX} memories`);
     expect(section).toContain("`touch` alone or `TOUCH-49450` never match");
@@ -438,9 +439,13 @@ function markdownSection(text: string, heading: string): string[] {
   return lines.slice(start + 1, end === -1 ? undefined : end).filter((line) => line.trim() !== "");
 }
 
-function readmeLine(prefix: string): string {
+function docText(name: string): string {
+  return readFileSync(join(DOCS_DIR, name), "utf8");
+}
+
+function docLine(name: string, prefix: string): string {
   return (
-    readFileSync(join(process.cwd(), "README.md"), "utf8")
+    docText(name)
       .split("\n")
       .find((line) => line.startsWith(prefix)) ?? ""
   );
@@ -532,8 +537,8 @@ describe("authoring standard docs", () => {
     expect(RENDERED_LIMITS.filter((limit) => summary.join("\n").includes(limit))).toEqual([]);
   });
 
-  it("the README memory_store row names the key limits from their owner, the namespace rule and the anchor forms", () => {
-    const row = readmeLine("| `memory_store` |");
+  it("the tools doc memory_store row names the key limits from their owner, the namespace rule and the anchor forms", () => {
+    const row = docLine("tools.md", "| `memory_store` |");
 
     expect(row).toContain(`\`conflict_key\` (lowercase dotted, ≤${CONFLICT_KEY_MAX_CHARS})`);
     expect(row).toContain(`\`value_text\` (≤${VALUE_TEXT_MAX_CHARS},`);
@@ -545,11 +550,11 @@ describe("authoring standard docs", () => {
     expect(row).toContain(`a command head of at most ${MAX_HEAD_WORDS} words`);
   });
 
-  it("the README states the authoring rejections and that import applies the same key rules", () => {
-    expect(readmeLine("Invalid input returns")).toContain(
+  it("the docs state the authoring rejections and that import applies the same key rules", () => {
+    expect(docLine("tools.md", "Invalid input returns")).toContain(
       "An anchor no recall path can match or a `conflict_key` outside `namespace.topic` with a listed namespace is rejected the same way, the message naming the fix",
     );
-    expect(readmeLine("| `import <file>` |")).toContain(
+    expect(docLine("cli.md", "| `import <file>` |")).toContain(
       'every memory must pass the same key rules as `memory_store` (conflict key, value, keywords, anchors), except that a legacy empty `conflict_key` (`""`) is kept',
     );
   });
@@ -611,11 +616,8 @@ const REPLAY_PREFIX = `printf '%s' "$input" | `;
 describe("statusline docs (FR-30)", () => {
   const placeholderSnippet = snippetLine("<plugin data dir>/statusline/badge.cjs");
 
-  it("README statusline section shows the opt-in command, the snippet in its replay form, and off plus removing the line before uninstall", () => {
-    const section = markdownSection(
-      readFileSync(join(process.cwd(), "README.md"), "utf8"),
-      "## Statusline badge",
-    ).join("\n");
+  it("statusline doc shows the opt-in command, the snippet in its replay form, and off plus removing the line before uninstall", () => {
+    const section = docText("statusline.md");
 
     expect(section).toContain("`/memory-statusline on`");
     expect(section).toContain(`${REPLAY_PREFIX}${placeholderSnippet}`);
@@ -633,8 +635,8 @@ describe("statusline docs (FR-30)", () => {
 });
 
 describe("browse and curate docs", () => {
-  it("the README memory_list row names the filters, the cursor, the limits from their owner and the read-only project all", () => {
-    const row = readmeLine("| `memory_list` |");
+  it("the tools doc memory_list row names the filters, the cursor, the limits from their owner and the read-only project all", () => {
+    const row = docLine("tools.md", "| `memory_list` |");
 
     expect(row).toContain("`state`, `kind`, `type`, `scope`");
     expect(row).toContain("`before` (the `next_cursor` of the previous page)");
@@ -643,13 +645,13 @@ describe("browse and curate docs", () => {
     expect(row).toContain(`${LIST_PAGE_MAX_CHARS.toLocaleString("en-US")} characters`);
   });
 
-  it("the README memory_update row names the key edits and the fixed scope and kind, and the README names the curate skill", () => {
-    const row = readmeLine("| `memory_update` |");
+  it("the tools doc memory_update row names the key edits and the fixed scope and kind, and the tools doc names the curate skill", () => {
+    const row = docLine("tools.md", "| `memory_update` |");
 
     expect(row).toContain("`keywords`, `anchors`");
     expect(row).toContain("replace the stored value whole");
     expect(row).toContain("`scope` or `kind`");
-    expect(readFileSync(join(process.cwd(), "README.md"), "utf8")).toContain("`memory-curate`");
+    expect(docText("tools.md")).toContain("`memory-curate`");
   });
 
   it("the memory skill's curating section names memory_list, the key edits and the curate skill", () => {

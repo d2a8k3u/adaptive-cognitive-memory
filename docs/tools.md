@@ -1,0 +1,24 @@
+# MCP tools and skills
+
+Server name `memory`, so tool ids look like `mcp__plugin_adaptive-cognitive-memory_memory__memory_store`.
+
+| Tool | Arguments | Result |
+|---|---|---|
+| `memory_store` | `title` (≤200), `content` (≤32000), `type`, `kind`, `conflict_key` (lowercase dotted, ≤120) — required; `cardinality` (`single`\|`multi`, default `multi`), `value_text` (≤200, required for `single`), `keywords` (≤300), `anchors` (≤20 × ≤200), `scope` (`project`\|`user`, default `project`), `abstract`, `resolution` (`{action: ADD\|UPDATE\|SUPERSEDE\|NOOP, target?}`). A `conflict_key` is `namespace.topic` with namespace one of `project`, `build`, `test`, `deploy`, `db`, `api`, `code`, `git`, `tool`, `team`, `user`, `error`, `ticket`, and an anchor is a command head of at most 3 words, a project-relative path, a directory prefix ending in `/`, a basename, an extension, an upper-case ticket id or an error code | `{id, action: created\|superseded\|updated\|noop, refId?, promotedId?}` or `{status: needs_resolution, candidates, allowed}` |
+| `memory_search` | `query` (required, may be blank), `limit` (1–100, default 10), `type`, `scope` | `{results: [{id, scope, type, importance, abstract, score}], degraded?}` |
+| `memory_list` | optional filters `state`, `kind`, `type`, `scope`; `before` (the `next_cursor` of the previous page); `limit` (1–50, default 20); `project: "all"` lists every project's memories read-only (never the default; without it only the memories visible to this project) | `{rows: [{id, title, abstract, kind, type, scope, project_id, state, conflict_key, value_text, importance, support_count, injection_count, used_count, wrong_count, valid_from, updated_at}], next_cursor?}`, newest first, never `content`, changing nothing; a page stays within 40,000 characters of JSON, so it can hold fewer rows than `limit`; `next_cursor` is absent on the last page |
+| `memory_get` | `id` (full id or unique prefix) | full record incl. `content`, `state`, `conflict_key`, `value_text`, `superseded_by`, `relations` |
+| `memory_update` | `id`, plus at least one of `title`, `abstract`, `content`, `keywords`, `anchors`; `keywords` and `anchors` replace the stored value whole and pass the same checks as `memory_store`; `scope` or `kind` is rejected (store the memory again, then delete the old one) | updated record; revoked memories are immutable |
+| `memory_feedback` | `ids` (1–20, as recall printed them), `verdict` (`used`\|`wrong`\|`not_applicable`) | `{memories: [{id, state}]}`; `wrong` moves a memory to `hypothesis`, `used` brings it back; a call naming an unknown or revoked id records nothing |
+| `memory_delete` | `id` | `{deleted: true}`; deletes the row, its vector and its relations |
+| `memory_relate` | `source_id`, `target_id`, `relation_type` (≤40) | `{ok: true}`; rejects self-relations, unknown ids and a 21st relation |
+| `memory_status` | — | this project's id and recall switch; memory counts by state × kind for `user` scope and the project; transitions by reason; the share of the newest 500 recall events that injected anything (admission rejections and gate abstentions included), in total and per event (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUseFailure`); the share of memories injected in receipt-giving sessions that never got `used`; the newest 10 open capture signals with session and age; the last 10 injections |
+| `memory_doctor` | — | the doctor report |
+
+Invalid input returns `{error: {field, message}}` and persists nothing. An anchor no recall path can match or a `conflict_key` outside `namespace.topic` with a listed namespace is rejected the same way, the message naming the fix; the standard behind these rules is [`skills/memory/references/authoring.md`](../skills/memory/references/authoring.md). Keys are checked as they will be stored: an anchor holding a secret is rejected, because redaction would change it and it could never match, and `keywords` or a `value_text` that redaction would lengthen past its limit are rejected too. When the native module or the database cannot be used, every tool except `memory_doctor` returns an error naming the cause and the fix.
+
+## Skills
+
+The bundled `memory` skill tells Claude when and how to store, recall and curate memories.
+
+The bundled `memory-curate` skill reviews the memory with the user: status, hypotheses, stale facts, wrong scope, recall keys, then the counts before and after. It proposes each change and deletes, supersedes or updates nothing until the user confirms.
