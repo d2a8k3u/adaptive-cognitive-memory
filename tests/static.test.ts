@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -77,13 +77,17 @@ function localSpecifiersOf(file: string): string[] {
   );
 }
 
+function isFile(path: string): boolean {
+  return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+}
+
 function resolveLocal(fromFile: string, specifier: string): string | undefined {
   const candidate = join(dirname(fromFile), specifier);
-  if (existsSync(candidate)) {
+  if (isFile(candidate)) {
     return candidate;
   }
   const withExtension = `${candidate}.js`;
-  return existsSync(withExtension) ? withExtension : undefined;
+  return isFile(withExtension) ? withExtension : undefined;
 }
 
 function hookClosure(entry: string = HOOK_ENTRY): string[] {
@@ -671,6 +675,8 @@ describe("static dist gates", () => {
     expect(closure).toContain(join(DIST_DIR, "search.js"));
     expect(closure).toContain(join(DIST_DIR, "embeddings.js"));
     expect(closure).toContain(join(DIST_DIR, "branch.js"));
+    expect(closure).toContain(join(DIST_DIR, "statusline.js"));
+    expect(closure).toContain(join(DIST_DIR, "statusline", "badge.js"));
     expect(closure).toContain(listing);
     const offenders: string[] = [];
     for (const file of closure) {
@@ -684,5 +690,11 @@ describe("static dist gates", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps the statusline shim on node:fs and node:path alone, so its byte copy opens no database (NFR-15)", () => {
+    const shim = readFileSync(join(DIST_DIR, "statusline", "badge.js"), "utf8");
+
+    expect([...new Set(specifiersOf(shim))].sort()).toEqual(["node:fs", "node:path"]);
   });
 });

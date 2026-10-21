@@ -12,8 +12,9 @@ const doctor_1 = require("./doctor");
 const embeddings_1 = require("./embeddings");
 const ids_1 = require("./ids");
 const modelinit_1 = require("./modelinit");
+const statusline_1 = require("./statusline");
 const transfer_2 = require("./transfer");
-const USAGE = "usage: cli <doctor|model-init|reembed|recall on|recall off|export <file>|import <file>>";
+const USAGE = "usage: cli <doctor|model-init|reembed|recall on|recall off|statusline on|statusline off|export <file>|import <file>>";
 const REEMBED_BATCH = 32;
 const FILE_EXISTS_CODE = "EEXIST";
 async function reembed(config) {
@@ -54,6 +55,12 @@ function switchRecall(config, cwd, enabled) {
         opened.db.close();
     }
     console.log(`recall ${enabled ? "on" : "off"} for project ${projectId} (${cwd})`);
+    return 0;
+}
+function switchStatusline(config, enabled) {
+    console.log(enabled
+        ? (0, statusline_1.enableStatusline)(config.pluginData, (0, statusline_1.distShim)(), new Date().toISOString())
+        : (0, statusline_1.disableStatusline)(config.pluginData));
     return 0;
 }
 function fileExists(error) {
@@ -117,6 +124,10 @@ function commandFor(argv, cwd) {
         case "recall":
             return argument === "on" || argument === "off"
                 ? (config) => switchRecall(config, cwd, argument === "on")
+                : undefined;
+        case "statusline":
+            return argument === "on" || argument === "off"
+                ? (config) => switchStatusline(config, argument === "on")
                 : undefined;
         case "export":
             return argument === undefined ? undefined : (config) => exportTo(config, argument);

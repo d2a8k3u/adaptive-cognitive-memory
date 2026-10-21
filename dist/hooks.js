@@ -19,6 +19,8 @@ const outage_1 = require("./outage");
 const prompt_1 = require("./prompt");
 const retention_1 = require("./retention");
 const session_1 = require("./session");
+const statusline_1 = require("./statusline");
+const badge_1 = require("./statusline/badge");
 const toolnames_1 = require("./toolnames");
 const version_1 = require("./version");
 const HOOK_EVENTS = [
@@ -120,6 +122,56 @@ function recordAbstention(opened, scope, event) {
     recordRecall(opened, scope, event, []);
     return "";
 }
+function fsErrorCode(error) {
+    return error instanceof Error &&
+        "syscall" in error &&
+        typeof error.syscall === "string" &&
+        "code" in error &&
+        typeof error.code === "string"
+        ? error.code
+        : undefined;
+}
+function whileStatuslineEnabled(scope, work) {
+    const paths = (0, statusline_1.statuslinePaths)(scope.config.pluginData);
+    if (!(0, statusline_1.statuslineEnabled)(paths)) {
+        return;
+    }
+    try {
+        work(paths);
+    }
+    catch (error) {
+        const code = fsErrorCode(error);
+        if (code === undefined) {
+            throw error;
+        }
+        console.error(`statusline badge not written: ${code}`);
+    }
+}
+function writeSessionBadge(paths, opened, scope, event, recallOn) {
+    const sessionId = scope.sessionId;
+    if (!(0, badge_1.isBadgeSessionId)(sessionId)) {
+        return;
+    }
+    const state = {
+        version: badge_1.BADGE_STATE_VERSION,
+        session_id: sessionId,
+        injected: (0, injections_1.sessionInjectedIds)(opened.db, sessionId).size,
+        last_event: event,
+        last_at: scope.now,
+        recall: recallOn ? "on" : "off",
+    };
+    (0, statusline_1.writeBadgeState)(paths, state);
+}
+function updateBadge(opened, scope, event, recallOn) {
+    whileStatuslineEnabled(scope, (paths) => writeSessionBadge(paths, opened, scope, event, recallOn));
+}
+function statuslineAtSessionStart(opened, scope, recallOn) {
+    whileStatuslineEnabled(scope, (paths) => {
+        (0, statusline_1.refreshShim)(paths, (0, statusline_1.distShim)());
+        (0, statusline_1.pruneBadgeStates)(paths, (0, retention_1.daysBefore)(scope.now, retention_1.SESSION_HISTORY_RETENTION_DAYS));
+        writeSessionBadge(paths, opened, scope, "SessionStart", recallOn);
+    });
+}
 function keepHistoryBounded(db, now) {
     db.transaction(() => {
         (0, events_1.pruneRecallEvents)(db, retention_1.RECALL_EVENTS_KEPT);
@@ -185,10 +237,10 @@ function sessionStartText(scope, source) {
     const location = { projectId: (0, ids_1.projectIdentity)(facts), ticket: (0, branch_1.ticketId)(facts.branch) };
     const routing = lessonRouting(scope, facts, source);
     return withDatabase(scope.config, async (opened) => {
-        const recall = (0, projects_1.recallEnabled)(opened.db, location.projectId)
-            ? await sessionStartRecall(opened, scope, location, source)
-            : "";
+        const recallOn = (0, projects_1.recallEnabled)(opened.db, location.projectId);
+        const recall = recallOn ? await sessionStartRecall(opened, scope, location, source) : "";
         keepHistoryBounded(opened.db, scope.now);
+        statuslineAtSessionStart(opened, scope, recallOn);
         return contextLines([routing, recall]);
     });
 }
@@ -228,9 +280,9 @@ function promptText(scope, prompt) {
                 at: scope.now,
             });
         }
-        const recall = (0, projects_1.recallEnabled)(opened.db, projectId)
-            ? await promptRecall(opened, scope, projectId, prompt)
-            : "";
+        const recallOn = (0, projects_1.recallEnabled)(opened.db, projectId);
+        const recall = recallOn ? await promptRecall(opened, scope, projectId, prompt) : "";
+        updateBadge(opened, scope, "UserPromptSubmit", recallOn);
         return contextLines([cue === undefined ? "" : (0, capture_1.cueLine)(cue.kind), recall]);
     });
 }
@@ -254,7 +306,12 @@ async function toolRecall(opened, scope, projectId, lookup) {
 }
 function toolText(scope, lookup) {
     const projectId = (0, ids_1.resolveProjectId)(scope.projectDir);
-    return withDatabase(scope.config, async (opened) => (0, projects_1.recallEnabled)(opened.db, projectId) ? toolRecall(opened, scope, projectId, lookup) : "");
+    return withDatabase(scope.config, async (opened) => {
+        const recallOn = (0, projects_1.recallEnabled)(opened.db, projectId);
+        const recall = recallOn ? await toolRecall(opened, scope, projectId, lookup) : "";
+        updateBadge(opened, scope, "PreToolUse", recallOn);
+        return recall;
+    });
 }
 function silently(config, work) {
     return withDatabase(config, async (opened) => {

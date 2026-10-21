@@ -9,10 +9,11 @@ import { errorMessage, runDoctor } from "./doctor";
 import { modelCached, modelCachePath } from "./embeddings";
 import { resolveProjectId } from "./ids";
 import { modelInit } from "./modelinit";
+import { disableStatusline, distShim, enableStatusline } from "./statusline";
 import { exportText, parseImport } from "./transfer";
 
 const USAGE =
-  "usage: cli <doctor|model-init|reembed|recall on|recall off|export <file>|import <file>>";
+  "usage: cli <doctor|model-init|reembed|recall on|recall off|statusline on|statusline off|export <file>|import <file>>";
 const REEMBED_BATCH = 32;
 const FILE_EXISTS_CODE = "EEXIST";
 
@@ -57,6 +58,15 @@ function switchRecall(config: Config, cwd: string, enabled: boolean): number {
     opened.db.close();
   }
   console.log(`recall ${enabled ? "on" : "off"} for project ${projectId} (${cwd})`);
+  return 0;
+}
+
+function switchStatusline(config: Config, enabled: boolean): number {
+  console.log(
+    enabled
+      ? enableStatusline(config.pluginData, distShim(), new Date().toISOString())
+      : disableStatusline(config.pluginData),
+  );
   return 0;
 }
 
@@ -125,6 +135,10 @@ function commandFor(argv: readonly string[], cwd: string): Command | undefined {
     case "recall":
       return argument === "on" || argument === "off"
         ? (config) => switchRecall(config, cwd, argument === "on")
+        : undefined;
+    case "statusline":
+      return argument === "on" || argument === "off"
+        ? (config) => switchStatusline(config, argument === "on")
         : undefined;
     case "export":
       return argument === undefined ? undefined : (config) => exportTo(config, argument);
