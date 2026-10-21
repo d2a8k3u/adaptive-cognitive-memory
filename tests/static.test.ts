@@ -15,9 +15,11 @@ import {
   VALUE_TEXT_MAX_CHARS,
   valueTextProblem,
 } from "../src/authoring";
+import { ticketId } from "../src/branch";
 import { ABSTRACT_MAX_CHARS, CONTENT_MAX_CHARS, TITLE_MAX_CHARS } from "../src/cfg";
 import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, LIST_PAGE_MAX_CHARS } from "../src/db/listing";
 import { MAX_HEAD_WORDS } from "../src/keys";
+import { TICKET_ROWS_MAX } from "../src/search";
 import { hostToolName, MEMORY_SERVER_NAME } from "../src/toolnames";
 import { TOOL_DEFINITIONS, type ToolDefinition } from "../src/tools";
 import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
@@ -264,6 +266,25 @@ describe("recall docs", () => {
     const skill = readFileSync(join(process.cwd(), "skills", "memory", "SKILL.md"), "utf8");
 
     expect(skill).toContain("before Read, Edit or Write, a project-relative path");
+  });
+
+  it("skill says to put a lesson's ticket id, upper-case as in the branch, into keywords and anchors", () => {
+    const skill = readFileSync(join(process.cwd(), "skills", "memory", "SKILL.md"), "utf8");
+
+    expect(skill).toContain(
+      `put the ticket id, upper-case as it appears in the branch (\`${ticketId("fix/TOUCH-4945/guide-list")}\`), into both \`keywords\` and \`anchors\``,
+    );
+  });
+
+  it("README branch-aware section names the ticket row cap from its owner, the exact match and the unchanged no-ticket start", () => {
+    const section = markdownSection(readme, "### Branch-aware session start").join("\n");
+
+    expect(section).toContain(`up to ${TICKET_ROWS_MAX} memories`);
+    expect(section).toContain("`touch` alone or `TOUCH-49450` never match");
+    expect(section).toContain("session start is unchanged");
+    expect(section).toContain(
+      "put the ticket id, upper-case as it appears in the branch, into both `keywords` and `anchors`",
+    );
   });
 });
 

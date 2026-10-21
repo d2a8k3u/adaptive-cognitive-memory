@@ -43,6 +43,7 @@ Recalled constraints start with `Apply —`, procedures with `Follow —`. Apply
 - `cardinality`: `single` when the slot holds one current value, `multi` when several coexist.
 - `value_text`: the slot's value in a few words (`PostgreSQL 15`); required for `single`.
 - `keywords` and `anchors` help recall find it. Before a tool call a memory is recalled only when an anchor matches exactly: before Bash, a command head (`pytest`, `git commit`); before Read, Edit or Write, a project-relative path or basename (`billing/tax.py`), a directory prefix ending in `/` (`migrations/versions/`) or an extension starting with `.` (`.vue`) of the file.
+- A lesson tied to a ticket: put the ticket id, upper-case as it appears in the branch (`TOUCH-4945`), into both `keywords` and `anchors`. Session start on a branch that carries the ticket then recalls it.
 
 ## Authoring standard
 
