@@ -43,14 +43,6 @@ export const ERROR_NEGATIVE_CATEGORIES = [
 ] as const;
 export const ERROR_POSITIVE_CATEGORIES = ["head_not_used_up"] as const;
 const ERROR_CATEGORIES = [...ERROR_NEGATIVE_CATEGORIES, ...ERROR_POSITIVE_CATEGORIES] as const;
-export const CUE_ORIGINS = ["human", "harness"] as const;
-export const CUE_LABELS = ["correction", "remember", "neutral"] as const;
-export const HARNESS_MARKERS = [
-  "<agent-message",
-  "<task-notification",
-  "<system-reminder",
-  "[Subagent hand-back]",
-] as const;
 
 export type Lang = (typeof LANGS)[number];
 export type TranslationLang = (typeof TRANSLATION_LANGS)[number];
@@ -64,8 +56,6 @@ export type NegativeCategory = (typeof NEGATIVE_CATEGORIES)[number];
 export type ToolName = (typeof TOOL_NAMES)[number];
 export type ErrorNegativeCategory = (typeof ERROR_NEGATIVE_CATEGORIES)[number];
 export type ErrorCaseCategory = (typeof ERROR_CATEGORIES)[number];
-export type CueOrigin = (typeof CUE_ORIGINS)[number];
-export type CueLabel = (typeof CUE_LABELS)[number];
 
 export interface ProjectFixture {
   readonly key: string;
@@ -168,14 +158,6 @@ export interface ContradictionCase {
   readonly probes: readonly ContradictionProbe[];
 }
 
-export interface CaptureCue {
-  readonly id: string;
-  readonly lang: Lang;
-  readonly origin: CueOrigin;
-  readonly label: CueLabel;
-  readonly text: string;
-}
-
 export interface RedactionSample {
   readonly name: string;
   readonly text: string;
@@ -189,13 +171,6 @@ export interface TranslatedPrompt {
   readonly prompt: string;
 }
 
-export interface Translation {
-  readonly id: string;
-  readonly source: string;
-  readonly lang: TranslationLang;
-  readonly text: string;
-}
-
 export interface Fixtures {
   readonly corpus: Corpus;
   readonly positives: readonly PositivePrompt[];
@@ -203,10 +178,8 @@ export interface Fixtures {
   readonly pretool: readonly PretoolCase[];
   readonly supersession: readonly SupersessionCase[];
   readonly contradictions: readonly ContradictionCase[];
-  readonly cues: readonly CaptureCue[];
   readonly redaction: readonly RedactionSample[];
   readonly multilingualPrompts: readonly TranslatedPrompt[];
-  readonly multilingualCues: readonly Translation[];
 }
 
 export const FIXTURE_FILES = [
@@ -215,11 +188,9 @@ export const FIXTURE_FILES = [
   "pretool.json",
   "supersession.json",
   "contradictions.json",
-  "capture-cues.json",
   "redaction.json",
   "errors.json",
   "multilingual.json",
-  "capture-cues-multilingual.json",
   "recall-questions.json",
 ] as const;
 
@@ -382,16 +353,6 @@ function parseContradiction(record: JsonRecord, path: string): ContradictionCase
   };
 }
 
-function parseCue(record: JsonRecord, path: string): CaptureCue {
-  return {
-    id: requireString(record, "id", path),
-    lang: requireEnum(record, "lang", LANGS, path),
-    origin: requireEnum(record, "origin", CUE_ORIGINS, path),
-    label: requireEnum(record, "label", CUE_LABELS, path),
-    text: requireString(record, "text", path),
-  };
-}
-
 export function parseRedaction(record: JsonRecord, path: string): RedactionSample {
   const secret = requireStringArray(record, "secret_parts", path).join("");
   const template = requireStringArray(record, "text_parts", path).join("");
@@ -405,7 +366,7 @@ export function parseRedaction(record: JsonRecord, path: string): RedactionSampl
   };
 }
 
-function translations(value: unknown, path: string): Translation[] {
+function translatedPrompts(value: unknown, path: string): TranslatedPrompt[] {
   return Object.entries(requireRecord(value, path)).flatMap(([source, byLang]) => {
     const sourcePath = `${path}.${source}`;
     const record = requireRecord(byLang, sourcePath);
@@ -413,7 +374,7 @@ function translations(value: unknown, path: string): Translation[] {
       id: `${source}#${lang}`,
       source,
       lang,
-      text: requireString(record, lang, sourcePath),
+      prompt: requireString(record, lang, sourcePath),
     }));
   });
 }
@@ -456,17 +417,8 @@ export function loadFixtures(dir: string): Fixtures {
     contradictions: records(readFixture(dir, "contradictions.json"), "contradictions").map(
       (record, index) => parseContradiction(record, `contradictions[${index}]`),
     ),
-    cues: records(readFixture(dir, "capture-cues.json"), "capture-cues").map((record, index) =>
-      parseCue(record, `capture-cues[${index}]`),
-    ),
     redaction: redactionSamples(dir),
-    multilingualPrompts: translations(readFixture(dir, "multilingual.json"), "multilingual").map(
-      ({ text, ...rest }) => ({ ...rest, prompt: text }),
-    ),
-    multilingualCues: translations(
-      readFixture(dir, "capture-cues-multilingual.json"),
-      "capture-cues-multilingual",
-    ),
+    multilingualPrompts: translatedPrompts(readFixture(dir, "multilingual.json"), "multilingual"),
   };
 }
 
@@ -490,7 +442,6 @@ export const MINIMUM_SIZES = {
   errorNegatives: 35,
   supersession: 100,
   contradictions: 20,
-  cues: 150,
   redaction: 16,
 } as const;
 
@@ -791,22 +742,6 @@ function contradictionProblems(fixtures: Fixtures, keys: ReadonlySet<string>): s
   ];
 }
 
-function cueProblems(fixtures: Fixtures): string[] {
-  return [
-    ...duplicateProblems("capture-cues", idsOf(fixtures.cues)),
-    ...fixtures.cues.flatMap((cue) => {
-      const marked = HARNESS_MARKERS.some((marker) => cue.text.includes(marker));
-      if (cue.origin === "harness" && !marked) {
-        return [`${cue.id}: harness cue carries no harness marker`];
-      }
-      if (cue.origin === "human" && marked) {
-        return [`${cue.id}: human cue carries a harness marker`];
-      }
-      return [];
-    }),
-  ];
-}
-
 function redactionProblems(fixtures: Fixtures): string[] {
   return [
     ...duplicateProblems(
@@ -821,15 +756,9 @@ function redactionProblems(fixtures: Fixtures): string[] {
 
 function translationProblems(fixtures: Fixtures): string[] {
   const promptIds = new Set(idsOf([...fixtures.positives, ...fixtures.negatives]));
-  const humanCueIds = new Set(idsOf(fixtures.cues.filter((cue) => cue.origin === "human")));
-  return [
-    ...fixtures.multilingualPrompts
-      .filter((item) => !promptIds.has(item.source))
-      .map((item) => `${item.id}: no labelled prompt ${item.source}`),
-    ...fixtures.multilingualCues
-      .filter((item) => !humanCueIds.has(item.source))
-      .map((item) => `${item.id}: no human cue ${item.source}`),
-  ];
+  return fixtures.multilingualPrompts
+    .filter((item) => !promptIds.has(item.source))
+    .map((item) => `${item.id}: no labelled prompt ${item.source}`);
 }
 
 export function referenceProblems(fixtures: Fixtures): string[] {
@@ -855,7 +784,6 @@ export function referenceProblems(fixtures: Fixtures): string[] {
     ...pretoolProblems(fixtures, keys, memoriesById),
     ...supersessionProblems(fixtures, keys),
     ...contradictionProblems(fixtures, keys),
-    ...cueProblems(fixtures),
     ...redactionProblems(fixtures),
     ...translationProblems(fixtures),
   ];
@@ -894,7 +822,6 @@ export function sizeProblems(fixtures: Fixtures): string[] {
     ),
     ...atLeast("supersession", fixtures.supersession.length, minimum.supersession),
     ...atLeast("contradictions", fixtures.contradictions.length, minimum.contradictions),
-    ...atLeast("capture cues", fixtures.cues.length, minimum.cues),
     ...atLeast("redaction", fixtures.redaction.length, minimum.redaction),
   ];
 }

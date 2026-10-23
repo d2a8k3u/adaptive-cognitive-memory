@@ -10,7 +10,6 @@ import { redact } from "../../src/redact";
 import { testModelCacheDir } from "../../vitest.config";
 import { buildCorpusWorld, ownersOf, projectKeys, type StoredWorld, storeAll } from "./corpus";
 import {
-  type CaptureCue,
   type ContradictionCase,
   ERROR_NEGATIVE_CATEGORIES,
   type ErrorCase,
@@ -161,14 +160,8 @@ const LIFECYCLE_SILENT: StoreArguments = {
   anchors: [],
 };
 
-const CAPTURE_PROJECT = "capture";
 const CHECKPOINT_PROJECT = "checkpoint";
 const STORE_TOOL_NAME = "mcp__plugin_adaptive-cognitive-memory_memory__memory_store";
-const CORRECTION_CUE_LINE = `If this message corrects how you work, store the rule and the reason with ${STORE_TOOL_NAME} before continuing.`;
-const REMEMBER_CUE_LINE = `The user asked you to remember this: store it with ${STORE_TOOL_NAME} now.`;
-const DETECTED_CUES = ["correction", "remember"] as const;
-const CHECKPOINT_CORRECTION =
-  "Don't run the migrations against the shared database, use the local container.";
 const CHECKPOINT_NEUTRAL = "Add a test for the refund webhook and run it.";
 const CHECKPOINT_FAILING_COMMAND = "pytest -q tests/test_refunds.py";
 const CHECKPOINT_STEADY_COMMAND = "git status --short";
@@ -187,7 +180,6 @@ const CHECKPOINT_LESSON: StoreArguments = {
   anchors: [],
 };
 
-type DetectedCue = (typeof DETECTED_CUES)[number];
 type ContextInvocation = HookInvocation & { readonly event: ContextEventName };
 type ResultRecord = Readonly<Record<string, unknown>>;
 
@@ -785,134 +777,6 @@ function recallMetrics(
       }),
     ),
     negative_rows_mean: meanMetric(negatives.map(({ observation }) => observation.injected.length)),
-  };
-}
-
-function deliveredCue(text: string): DetectedCue | undefined {
-  const lines = text.split("\n");
-  if (lines.includes(REMEMBER_CUE_LINE)) {
-    return "remember";
-  }
-  return lines.includes(CORRECTION_CUE_LINE) ? "correction" : undefined;
-}
-
-type LabelledCue = Omit<CaptureCue, "lang"> & { readonly lang: CaseLang };
-
-interface CueObservation {
-  readonly cue: LabelledCue;
-  readonly detected: DetectedCue | undefined;
-  readonly observation: Observation;
-}
-
-function translatedCues(fixtures: Fixtures): LabelledCue[] {
-  const sources = new Map(fixtures.cues.map((cue) => [cue.id, cue]));
-  return fixtures.multilingualCues.map((item) => {
-    const source = sources.get(item.source);
-    if (source === undefined) {
-      throw new Error(`translation names unknown cue ${item.source}`);
-    }
-    return { ...source, id: item.id, lang: item.lang, text: item.text };
-  });
-}
-
-async function runCueCases(
-  state: RunState,
-  suite: string,
-  cues: readonly LabelledCue[],
-): Promise<CueObservation[]> {
-  const world = await newWorld(state, [CAPTURE_PROJECT], testModelCacheDir);
-  const root = projectDirs(world, CAPTURE_PROJECT).root;
-  const observed: CueObservation[] = await mapPool(cues, HOOK_POOL_SIZE, async (cue) => {
-    const observation = await observe(state, world, new Map(), promptInvocation(root, cue.text));
-    return { cue, detected: deliveredCue(observation.delivery.text), observation };
-  });
-  appendRecords(
-    observed.map(({ cue, detected, observation }) =>
-      hookCaseRecord(
-        state,
-        suite,
-        cue.id,
-        { split: null, lang: cue.lang, category: `${cue.origin}:${cue.label}`, gold: [] },
-        observation,
-        { origin: cue.origin, label: cue.label, detected: detected ?? null },
-      ),
-    ),
-  );
-  return observed;
-}
-
-function cueLabelMetrics(
-  observed: readonly CueObservation[],
-  suffix: string,
-): Record<string, MetricEntry> {
-  return Object.fromEntries(
-    DETECTED_CUES.flatMap((label) => [
-      [
-        `${label}_precision${suffix}`,
-        ratioMetric(
-          countRatio(
-            observed.filter(({ detected }) => detected === label),
-            ({ cue }) => cue.label === label,
-          ),
-        ),
-      ],
-      [
-        `${label}_recall${suffix}`,
-        ratioMetric(
-          countRatio(
-            observed.filter(({ cue }) => cue.label === label),
-            ({ detected }) => detected === label,
-          ),
-        ),
-      ],
-    ]),
-  );
-}
-
-function cueMetrics(
-  observed: readonly CueObservation[],
-  langs: readonly CaseLang[],
-): Record<string, MetricEntry> {
-  const human = observed.filter(({ cue }) => cue.origin === "human");
-  const harness = observed.filter(({ cue }) => cue.origin === "harness");
-  const anyCue = ({ detected }: CueObservation) => detected !== undefined;
-  const neutralRate = (subset: readonly CueObservation[]) =>
-    ratioMetric(
-      countRatio(
-        subset.filter(({ cue }) => cue.label === "neutral"),
-        anyCue,
-      ),
-    );
-  return {
-    ...cueLabelMetrics(human, ""),
-    ...Object.fromEntries(
-      langs.flatMap((lang) =>
-        Object.entries(
-          cueLabelMetrics(
-            human.filter(({ cue }) => cue.lang === lang),
-            `_${lang}`,
-          ),
-        ),
-      ),
-    ),
-    any_cue_precision: ratioMetric(
-      countRatio(human.filter(anyCue), ({ cue }) => cue.label !== "neutral"),
-    ),
-    any_cue_recall: ratioMetric(
-      countRatio(
-        human.filter(({ cue }) => cue.label !== "neutral"),
-        anyCue,
-      ),
-    ),
-    neutral_false_cue_rate: neutralRate(human),
-    ...Object.fromEntries(
-      langs.map((lang) => [
-        `neutral_false_cue_rate_${lang}`,
-        neutralRate(human.filter(({ cue }) => cue.lang === lang)),
-      ]),
-    ),
-    harness_cue_rate: ratioMetric(countRatio(harness, anyCue)),
-    ...observationDistributions(observed.map(({ observation }) => observation)),
   };
 }
 
@@ -1807,25 +1671,7 @@ describe("memory evaluation at the host boundary", () => {
     }
   });
 
-  it("capture_cues: every labelled cue as a UserPromptSubmit, typed by the user or by the harness", async () => {
-    const cues = sampleEvenly(state.fixtures.cues, state.sample);
-    const observed = await runCueCases(state, "capture_cues", cues);
-    writeAggregate(state, "capture_cues", cueMetrics(observed, LANGS));
-    expect(
-      observed
-        .filter(({ cue, detected }) => cue.origin === "harness" && detected !== undefined)
-        .map(({ cue }) => cue.id),
-    ).toEqual([]);
-  });
-
-  it("capture_cues_multilingual: held-out translations of the human cues", async () => {
-    const cues = sampleEvenly(translatedCues(state.fixtures), state.sample);
-    const observed = await runCueCases(state, "capture_cues_multilingual", cues);
-    writeAggregate(state, "capture_cues_multilingual", cueMetrics(observed, TRANSLATION_LANGS));
-    expect(observed).toHaveLength(cues.length);
-  });
-
-  it("checkpoint: corrections, receipts, resolutions and stop_hook_active at the host boundary", async () => {
+  it("checkpoint: resolutions, receipts and stop_hook_active at the host boundary", async () => {
     const world = await newWorld(state, [CHECKPOINT_PROJECT], testModelCacheDir);
     const writer = new WorldWriter(state.plugin, world);
     const root = projectDirs(world, CHECKPOINT_PROJECT).root;
@@ -1871,14 +1717,18 @@ describe("memory evaluation at the host boundary", () => {
               error: "Exit code 1\n1 failed",
             }),
           );
+    const resolveFailingCommand = async (sessionId: string) => {
+      await bash(sessionId, CHECKPOINT_FAILING_COMMAND, false);
+      await bash(sessionId, CHECKPOINT_FAILING_COMMAND, true);
+    };
     try {
-      const corrected = randomUUID();
-      const correctionPrompt = await prompt(corrected, CHECKPOINT_CORRECTION);
-      const correctedFirst = await stop(corrected, false);
-      const correctedSecond = await stop(corrected, false);
+      const resolved = randomUUID();
+      await resolveFailingCommand(resolved);
+      const resolvedFirst = await stop(resolved, false);
+      const resolvedSecond = await stop(resolved, false);
 
       const stored = randomUUID();
-      await prompt(stored, CHECKPOINT_CORRECTION);
+      await resolveFailingCommand(stored);
       const lesson = await writer.store(root, CHECKPOINT_LESSON);
       await invoke(
         "post_tool_store",
@@ -1894,13 +1744,8 @@ describe("memory evaluation at the host boundary", () => {
       await prompt(neutral, CHECKPOINT_NEUTRAL);
       const neutralStop = await stop(neutral, false);
 
-      const resolved = randomUUID();
-      await bash(resolved, CHECKPOINT_FAILING_COMMAND, false);
-      await bash(resolved, CHECKPOINT_FAILING_COMMAND, true);
-      const resolvedStop = await stop(resolved, false);
-
       const continuing = randomUUID();
-      await prompt(continuing, CHECKPOINT_CORRECTION);
+      await resolveFailingCommand(continuing);
       const continuingStop = await stop(continuing, true);
 
       const steady = randomUUID();
@@ -1909,26 +1754,20 @@ describe("memory evaluation at the host boundary", () => {
         await stop(steady, false);
       }
 
-      const correctionContext = deliveredContext("UserPromptSubmit", correctionPrompt).text;
       const outcomes = {
         all_hooks_registered: runs.every((run) => run.registered && run.exitCode === 0),
-        correction_line_delivered: correctionContext.split("\n").includes(CORRECTION_CUE_LINE),
-        correction_checkpoint_once:
-          correctedFirst.additionalContext?.startsWith(
-            "Memory checkpoint: you were corrected about",
-          ) === true && correctedSecond.additionalContext === undefined,
+        resolution_checkpoint_once:
+          resolvedFirst.additionalContext?.includes("you resolved a failing `pytest`") === true &&
+          resolvedSecond.additionalContext === undefined,
         never_blocks: [
-          correctedFirst,
-          correctedSecond,
+          resolvedFirst,
+          resolvedSecond,
           storedStop,
           neutralStop,
-          resolvedStop,
           continuingStop,
         ].every((delivery) => delivery.decision === undefined),
         store_receipt_silences_checkpoint: storedStop.additionalContext === undefined,
         neutral_turn_no_checkpoint: neutralStop.additionalContext === undefined,
-        failed_then_passed_resolution_checkpoint:
-          resolvedStop.additionalContext?.includes("you resolved a failing `pytest`") === true,
         stop_hook_active_silent: continuingStop.additionalContext === undefined,
       };
       appendRecords([
@@ -1938,11 +1777,10 @@ describe("memory evaluation at the host boundary", () => {
           suite: "checkpoint",
           case_id: "capture-moments",
           event: null,
-          corrected_first: correctedFirst.additionalContext ?? null,
-          corrected_second: correctedSecond.additionalContext ?? null,
+          resolved_first: resolvedFirst.additionalContext ?? null,
+          resolved_second: resolvedSecond.additionalContext ?? null,
           stored_stop: storedStop.additionalContext ?? null,
           neutral_stop: neutralStop.additionalContext ?? null,
-          resolved_stop: resolvedStop.additionalContext ?? null,
           continuing_stop: continuingStop.additionalContext ?? null,
           ...outcomes,
         },
