@@ -29,7 +29,7 @@ Rules for every memory:
 - Do not ask the user before saving. Do not store agent, task or system text: write the lesson in your own words.
 - When Claude Code's native auto memory is also on, durable lessons still go to `memory_store`, not to the auto-memory `MEMORY.md`.
 
-The hooks only point at moments; they never store anything. A correction or a remember request adds one line to the prompt context asking you to store it, but that line recognises only some English and Czech phrasings: notice a correction or a remember request in any language yourself and store it all the same. When you finish a turn with such a moment still unstored (or after a failing command later passed), the Stop hook returns a memory checkpoint: store the durable lesson, or say there is none, then finish.
+The hooks never store anything and never flag a correction or a remember request: notice those yourself, in any language, and store them right away. After a failing command later passed, the Stop hook returns a memory checkpoint when you finish the turn without a store: store the durable lesson, or say there is none, then finish.
 
 ## Acting on recall
 

@@ -1,6 +1,6 @@
 # Capture
 
-Nothing is auto-saved. Claude stores durable knowledge with the `memory_*` MCP tools, guided by the bundled `memory` skill. Hooks only point at the moments worth a store: a correction, a remember request, a failing command that later passed.
+Nothing is auto-saved. Claude stores durable knowledge with the `memory_*` MCP tools, guided by the bundled `memory` skill. Claude notices a correction or a remember request itself, in any language; the hooks only point at a failing command that later passed.
 
 ## Two-phase store
 
@@ -8,7 +8,6 @@ Every memory names its slot (`kind`, `conflict_key`, `cardinality`, `value_text`
 
 ## Capture moments and the Stop checkpoint
 
-- A human prompt that corrects how Claude works (`don't`, `never`, `wrong`, `instead`, `nedělej`, `špatně`, …) gets one context line: store the rule and the reason with `memory_store` before continuing. A remember request (`remember`, `from now on`, `zapamatuj si`, …) gets: store it now. Agent and system messages never trigger a line.
 - A Bash command that failed and later passed in the same session opens a resolution moment.
 - When a turn ends with such a moment still open (no `memory_store` or `memory_update` since), the Stop hook returns one memory checkpoint: store the durable lesson, or say there is none, then finish. It never fires while a stop hook is already continuing the turn.
 - `memory_feedback` receipts drive the lifecycle: only in sessions that give receipts does an injection without a `used` receipt count against a memory; at 5 or more receipted injections with a used share below 0.5 it becomes a `hypothesis` and leaves recall. Nothing is deleted.

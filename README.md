@@ -7,7 +7,7 @@ Every project Claude works in reads and writes the same `${CLAUDE_PLUGIN_DATA}/m
 ## How it works
 
 - **Recall is automatic.** Hooks inject one-line abstracts under a token budget at session start, on every user prompt, before tool calls and after a failed Bash command; Claude expands a memory's full body with `memory_get`.
-- **Capture is explicit.** Nothing is auto-saved. Claude stores durable knowledge with the `memory_*` MCP tools, guided by the bundled `memory` skill. Hooks only point at the moments worth a store: a correction, a remember request, a failing command that later passed.
+- **Capture is explicit.** Nothing is auto-saved. Claude stores durable knowledge with the `memory_*` MCP tools, guided by the bundled `memory` skill. Claude notices a correction or a remember request itself, in any language; the hooks only point at a failing command that later passed.
 - **Claude curates, the server guards.** A store that finds related memories writes nothing and returns them; Claude decides to supersede, update, skip or add. Superseded memories stay readable but never reach recall.
 - **Nothing ever leaves the machine.** No outbound request carries memory content, the MCP server talks stdio only, and hooks make zero LLM calls. The one network operation is the one-time embedding model download. Secrets are redacted at the persist boundary and again on export.
 - **Degraded is never silent.** A missing embedding model or sqlite-vec extension falls back to FTS5 keyword search with a visible warning; a native module that does not load or a database from a newer plugin turns memory off with one session-start notice; `/memory-doctor` names the broken piece and its fix.
