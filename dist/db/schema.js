@@ -1,9 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.vecTableDdl = exports.schemaV6Ddl = exports.schemaV5Ddl = exports.schemaV4Ddl = exports.schemaV3Ddl = exports.schemaV2Ddl = exports.baselineDdl = exports.SchemaTooNewError = exports.SCHEMA_VERSION = void 0;
+exports.vecTableDdl = exports.questionsVecTableDdl = exports.schemaV7Ddl = exports.schemaV6Ddl = exports.schemaV5Ddl = exports.schemaV4Ddl = exports.schemaV3Ddl = exports.schemaV2Ddl = exports.baselineDdl = exports.SchemaTooNewError = exports.SCHEMA_VERSION = void 0;
 const cfg_1 = require("../cfg");
 const events_1 = require("./events");
-exports.SCHEMA_VERSION = 6;
+exports.SCHEMA_VERSION = 7;
 class SchemaTooNewError extends Error {
 }
 exports.SchemaTooNewError = SchemaTooNewError;
@@ -196,6 +196,17 @@ exports.schemaV6Ddl = [
     PRIMARY KEY (session_id, head)
   )`,
 ];
+exports.schemaV7Ddl = [
+    "ALTER TABLE memories ADD COLUMN questions TEXT NOT NULL DEFAULT '[]'",
+];
+exports.questionsVecTableDdl = `CREATE VIRTUAL TABLE questions_vec USING vec0(
+  question_id TEXT PRIMARY KEY,
+  embedding float[${cfg_1.EMBED_DIM}] distance_metric=cosine,
+  memory_id TEXT,
+  scope TEXT,
+  project_id TEXT,
+  state TEXT
+)`;
 exports.vecTableDdl = `CREATE VIRTUAL TABLE memories_vec USING vec0(
   memory_id TEXT PRIMARY KEY,
   embedding float[${cfg_1.EMBED_DIM}] distance_metric=cosine,

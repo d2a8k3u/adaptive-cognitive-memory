@@ -10,7 +10,7 @@ import {
 } from "../cfg";
 import { RECALL_EVENT_NAMES } from "./events";
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export class SchemaTooNewError extends Error {}
 
@@ -212,6 +212,19 @@ export const schemaV6Ddl: readonly string[] = [
     PRIMARY KEY (session_id, head)
   )`,
 ];
+
+export const schemaV7Ddl: readonly string[] = [
+  "ALTER TABLE memories ADD COLUMN questions TEXT NOT NULL DEFAULT '[]'",
+];
+
+export const questionsVecTableDdl = `CREATE VIRTUAL TABLE questions_vec USING vec0(
+  question_id TEXT PRIMARY KEY,
+  embedding float[${EMBED_DIM}] distance_metric=cosine,
+  memory_id TEXT,
+  scope TEXT,
+  project_id TEXT,
+  state TEXT
+)`;
 
 export const vecTableDdl = `CREATE VIRTUAL TABLE memories_vec USING vec0(
   memory_id TEXT PRIMARY KEY,

@@ -23,7 +23,7 @@ const GUARDING_CONSTRAINT_CODES = new Set([
     "SQLITE_CONSTRAINT_UNIQUE",
     "SQLITE_CONSTRAINT_TRIGGER",
 ]);
-const metaGuards = {
+const LIVE_EMBEDDING = {
     embedding_model: cfg_1.MODEL_ID,
     embedding_dim: String(cfg_1.EMBED_DIM),
 };
@@ -34,6 +34,7 @@ const migrationSteps = [
     { version: 4, apply: (db) => execAll(db, schema_1.schemaV4Ddl) },
     { version: 5, apply: (db) => execAll(db, schema_1.schemaV5Ddl) },
     { version: 6, apply: (db) => execAll(db, schema_1.schemaV6Ddl) },
+    { version: 7, apply: (db) => execAll(db, schema_1.schemaV7Ddl) },
 ];
 function execAll(db, statements) {
     for (const statement of statements) {
@@ -71,7 +72,7 @@ function openDatabase(config) {
         const vec = loadVecExtension(db);
         runMigrations(db);
         ensureVecTable(db, vec.loaded);
-        checkMetaGuards(db);
+        alignEmbeddingIndex(db, vec.loaded);
         return vec.loaded ? { db, vecLoaded: true } : { db, vecLoaded: false, vecError: vec.error };
     }
     catch (error) {
@@ -168,6 +169,7 @@ function schemaVersionIn(db) {
     return parsed;
 }
 const VEC_STATE_COLUMN = "state";
+const QUESTIONS_VEC_TABLE = "questions_vec";
 function vecTableShape(db) {
     const columns = db.prepare("PRAGMA table_info(memories_vec)").all();
     if (columns.length === 0) {
@@ -175,8 +177,11 @@ function vecTableShape(db) {
     }
     return columns.some((column) => column.name === VEC_STATE_COLUMN) ? "current" : "stateless";
 }
+function hasTable(db, name) {
+    return db.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(name) !== undefined;
+}
 function ensureVecTable(db, vecLoaded) {
-    if (!vecLoaded || vecTableShape(db) === "current") {
+    if (!vecLoaded || (vecTableShape(db) === "current" && hasTable(db, QUESTIONS_VEC_TABLE))) {
         return;
     }
     const reshape = db.transaction(() => {
@@ -186,6 +191,9 @@ function ensureVecTable(db, vecLoaded) {
         }
         else if (shape === "stateless") {
             rebuildVecTableWithState(db);
+        }
+        if (!hasTable(db, QUESTIONS_VEC_TABLE)) {
+            db.exec(schema_1.questionsVecTableDdl);
         }
     });
     reshape.immediate();
@@ -203,14 +211,30 @@ function rebuildVecTableWithState(db) {
         insert.run(row.memoryId, row.embedding, row.type, row.scope, row.projectId, row.state);
     }
 }
-function checkMetaGuards(db) {
-    for (const [key, expected] of Object.entries(metaGuards)) {
-        const value = metaValue(db, key);
-        if (value === undefined) {
+function embeddedByAnotherModel(db) {
+    return Object.entries(LIVE_EMBEDDING).some(([key, live]) => {
+        const recorded = metaValue(db, key);
+        if (recorded === undefined) {
             throw new Error(`${key} not set in meta: inconsistent database`);
         }
-        if (value !== expected) {
-            throw new Error(`${key} mismatch: expected '${expected}', actual '${value}'`);
-        }
+        return recorded !== live;
+    });
+}
+function alignEmbeddingIndex(db, vecLoaded) {
+    if (!vecLoaded || !embeddedByAnotherModel(db)) {
+        return;
     }
+    const reindex = db.transaction(() => {
+        if (!embeddedByAnotherModel(db)) {
+            return;
+        }
+        db.exec("DROP TABLE memories_vec");
+        db.exec(schema_1.vecTableDdl);
+        db.exec(`DROP TABLE ${QUESTIONS_VEC_TABLE}`);
+        db.exec(schema_1.questionsVecTableDdl);
+        for (const [key, live] of Object.entries(LIVE_EMBEDDING)) {
+            setMetaValue(db, key, live);
+        }
+    });
+    reindex.immediate();
 }

@@ -6,6 +6,7 @@ import { contentHash } from "../policy";
 import { PLUGIN_NAME, PLUGIN_VERSION } from "../version";
 import {
   baselineDdl,
+  questionsVecTableDdl,
   SCHEMA_VERSION,
   SchemaTooNewError,
   schemaV2Ddl,
@@ -13,6 +14,7 @@ import {
   schemaV4Ddl,
   schemaV5Ddl,
   schemaV6Ddl,
+  schemaV7Ddl,
   vecTableDdl,
 } from "./schema";
 
@@ -30,7 +32,7 @@ const GUARDING_CONSTRAINT_CODES: ReadonlySet<string> = new Set([
   "SQLITE_CONSTRAINT_TRIGGER",
 ]);
 
-const metaGuards: Readonly<Record<string, string>> = {
+const LIVE_EMBEDDING: Readonly<Record<string, string>> = {
   embedding_model: MODEL_ID,
   embedding_dim: String(EMBED_DIM),
 };
@@ -47,6 +49,7 @@ const migrationSteps: readonly MigrationStep[] = [
   { version: 4, apply: (db) => execAll(db, schemaV4Ddl) },
   { version: 5, apply: (db) => execAll(db, schemaV5Ddl) },
   { version: 6, apply: (db) => execAll(db, schemaV6Ddl) },
+  { version: 7, apply: (db) => execAll(db, schemaV7Ddl) },
 ];
 
 function execAll(db: Db, statements: readonly string[]): void {
@@ -92,7 +95,7 @@ export function openDatabase(config: Config): OpenedDb {
     const vec = loadVecExtension(db);
     runMigrations(db);
     ensureVecTable(db, vec.loaded);
-    checkMetaGuards(db);
+    alignEmbeddingIndex(db, vec.loaded);
     return vec.loaded ? { db, vecLoaded: true } : { db, vecLoaded: false, vecError: vec.error };
   } catch (error) {
     db.close();
@@ -209,6 +212,7 @@ function schemaVersionIn(db: Db): number {
 type VecTableShape = "missing" | "stateless" | "current";
 
 const VEC_STATE_COLUMN = "state";
+const QUESTIONS_VEC_TABLE = "questions_vec";
 
 function vecTableShape(db: Db): VecTableShape {
   const columns = db.prepare("PRAGMA table_info(memories_vec)").all() as { name: string }[];
@@ -218,8 +222,12 @@ function vecTableShape(db: Db): VecTableShape {
   return columns.some((column) => column.name === VEC_STATE_COLUMN) ? "current" : "stateless";
 }
 
+function hasTable(db: Db, name: string): boolean {
+  return db.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(name) !== undefined;
+}
+
 function ensureVecTable(db: Db, vecLoaded: boolean): void {
-  if (!vecLoaded || vecTableShape(db) === "current") {
+  if (!vecLoaded || (vecTableShape(db) === "current" && hasTable(db, QUESTIONS_VEC_TABLE))) {
     return;
   }
   const reshape = db.transaction(() => {
@@ -228,6 +236,9 @@ function ensureVecTable(db: Db, vecLoaded: boolean): void {
       db.exec(vecTableDdl);
     } else if (shape === "stateless") {
       rebuildVecTableWithState(db);
+    }
+    if (!hasTable(db, QUESTIONS_VEC_TABLE)) {
+      db.exec(questionsVecTableDdl);
     }
   });
   reshape.immediate();
@@ -258,14 +269,31 @@ function rebuildVecTableWithState(db: Db): void {
   }
 }
 
-function checkMetaGuards(db: Db): void {
-  for (const [key, expected] of Object.entries(metaGuards)) {
-    const value = metaValue(db, key);
-    if (value === undefined) {
+function embeddedByAnotherModel(db: Db): boolean {
+  return Object.entries(LIVE_EMBEDDING).some(([key, live]) => {
+    const recorded = metaValue(db, key);
+    if (recorded === undefined) {
       throw new Error(`${key} not set in meta: inconsistent database`);
     }
-    if (value !== expected) {
-      throw new Error(`${key} mismatch: expected '${expected}', actual '${value}'`);
-    }
+    return recorded !== live;
+  });
+}
+
+function alignEmbeddingIndex(db: Db, vecLoaded: boolean): void {
+  if (!vecLoaded || !embeddedByAnotherModel(db)) {
+    return;
   }
+  const reindex = db.transaction(() => {
+    if (!embeddedByAnotherModel(db)) {
+      return;
+    }
+    db.exec("DROP TABLE memories_vec");
+    db.exec(vecTableDdl);
+    db.exec(`DROP TABLE ${QUESTIONS_VEC_TABLE}`);
+    db.exec(questionsVecTableDdl);
+    for (const [key, live] of Object.entries(LIVE_EMBEDDING)) {
+      setMetaValue(db, key, live);
+    }
+  });
+  reindex.immediate();
 }

@@ -366,22 +366,52 @@ describe("openDatabase", () => {
     }
   });
 
-  it("throws an expected/actual error when a meta guard mismatches", () => {
-    for (const [key, tampered, pattern] of [
-      [
-        "embedding_model",
-        "Xenova/other-model",
-        /embedding_model.*expected.*multilingual-e5-small.*actual.*other-model/,
-      ],
-      ["embedding_dim", "768", /embedding_dim.*expected.*384.*actual.*768/],
+  it("drops the vectors of another embedding model or dimension, keeps the memories and records the live model", () => {
+    for (const [key, tampered] of [
+      ["embedding_model", "Xenova/other-model"],
+      ["embedding_dim", "768"],
     ] as const) {
       const config = tempConfig();
       openDatabase(config).db.close();
       const raw = new Database(config.dbPath);
+      raw.loadExtension(getLoadablePath());
+      insertMemory(raw, memoryRow({ id: "mem-kept" }));
+      raw
+        .prepare(
+          `INSERT INTO memories_vec (memory_id, embedding, type, scope, project_id, state)
+           VALUES (?, ?, 'semantic', 'project', 'proj-0000000000000001', 'active')`,
+        )
+        .run("mem-kept", Buffer.from(new Float32Array(EMBED_DIM).fill(0.5).buffer));
+      raw
+        .prepare(
+          `INSERT INTO questions_vec (question_id, embedding, memory_id, scope, project_id, state)
+           VALUES ('mem-kept:0', ?, 'mem-kept', 'project', 'proj-0000000000000001', 'active')`,
+        )
+        .run(Buffer.from(new Float32Array(EMBED_DIM).fill(0.5).buffer));
       raw.prepare("UPDATE meta SET value = ? WHERE key = ?").run(tampered, key);
       raw.close();
-      expect(() => openDatabase(config)).toThrow(pattern);
+      const reopened = openDatabase(config);
+      try {
+        expect({
+          model: metaValue(reopened.db, "embedding_model"),
+          dim: metaValue(reopened.db, "embedding_dim"),
+          vectors: reopened.db.prepare("SELECT count(*) FROM memories_vec").pluck().get(),
+          questionVectors: reopened.db.prepare("SELECT count(*) FROM questions_vec").pluck().get(),
+          memories: reopened.db.prepare("SELECT id FROM memories").pluck().all(),
+        }).toEqual({
+          model: MODEL_ID,
+          dim: String(EMBED_DIM),
+          vectors: 0,
+          questionVectors: 0,
+          memories: ["mem-kept"],
+        });
+      } finally {
+        reopened.db.close();
+      }
     }
+  });
+
+  it("throws when the database records no embedding model", () => {
     const config = tempConfig();
     openDatabase(config).db.close();
     const raw = new Database(config.dbPath);
@@ -644,6 +674,23 @@ describe("schema v5 migration", () => {
   });
 });
 
+describe("schema v7 migration", () => {
+  it("gives every kept memory an empty question list and creates the question vector table", () => {
+    const config = tempConfig();
+    createV5Database(config.dbPath);
+
+    const opened = openDatabase(config);
+    try {
+      expect({
+        questions: opened.db.prepare("SELECT id, questions FROM memories").all(),
+        questionVectors: opened.db.prepare("SELECT count(*) FROM questions_vec").pluck().get(),
+      }).toEqual({ questions: [{ id: "mem-v5", questions: "[]" }], questionVectors: 0 });
+    } finally {
+      opened.db.close();
+    }
+  });
+});
+
 describe("schema v6 migration", () => {
   it("migrates a v5 database: recall events rebuilt with the failure event and their ids, failure claims added, every row kept", () => {
     const config = tempConfig();
@@ -652,8 +699,13 @@ describe("schema v6 migration", () => {
 
     const opened = openDatabase(config);
     try {
-      expect(metaValue(opened.db, "schema_version")).toBe("6");
-      expect(tableRowCounts(opened.db)).toEqual({ ...before, failure_recalls: 0 });
+      expect(metaValue(opened.db, "schema_version")).toBe(String(SCHEMA_VERSION));
+      const after = tableRowCounts(opened.db);
+      expect(
+        Object.fromEntries(
+          [...Object.keys(before), "failure_recalls"].map((table) => [table, after[table]]),
+        ),
+      ).toEqual({ ...before, failure_recalls: 0 });
       expect(
         opened.db
           .prepare("SELECT id, session_id, event, at, injected FROM recall_events ORDER BY id")
