@@ -19,6 +19,7 @@ Hooks receive them as `CLAUDE_PLUGIN_OPTION_RECALL_BUDGET_TOKENS`, `CLAUDE_PLUGI
 | `CLAUDE_PLUGIN_DATA` | plugin data directory; required | set by Claude Code |
 | `ACM_DB_PATH` | database path override | `${CLAUDE_PLUGIN_DATA}/memory.sqlite` |
 | `ACM_MODEL_CACHE_DIR` | model cache override | `${CLAUDE_PLUGIN_DATA}/models` |
+| `ACM_EMBED_DEADLINE_MS` | deadline for a query embedding, model load included, before recall falls back to keyword search (the tests raise it so slow CI runners do not fail recall tests) | `1500` |
 | `ACM_MODEL_REMOTE_HOST` | model download source override (the tests point it at an unreachable local address) | `https://huggingface.co/` |
 
 ## Native auto memory

@@ -37,7 +37,7 @@ Rows already injected in the session since its latest SessionStart are skipped. 
 
 The gate is fitted, not hand-tuned: `npm run eval:fit` stores the eval corpus through the real memory server, collects every calibration prompt's candidates the way the hook does (240 positive and 207 negative prompts in English and Czech), fits a logistic model on them and picks the threshold with the most gold hits whose false-injection rate stays within 3%; the weights, threshold and background cosine live in `src/calibration.ts`, and a test pins the record to the live embedding model and its query, passage and question inputs. On the held-out confirmation split (240 positive, 120 negative prompts) the fitted gate reaches a gold hit of 57.5%, precision 82.1% and false injections 2/120; prompts in German, Spanish, Polish and Japanese are measured by the `recall_multilingual` eval suite and never used for fitting.
 
-An embedding run has a 1.5 s deadline per event; without a query vector `UserPromptSubmit` injects only the degraded warning, which names `embedding timeout` when the deadline passed and `model missing` when the model failed.
+An embedding run has a 1.5 s deadline per event (`ACM_EMBED_DEADLINE_MS`); without a query vector `UserPromptSubmit` injects only the degraded warning, which names `embedding timeout` when the deadline passed and `model missing` when the model failed.
 
 ## Turning recall off
 
