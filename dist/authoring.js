@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ANCHOR_MAX_CHARS = exports.ANCHORS_MAX_ITEMS = exports.KEYWORDS_MAX_CHARS = exports.VALUE_TEXT_MAX_CHARS = exports.CONFLICT_KEY_NAMESPACES = exports.CONFLICT_KEY_PATTERN = exports.CONFLICT_KEY_MAX_CHARS = void 0;
+exports.QUESTION_MAX_CHARS = exports.QUESTIONS_MAX_ITEMS = exports.ANCHOR_MAX_CHARS = exports.ANCHORS_MAX_ITEMS = exports.KEYWORDS_MAX_CHARS = exports.VALUE_TEXT_MAX_CHARS = exports.CONFLICT_KEY_NAMESPACES = exports.CONFLICT_KEY_PATTERN = exports.CONFLICT_KEY_MAX_CHARS = void 0;
 exports.conflictKeyProblem = conflictKeyProblem;
 exports.valueTextProblem = valueTextProblem;
 exports.keywordsProblem = keywordsProblem;
 exports.redactedAnchorProblem = redactedAnchorProblem;
+exports.questionsProblem = questionsProblem;
 exports.anchorsProblem = anchorsProblem;
 const branch_1 = require("./branch");
 const keys_1 = require("./keys");
@@ -29,6 +30,8 @@ exports.VALUE_TEXT_MAX_CHARS = 200;
 exports.KEYWORDS_MAX_CHARS = 300;
 exports.ANCHORS_MAX_ITEMS = 20;
 exports.ANCHOR_MAX_CHARS = 200;
+exports.QUESTIONS_MAX_ITEMS = 8;
+exports.QUESTION_MAX_CHARS = 200;
 const NAMESPACE_SEPARATOR = ".";
 const WORD_SEPARATOR = " ";
 const ABSOLUTE_PATH_MARK = "/";
@@ -39,6 +42,7 @@ const BACKSLASH = "\\";
 const GLOB_MARK = /[*?]/;
 const CONFLICT_KEY_MESSAGE = `conflict_key must be namespace.topic naming the slot — lowercase, dotted, at most ${exports.CONFLICT_KEY_MAX_CHARS} characters, with namespace one of ${exports.CONFLICT_KEY_NAMESPACES.join(", ")} — such as project.primary_database or team.reviewers`;
 const ANCHORS_SHAPE_MESSAGE = `anchors must be a list of at most ${exports.ANCHORS_MAX_ITEMS} non-empty strings of at most ${exports.ANCHOR_MAX_CHARS} characters`;
+const QUESTIONS_SHAPE_MESSAGE = `questions must be a list of at most ${exports.QUESTIONS_MAX_ITEMS} non-empty strings of at most ${exports.QUESTION_MAX_CHARS} characters`;
 const REDACTED_ANCHOR_FAULT = "contains a secret; anchors match raw tool input, so a redacted anchor never fires";
 function isSingleToken(anchor) {
     return !WHITESPACE.test(anchor);
@@ -116,6 +120,28 @@ function redactedAnchorProblem(written, stored) {
     return index === -1
         ? undefined
         : { field: "anchors", message: `anchors[${index}] ${REDACTED_ANCHOR_FAULT}` };
+}
+function isQuestionList(value) {
+    return (Array.isArray(value) &&
+        value.length <= exports.QUESTIONS_MAX_ITEMS &&
+        value.every((question) => typeof question === "string" &&
+            question.trim() !== "" &&
+            question.length <= exports.QUESTION_MAX_CHARS));
+}
+function questionsProblem(value) {
+    if (!isQuestionList(value)) {
+        return { field: "questions", message: QUESTIONS_SHAPE_MESSAGE };
+    }
+    for (const [index, question] of value.entries()) {
+        const first = value.indexOf(question);
+        if (first < index) {
+            return {
+                field: "questions",
+                message: `questions[${index}] ${JSON.stringify(question)} repeats questions[${first}]; list each question once`,
+            };
+        }
+    }
+    return undefined;
 }
 function anchorsProblem(value) {
     if (!isAnchorList(value)) {

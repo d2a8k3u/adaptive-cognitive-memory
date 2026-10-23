@@ -22,8 +22,10 @@ export const VALUE_TEXT_MAX_CHARS = 200;
 export const KEYWORDS_MAX_CHARS = 300;
 export const ANCHORS_MAX_ITEMS = 20;
 export const ANCHOR_MAX_CHARS = 200;
+export const QUESTIONS_MAX_ITEMS = 8;
+export const QUESTION_MAX_CHARS = 200;
 
-export type AuthoringField = "conflict_key" | "value_text" | "keywords" | "anchors";
+export type AuthoringField = "conflict_key" | "value_text" | "keywords" | "anchors" | "questions";
 
 export interface AuthoringProblem {
   readonly field: AuthoringField;
@@ -46,6 +48,7 @@ const GLOB_MARK = /[*?]/;
 
 const CONFLICT_KEY_MESSAGE = `conflict_key must be namespace.topic naming the slot — lowercase, dotted, at most ${CONFLICT_KEY_MAX_CHARS} characters, with namespace one of ${CONFLICT_KEY_NAMESPACES.join(", ")} — such as project.primary_database or team.reviewers`;
 const ANCHORS_SHAPE_MESSAGE = `anchors must be a list of at most ${ANCHORS_MAX_ITEMS} non-empty strings of at most ${ANCHOR_MAX_CHARS} characters`;
+const QUESTIONS_SHAPE_MESSAGE = `questions must be a list of at most ${QUESTIONS_MAX_ITEMS} non-empty strings of at most ${QUESTION_MAX_CHARS} characters`;
 const REDACTED_ANCHOR_FAULT =
   "contains a secret; anchors match raw tool input, so a redacted anchor never fires";
 
@@ -156,6 +159,35 @@ export function redactedAnchorProblem(
   return index === -1
     ? undefined
     : { field: "anchors", message: `anchors[${index}] ${REDACTED_ANCHOR_FAULT}` };
+}
+
+function isQuestionList(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= QUESTIONS_MAX_ITEMS &&
+    value.every(
+      (question) =>
+        typeof question === "string" &&
+        question.trim() !== "" &&
+        question.length <= QUESTION_MAX_CHARS,
+    )
+  );
+}
+
+export function questionsProblem(value: unknown): AuthoringProblem | undefined {
+  if (!isQuestionList(value)) {
+    return { field: "questions", message: QUESTIONS_SHAPE_MESSAGE };
+  }
+  for (const [index, question] of value.entries()) {
+    const first = value.indexOf(question);
+    if (first < index) {
+      return {
+        field: "questions",
+        message: `questions[${index}] ${JSON.stringify(question)} repeats questions[${first}]; list each question once`,
+      };
+    }
+  }
+  return undefined;
 }
 
 export function anchorsProblem(value: unknown): AuthoringProblem | undefined {

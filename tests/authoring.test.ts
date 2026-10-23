@@ -4,6 +4,7 @@ import {
   CONFLICT_KEY_NAMESPACES,
   conflictKeyProblem,
   keywordsProblem,
+  questionsProblem,
   redactedAnchorProblem,
   valueTextProblem,
 } from "../src/authoring";
@@ -215,6 +216,35 @@ describe("conflictKeyProblem", () => {
     const message = conflictKeyProblem("database")?.message ?? "";
 
     expect(CONFLICT_KEY_NAMESPACES.filter((namespace) => !message.includes(namespace))).toEqual([]);
+  });
+});
+
+describe("questionsProblem", () => {
+  const SHAPE = {
+    field: "questions",
+    message: "questions must be a list of at most 8 non-empty strings of at most 200 characters",
+  };
+
+  it("accepts 8 questions of 200 characters", () => {
+    expect(
+      questionsProblem(Array.from({ length: 8 }, (_, index) => `${index}`.padEnd(200, "q"))),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    { name: "a ninth question", questions: Array.from({ length: 9 }, (_, index) => `q${index}`) },
+    { name: "201 characters", questions: ["q".repeat(201)] },
+    { name: "a blank question", questions: ["How do I deploy?", "  "] },
+    { name: "a string instead of a list", questions: "How do I deploy?" },
+  ])("rejects $name with the shape message", ({ questions }) => {
+    expect(questionsProblem(questions)).toEqual(SHAPE);
+  });
+
+  it("names a repeated question", () => {
+    expect(questionsProblem(["How do I deploy?", "Jak nasadím?", "How do I deploy?"])).toEqual({
+      field: "questions",
+      message: 'questions[2] "How do I deploy?" repeats questions[0]; list each question once',
+    });
   });
 });
 
