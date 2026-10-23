@@ -1,6 +1,14 @@
 const MIN_TOKEN_CHARS = 2;
 const SLASH_COMMAND_PREFIX = "/";
 const WORD_PATTERN = /[\p{L}\p{N}]+/gu;
+const UNSPACED_SCRIPT =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+let wordSegmenter: Intl.Segmenter | undefined;
+
+function segmenter(): Intl.Segmenter {
+  wordSegmenter ??= new Intl.Segmenter("und", { granularity: "word" });
+  return wordSegmenter;
+}
 
 const ENGLISH_STOPWORDS = [
   "about",
@@ -367,36 +375,25 @@ const ACKNOWLEDGEMENTS: ReadonlySet<string> = new Set([
   ...CZECH_ACKNOWLEDGEMENTS,
 ]);
 
-export const PROMPT_LANGUAGES = ["en", "cs"] as const;
-export type PromptLanguage = (typeof PROMPT_LANGUAGES)[number];
-
-const CZECH_DIACRITIC_LETTER = /[áčďéěíňóřšťúůýž]/u;
-const ENGLISH_STOPWORD_SET: ReadonlySet<string> = new Set(ENGLISH_STOPWORDS);
-const CZECH_STOPWORD_SET: ReadonlySet<string> = new Set(CZECH_STOPWORDS);
-
-function czechStopwordVote(word: string): number {
-  return Number(CZECH_STOPWORD_SET.has(word)) - Number(ENGLISH_STOPWORD_SET.has(word));
-}
-
-export function promptLanguage(prompt: string): PromptLanguage {
-  const text = prompt.toLowerCase();
-  if (CZECH_DIACRITIC_LETTER.test(text)) {
-    return "cs";
-  }
-  const czechStopwordLead = wordsOf(text).reduce((lead, word) => lead + czechStopwordVote(word), 0);
-  return czechStopwordLead > 0 ? "cs" : "en";
-}
-
 export type AdmissionRejection = "slash_command" | "acknowledgement" | "too_few_content_tokens";
 
 export type Admission =
   | { readonly admitted: true; readonly tokens: readonly string[] }
   | { readonly admitted: false; readonly reason: AdmissionRejection };
 
+function segmentedWords(run: string): string[] {
+  if (!UNSPACED_SCRIPT.test(run)) {
+    return [run];
+  }
+  return [...segmenter().segment(run)]
+    .filter((segment) => segment.isWordLike)
+    .map((segment) => segment.segment);
+}
+
 export function wordsOf(text: string): string[] {
-  return (text.toLowerCase().match(WORD_PATTERN) ?? []).filter(
-    (word) => word.length >= MIN_TOKEN_CHARS,
-  );
+  return (text.toLowerCase().match(WORD_PATTERN) ?? [])
+    .flatMap(segmentedWords)
+    .filter((word) => word.length >= MIN_TOKEN_CHARS);
 }
 
 export function contentTokens(text: string): string[] {

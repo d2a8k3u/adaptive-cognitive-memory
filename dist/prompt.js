@@ -1,13 +1,17 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PROMPT_LANGUAGES = void 0;
-exports.promptLanguage = promptLanguage;
 exports.wordsOf = wordsOf;
 exports.contentTokens = contentTokens;
 exports.admitPrompt = admitPrompt;
 const MIN_TOKEN_CHARS = 2;
 const SLASH_COMMAND_PREFIX = "/";
 const WORD_PATTERN = /[\p{L}\p{N}]+/gu;
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+let wordSegmenter;
+function segmenter() {
+    wordSegmenter ??= new Intl.Segmenter("und", { granularity: "word" });
+    return wordSegmenter;
+}
 const ENGLISH_STOPWORDS = [
     "about",
     "above",
@@ -368,23 +372,18 @@ const ACKNOWLEDGEMENTS = new Set([
     ...ENGLISH_ACKNOWLEDGEMENTS,
     ...CZECH_ACKNOWLEDGEMENTS,
 ]);
-exports.PROMPT_LANGUAGES = ["en", "cs"];
-const CZECH_DIACRITIC_LETTER = /[áčďéěíňóřšťúůýž]/u;
-const ENGLISH_STOPWORD_SET = new Set(ENGLISH_STOPWORDS);
-const CZECH_STOPWORD_SET = new Set(CZECH_STOPWORDS);
-function czechStopwordVote(word) {
-    return Number(CZECH_STOPWORD_SET.has(word)) - Number(ENGLISH_STOPWORD_SET.has(word));
-}
-function promptLanguage(prompt) {
-    const text = prompt.toLowerCase();
-    if (CZECH_DIACRITIC_LETTER.test(text)) {
-        return "cs";
+function segmentedWords(run) {
+    if (!UNSPACED_SCRIPT.test(run)) {
+        return [run];
     }
-    const czechStopwordLead = wordsOf(text).reduce((lead, word) => lead + czechStopwordVote(word), 0);
-    return czechStopwordLead > 0 ? "cs" : "en";
+    return [...segmenter().segment(run)]
+        .filter((segment) => segment.isWordLike)
+        .map((segment) => segment.segment);
 }
 function wordsOf(text) {
-    return (text.toLowerCase().match(WORD_PATTERN) ?? []).filter((word) => word.length >= MIN_TOKEN_CHARS);
+    return (text.toLowerCase().match(WORD_PATTERN) ?? [])
+        .flatMap(segmentedWords)
+        .filter((word) => word.length >= MIN_TOKEN_CHARS);
 }
 function contentTokens(text) {
     return [...new Set(wordsOf(text).filter((word) => !STOPWORDS.has(word)))];
