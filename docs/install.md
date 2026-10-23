@@ -31,7 +31,7 @@ npm ci --ignore-scripts
 
 ## Embedding model
 
-The first session downloads the embedding model by itself: `Xenova/multilingual-e5-small`, int8, about 135 MB, once, into the plugin data directory. It is the only network operation the plugin performs, and it never touches memory content. The download runs in the background, so the session starts at once with a notice; until it finishes, prompts recall nothing (session-start and pre-tool recall need no model), `memory_search` matches keywords only, and new memories are stored without a vector — the next memory server start embeds up to 32 of them, `reembed` the rest. A failed download is retried at every session start, whose notice then names the failure.
+The first session downloads the embedding model by itself: `onnx-community/granite-embedding-97m-multilingual-r2-ONNX`, int8, about 120 MB, once, into the plugin data directory. It is the only network operation the plugin performs, and it never touches memory content. The download runs in the background, so the session starts at once with a notice; until it finishes, prompts recall nothing (session-start and pre-tool recall need no model), `memory_search` matches keywords only, and new memories are stored without a vector — the next memory server start embeds up to 32 of them, `reembed` the rest. A failed download is retried at every session start, whose notice then names the failure.
 
 To keep the plugin off the network, turn the `download_model` option off (`/config`, or `claude plugin configure adaptive-cognitive-memory`) and cache the model yourself:
 

@@ -2,7 +2,7 @@
 
 A Claude Code plugin that gives Claude a persistent cognitive memory: one central, local SQLite database shared by every project, with local semantic search, budgeted hook recall and explicit, curated capture.
 
-Every project Claude works in reads and writes the same `${CLAUDE_PLUGIN_DATA}/memory.sqlite`. Memories carry a scope — `project` (visible only in that project) or `user` (visible everywhere) — and a type: `semantic` (facts), `procedural` (how-tos), `episodic` (session events) or `pattern` (lessons and preferences). All memories are stored in English as the canonical retrieval language; a multilingual local embedding model makes Czech or other non-English queries find them anyway.
+Every project Claude works in reads and writes the same `${CLAUDE_PLUGIN_DATA}/memory.sqlite`. Memories carry a scope — `project` (visible only in that project) or `user` (visible everywhere) — and a type: `semantic` (facts), `procedural` (how-tos), `episodic` (session events) or `pattern` (lessons and preferences). All memories are stored in English as the canonical retrieval language; a multilingual local embedding model and the recall questions each memory carries, written in English and in the user's language, let prompts in other languages find them.
 
 ## How it works
 

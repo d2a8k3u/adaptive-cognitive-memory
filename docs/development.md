@@ -21,9 +21,10 @@ npm ci               # install dependencies (exact pins, lockfile committed)
 npm run build        # tsc → dist/ (commit the result — dist ships with the plugin)
 npm run check        # tsc + biome + vitest run
 npm run eval         # retrieval and capture evaluation at the host boundary
+npm run eval:fit     # refit the prompt recall gate on the calibration split
 ```
 
-`npm run check` runs what CI runs before the build: strict `tsc`, the `biome` lint and format gate (warnings are errors) and the full vitest suite. The first test run downloads the embedding model (about 135 MB) from Hugging Face, so it needs a network connection; later runs work offline.
+`npm run check` runs what CI runs before the build: strict `tsc`, the `biome` lint and format gate (warnings are errors) and the full vitest suite. The first test run downloads the embedding model (about 120 MB) from Hugging Face, so it needs a network connection; later runs work offline.
 
 The suite covers the store pipeline, scope isolation, budgeted injection, redaction, tool contracts, hook spawning against the committed `dist`, concurrency and kill -9 durability, export/import round trips, the doctor, native-module and newer-schema fail-open, install and static gates, and a two-session end-to-end recall run.
 
