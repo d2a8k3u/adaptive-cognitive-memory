@@ -83,5 +83,5 @@ function failureLookup(signature) {
     if (signature.terms.length === 0) {
         return undefined;
     }
-    return { anchors: signature.terms, tokens: (0, prompt_1.contentTokens)(signature.terms.join(" ")) };
+    return { anchors: signature.terms, tokens: (0, prompt_1.distinctWords)(signature.terms.join(" ")) };
 }

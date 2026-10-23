@@ -228,7 +228,7 @@ function bashLookup(command, projectDir) {
     if (anchors.length === 0) {
         return undefined;
     }
-    return { anchors, tokens: (0, prompt_1.contentTokens)(heads.join(" ")) };
+    return { anchors, tokens: (0, prompt_1.distinctWords)(heads.join(" ")) };
 }
 function projectRelativePath(filePath, projectDir) {
     const path = (0, node_path_1.relative)(projectDir, (0, node_path_1.resolve)(projectDir, filePath));
@@ -253,7 +253,7 @@ function pathLookup(filePath, projectDir) {
     const located = path === undefined ? [] : [path, ...directoryPrefixes(path)];
     return {
         anchors: [...new Set([...located, name, ...extensionSuffixes(name)])],
-        tokens: (0, prompt_1.contentTokens)(path ?? name),
+        tokens: (0, prompt_1.distinctWords)(path ?? name),
     };
 }
 function stringProperty(value, field) {

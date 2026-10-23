@@ -55,7 +55,7 @@ function anyTermMatchExpression(texts, maxTerms) {
     return [...byFoldedTerm.values()].slice(0, maxTerms).map(ftsPhrase).join(" OR ");
 }
 function ftsMatchExpression(query) {
-    return anyTermMatchExpression((0, prompt_1.contentTokens)(query), FTS_QUERY_MAX_TERMS);
+    return anyTermMatchExpression((0, prompt_1.distinctWords)(query), FTS_QUERY_MAX_TERMS);
 }
 function rrfFuse(rankings) {
     const scores = new Map();

@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import type { ToolLookup } from "./keys";
-import { contentTokens } from "./prompt";
+import { distinctWords } from "./prompt";
 import { redactWithin } from "./redact";
 
 export const FAILURE_TEXT_MAX_CHARS = 500;
@@ -99,5 +99,5 @@ export function failureLookup(signature: FailureSignature): ToolLookup | undefin
   if (signature.terms.length === 0) {
     return undefined;
   }
-  return { anchors: signature.terms, tokens: contentTokens(signature.terms.join(" ")) };
+  return { anchors: signature.terms, tokens: distinctWords(signature.terms.join(" ")) };
 }

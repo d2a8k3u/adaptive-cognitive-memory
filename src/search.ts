@@ -7,7 +7,7 @@ import type { PromptCandidate, RecalledMemory, ToolCandidate } from "./gate";
 import { minLineTokens } from "./inject";
 import { anchorHit, keyHit, type MemoryKeys, parseStoredList, type ToolLookup } from "./keys";
 import type { Epistemic, MemoryKind, MemoryScope, MemoryType } from "./policy";
-import { contentTokens } from "./prompt";
+import { distinctWords } from "./prompt";
 import { PINNED_KINDS, type PinnedCandidate } from "./session";
 
 export interface RecallRow {
@@ -172,7 +172,7 @@ export function anyTermMatchExpression(texts: readonly string[], maxTerms: numbe
 }
 
 export function ftsMatchExpression(query: string): string {
-  return anyTermMatchExpression(contentTokens(query), FTS_QUERY_MAX_TERMS);
+  return anyTermMatchExpression(distinctWords(query), FTS_QUERY_MAX_TERMS);
 }
 
 export function rrfFuse(rankings: readonly (readonly string[])[]): Map<string, number> {

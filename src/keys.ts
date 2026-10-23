@@ -1,5 +1,5 @@
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
-import { contentTokens, wordsOf } from "./prompt";
+import { distinctWords, wordsOf } from "./prompt";
 
 export interface MemoryKeys {
   readonly conflictKey: string;
@@ -263,7 +263,7 @@ function bashLookup(command: string, projectDir: string): ToolLookup | undefined
   if (anchors.length === 0) {
     return undefined;
   }
-  return { anchors, tokens: contentTokens(heads.join(" ")) };
+  return { anchors, tokens: distinctWords(heads.join(" ")) };
 }
 
 function projectRelativePath(filePath: string, projectDir: string): string | undefined {
@@ -294,7 +294,7 @@ function pathLookup(filePath: string, projectDir: string): ToolLookup | undefine
   const located = path === undefined ? [] : [path, ...directoryPrefixes(path)];
   return {
     anchors: [...new Set([...located, name, ...extensionSuffixes(name)])],
-    tokens: contentTokens(path ?? name),
+    tokens: distinctWords(path ?? name),
   };
 }
 

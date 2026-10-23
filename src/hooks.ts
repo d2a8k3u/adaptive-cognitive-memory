@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { readAutoMemory } from "./automemory";
 import { ticketId } from "./branch";
-import { FAILURE_GATE, PROMPT_GATE, PROMPT_MIN_CONTENT_TOKENS, TOOL_GATE } from "./calibration";
+import { FAILURE_GATE, PROMPT_GATE, PROMPT_MIN_WORDS, TOOL_GATE } from "./calibration";
 import { checkpoint, cueLine, detectCue, signalDetail } from "./capture";
 import { type Config, loadConfig } from "./cfg";
 import type { Db, OpenedDb } from "./db/database";
@@ -409,7 +409,7 @@ async function promptRecall(
   projectId: string,
   prompt: string,
 ): Promise<string> {
-  const admission = admitPrompt(prompt, PROMPT_MIN_CONTENT_TOKENS);
+  const admission = admitPrompt(prompt, PROMPT_MIN_WORDS);
   if (!admission.admitted) {
     return recordAbstention(opened, scope, "UserPromptSubmit");
   }

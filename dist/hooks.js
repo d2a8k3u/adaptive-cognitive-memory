@@ -249,7 +249,7 @@ function sessionStartText(scope, source) {
     });
 }
 async function promptRecall(opened, scope, projectId, prompt) {
-    const admission = (0, prompt_1.admitPrompt)(prompt, calibration_1.PROMPT_MIN_CONTENT_TOKENS);
+    const admission = (0, prompt_1.admitPrompt)(prompt, calibration_1.PROMPT_MIN_WORDS);
     if (!admission.admitted) {
         return recordAbstention(opened, scope, "UserPromptSubmit");
     }

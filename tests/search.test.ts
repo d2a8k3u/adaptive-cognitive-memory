@@ -242,9 +242,11 @@ describe("rrfFuse", () => {
 });
 
 describe("ftsMatchExpression", () => {
-  it("ORs the quoted content tokens so one matching term is enough and stopwords never match", () => {
-    expect(ftsMatchExpression("How do I deploy the database?")).toBe('"deploy" OR "database"');
-    expect(ftsMatchExpression('NEAR( "x" OR AND * the')).toBe('"near"');
+  it("ORs every quoted distinct word so one matching term is enough and operators stay literal", () => {
+    expect(ftsMatchExpression("How do I deploy the database?")).toBe(
+      '"how" OR "do" OR "deploy" OR "the" OR "database"',
+    );
+    expect(ftsMatchExpression('NEAR( "x" OR AND * the')).toBe('"near" OR "or" OR "and" OR "the"');
     expect(ftsMatchExpression("   ")).toBe("");
   });
 });

@@ -593,7 +593,7 @@ describe("hooks user-prompt-submit", () => {
   }, 30_000);
 
   it.each(["ok", "díky"])(
-    "injects nothing for the acknowledgement %s",
+    "injects nothing for the one-word prompt %s",
     async (prompt) => {
       const { env, config } = freshEnv();
       await seedMemories(config, [

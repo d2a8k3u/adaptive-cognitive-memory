@@ -1,15 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { admitPrompt, contentTokens } from "../src/prompt";
+import { admitPrompt, distinctWords } from "../src/prompt";
 
 describe("admitPrompt", () => {
+  it("rejects a slash command", () => {
+    expect(admitPrompt("/compact keep the billing notes", 1)).toEqual({
+      admitted: false,
+      reason: "slash_command",
+    });
+  });
+
   it.each([
-    { prompt: "/compact keep the billing notes", min: 1, expected: "slash_command" },
-    { prompt: "great, thanks", min: 2, expected: "acknowledgement" },
-    { prompt: "v pohodě, pokračuj", min: 1, expected: "acknowledgement" },
-    { prompt: "Jak spustím testy?", min: 3, expected: "too_few_content_tokens" },
-    { prompt: "How do I run the tests here?", min: 3, expected: "too_few_content_tokens" },
-  ])("rejects $prompt as $expected", ({ prompt, min, expected }) => {
-    expect(admitPrompt(prompt, min)).toEqual({ admitted: false, reason: expected });
+    { prompt: "great, thanks" },
+    { prompt: "v pohodě" },
+    { prompt: "danke, passt" },
+    { prompt: "なんで?" },
+  ])(
+    "rejects $prompt for having fewer distinct words than the minimum, whatever its language",
+    ({ prompt }) => {
+      expect(admitPrompt(prompt, 3)).toEqual({ admitted: false, reason: "too_few_words" });
+    },
+  );
+
+  it("counts every distinct word of two or more letters, with no word list deciding what counts", () => {
+    expect(admitPrompt("Jak spustím testy v billingu?", 4)).toEqual({
+      admitted: true,
+      tokens: ["jak", "spustím", "testy", "billingu"],
+    });
+    expect(admitPrompt("Jak spustím testy v billingu?", 5)).toEqual({
+      admitted: false,
+      reason: "too_few_words",
+    });
   });
 
   it("segments scripts written without spaces into words before counting them", () => {
@@ -17,26 +37,17 @@ describe("admitPrompt", () => {
       admitted: true,
       tokens: ["顧客", "返金", "する", "どう", "いい"],
     });
-    expect(admitPrompt("なんで?", 3)).toEqual({
-      admitted: false,
-      reason: "too_few_content_tokens",
-    });
-  });
-
-  it("admits a prompt with exactly the minimum number of content tokens, stopwords removed", () => {
-    expect(admitPrompt("Jak spustím testy v billingu?", 3)).toEqual({
-      admitted: true,
-      tokens: ["spustím", "testy", "billingu"],
-    });
-    expect(admitPrompt("How do I run the tests here?", 2)).toEqual({
-      admitted: true,
-      tokens: ["run", "tests"],
-    });
   });
 });
 
-describe("contentTokens", () => {
+describe("distinctWords", () => {
   it("lowercases, splits on punctuation, drops one-letter words and repeats", () => {
-    expect(contentTokens("Use fmt.Errorf, then FMT again; a b")).toEqual(["use", "fmt", "errorf"]);
+    expect(distinctWords("Use fmt.Errorf, then FMT again; a b")).toEqual([
+      "use",
+      "fmt",
+      "errorf",
+      "then",
+      "again",
+    ]);
   });
 });

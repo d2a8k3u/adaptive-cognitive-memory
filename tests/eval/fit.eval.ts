@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CALIBRATION_RUN, PROMPT_GATE, PROMPT_MIN_CONTENT_TOKENS } from "../../src/calibration";
+import { CALIBRATION_RUN, PROMPT_GATE, PROMPT_MIN_WORDS } from "../../src/calibration";
 import { loadConfig } from "../../src/cfg";
 import { type OpenedDb, openDatabase } from "../../src/db/database";
 import {
@@ -73,7 +73,7 @@ async function collectCases(stored: StoredWorld): Promise<PromptCase[]> {
   try {
     const cases: PromptCase[] = [];
     for (const item of items) {
-      const admission = admitPrompt(item.prompt, PROMPT_MIN_CONTENT_TOKENS);
+      const admission = admitPrompt(item.prompt, PROMPT_MIN_WORDS);
       const found = admission.admitted
         ? await promptCandidates(opened, {
             projectId: projectIds.get(item.project) ?? item.project,
