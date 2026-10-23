@@ -119,9 +119,9 @@ describe("modelNotice", () => {
     error: "fetch failed (getaddrinfo ENOTFOUND huggingface.co)",
   };
   const downloading =
-    "adaptive-cognitive-memory is downloading its embedding model (one time, about 135 MB); prompt recall starts when it finishes.";
+    "adaptive-cognitive-memory is downloading its embedding model (one time, about 120 MB); prompt recall starts when it finishes.";
   const retrying =
-    "adaptive-cognitive-memory's last embedding model download failed (fetch failed (getaddrinfo ENOTFOUND huggingface.co)); retrying in the background (one time, about 135 MB), prompt recall starts when it finishes.";
+    "adaptive-cognitive-memory's last embedding model download failed (fetch failed (getaddrinfo ENOTFOUND huggingface.co)); retrying in the background (one time, about 120 MB), prompt recall starts when it finishes.";
   const off =
     "adaptive-cognitive-memory has no embedding model yet and its automatic download is off, so prompt recall stays off: run /memory-doctor for the one-time model-init step.";
   const offAfterFailure =

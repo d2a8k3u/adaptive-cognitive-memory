@@ -1,14 +1,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { EMBED_DIM, MODEL_DTYPE, MODEL_ID } from "./cfg";
+import { EMBED_DIM, MODEL_DTYPE, MODEL_ID, MODEL_POOLING, MODEL_PREFIXES } from "./cfg";
 
 type FeatureExtractionPipeline = (
   texts: string[],
-  options: { pooling: "mean"; normalize: boolean },
+  options: { pooling: typeof MODEL_POOLING; normalize: boolean },
 ) => Promise<{ dims: number[]; data: Float32Array | number[] }>;
-
-const PASSAGE_PREFIX = "passage: ";
-const QUERY_PREFIX = "query: ";
 
 const ONNX_FILE_BY_DTYPE: Record<typeof MODEL_DTYPE, string> = {
   q8: "onnx/model_quantized.onnx",
@@ -58,7 +55,7 @@ async function embed(texts: string[], modelCacheDir: string): Promise<Float32Arr
     throw new Error("embed requires at least one text");
   }
   const extractor = await loadModel(modelCacheDir);
-  const output = await extractor(texts, { pooling: "mean", normalize: true });
+  const output = await extractor(texts, { pooling: MODEL_POOLING, normalize: true });
   const batchSize = output.dims[0] ?? 0;
   const dim = output.dims[1];
   if (dim !== EMBED_DIM || batchSize !== texts.length) {
@@ -69,15 +66,19 @@ async function embed(texts: string[], modelCacheDir: string): Promise<Float32Arr
 }
 
 export function passageInput(text: string): string {
-  return `${PASSAGE_PREFIX}${text}`;
+  return `${MODEL_PREFIXES.passage}${text}`;
 }
 
 export function queryInput(text: string): string {
-  return `${QUERY_PREFIX}${text}`;
+  return `${MODEL_PREFIXES.query}${text}`;
 }
 
 export function embedPassage(texts: string[], modelCacheDir: string): Promise<Float32Array[]> {
   return embed(texts.map(passageInput), modelCacheDir);
+}
+
+export function embedQuestions(texts: string[], modelCacheDir: string): Promise<Float32Array[]> {
+  return embed(texts.map(queryInput), modelCacheDir);
 }
 
 export async function embedQuery(text: string, modelCacheDir: string): Promise<Float32Array> {

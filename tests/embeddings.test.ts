@@ -48,7 +48,7 @@ describe("embeddings", () => {
     await expect(embedQuery("local inference only", emptyDir)).rejects.toThrow(/not cached/);
   });
 
-  it("embeds offline from the local cache with the e5 prefix contract", async () => {
+  it("embeds offline from the local cache into normalized, repeatable vectors", async () => {
     const fetchAttempt = vi.fn(() => Promise.reject(new Error("network fetch attempted")));
     env.fetch = fetchAttempt;
     try {
@@ -60,7 +60,6 @@ describe("embeddings", () => {
       expect(queryVector).toHaveLength(EMBED_DIM);
       expect(passageVector).toHaveLength(EMBED_DIM);
       expect(l2norm(queryVector)).toBeCloseTo(1, 5);
-      expect(cosine(queryVector, passageVector!)).toBeLessThan(0.99);
 
       const repeatQuery = await embedQuery("how to rotate logging credentials", testModelCacheDir);
       expect(repeatQuery).toEqual(queryVector);

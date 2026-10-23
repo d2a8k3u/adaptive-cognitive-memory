@@ -1,11 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_DOWNLOAD_MODEL = exports.BUDGET_MAX_TOKENS = exports.BUDGET_MIN_TOKENS = exports.DEFAULT_PRETOOL_BUDGET_TOKENS = exports.DEFAULT_BUDGET_TOKENS = exports.DB_FILENAME = exports.SIGNAL_DETAIL_MAX_CHARS = exports.RELATION_TYPE_MAX_CHARS = exports.RELATION_CAP = exports.CONTENT_MAX_CHARS = exports.ABSTRACT_MAX_CHARS = exports.TITLE_MAX_CHARS = exports.EMBED_DEADLINE_MS = exports.EMBED_DIM = exports.MODEL_DOWNLOAD_SIZE = exports.MODEL_DTYPE = exports.MODEL_ID = void 0;
+exports.DEFAULT_DOWNLOAD_MODEL = exports.BUDGET_MAX_TOKENS = exports.BUDGET_MIN_TOKENS = exports.DEFAULT_PRETOOL_BUDGET_TOKENS = exports.DEFAULT_BUDGET_TOKENS = exports.DB_FILENAME = exports.SIGNAL_DETAIL_MAX_CHARS = exports.RELATION_TYPE_MAX_CHARS = exports.RELATION_CAP = exports.CONTENT_MAX_CHARS = exports.ABSTRACT_MAX_CHARS = exports.TITLE_MAX_CHARS = exports.EMBED_DEADLINE_MS = exports.EMBED_DIM = exports.MODEL_DOWNLOAD_SIZE = exports.MODEL_PREFIXES = exports.MODEL_POOLING = exports.MODEL_DTYPE = exports.MODEL_ID = void 0;
 exports.loadConfig = loadConfig;
 const node_path_1 = require("node:path");
-exports.MODEL_ID = "Xenova/multilingual-e5-small";
+exports.MODEL_ID = "onnx-community/granite-embedding-97m-multilingual-r2-ONNX";
 exports.MODEL_DTYPE = "q8";
-exports.MODEL_DOWNLOAD_SIZE = "about 135 MB";
+exports.MODEL_POOLING = "cls";
+exports.MODEL_PREFIXES = { query: "", passage: "" };
+exports.MODEL_DOWNLOAD_SIZE = "about 120 MB";
 exports.EMBED_DIM = 384;
 exports.EMBED_DEADLINE_MS = 1500;
 exports.TITLE_MAX_CHARS = 200;

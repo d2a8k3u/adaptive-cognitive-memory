@@ -25,7 +25,7 @@
     "download_model": {
       "type": "boolean",
       "title": "Download the embedding model automatically",
-      "description": "On first run, download Xenova/multilingual-e5-small (one time, about 135 MB) into the plugin data directory in the background. Turn off to run model-init yourself (see /memory-doctor).",
+      "description": "On first run, download onnx-community/granite-embedding-97m-multilingual-r2-ONNX (one time, about 120 MB) into the plugin data directory in the background. Turn off to run model-init yourself (see /memory-doctor).",
       "default": true
     }
   }

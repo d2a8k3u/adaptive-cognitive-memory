@@ -5,7 +5,7 @@ lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_root="$(cd "$lib/../.." && pwd)"
 config_dir="$(cd "$HOME/.." && pwd)/config"
 data="$config_dir/plugins/data/adaptive-cognitive-memory-inline"
-models="$plugin_root/node_modules/.cache/adaptive-cognitive-memory/models/Xenova"
+models="$plugin_root/node_modules/.cache/adaptive-cognitive-memory/models/onnx-community"
 
 if [ ! -d "$config_dir" ]; then
   echo "eval layout changed: no Claude config dir at $config_dir" >&2
@@ -17,7 +17,7 @@ if [ ! -d "$models" ]; then
 fi
 
 mkdir -p "$data/models" "$TMPDIR/other-project"
-ln -s "$models" "$data/models/Xenova"
+ln -s "$models" "$data/models/onnx-community"
 
 if [ "$#" -gt 0 ]; then
   CLAUDE_PLUGIN_DATA="$data" node "$lib/seed.mjs" "$plugin_root" "$1" "$PWD" "$TMPDIR/other-project"

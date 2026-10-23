@@ -1,8 +1,10 @@
 import { join } from "node:path";
 
-export const MODEL_ID = "Xenova/multilingual-e5-small";
+export const MODEL_ID = "onnx-community/granite-embedding-97m-multilingual-r2-ONNX";
 export const MODEL_DTYPE = "q8";
-export const MODEL_DOWNLOAD_SIZE = "about 135 MB";
+export const MODEL_POOLING = "cls";
+export const MODEL_PREFIXES = { query: "", passage: "" } as const;
+export const MODEL_DOWNLOAD_SIZE = "about 120 MB";
 export const EMBED_DIM = 384;
 export const EMBED_DEADLINE_MS = 1500;
 export const TITLE_MAX_CHARS = 200;

@@ -6,13 +6,12 @@ exports.modelCached = modelCached;
 exports.passageInput = passageInput;
 exports.queryInput = queryInput;
 exports.embedPassage = embedPassage;
+exports.embedQuestions = embedQuestions;
 exports.embedQuery = embedQuery;
 exports.withDeadline = withDeadline;
 const node_fs_1 = require("node:fs");
 const node_path_1 = require("node:path");
 const cfg_1 = require("./cfg");
-const PASSAGE_PREFIX = "passage: ";
-const QUERY_PREFIX = "query: ";
 const ONNX_FILE_BY_DTYPE = {
     q8: "onnx/model_quantized.onnx",
 };
@@ -53,7 +52,7 @@ async function embed(texts, modelCacheDir) {
         throw new Error("embed requires at least one text");
     }
     const extractor = await loadModel(modelCacheDir);
-    const output = await extractor(texts, { pooling: "mean", normalize: true });
+    const output = await extractor(texts, { pooling: cfg_1.MODEL_POOLING, normalize: true });
     const batchSize = output.dims[0] ?? 0;
     const dim = output.dims[1];
     if (dim !== cfg_1.EMBED_DIM || batchSize !== texts.length) {
@@ -63,13 +62,16 @@ async function embed(texts, modelCacheDir) {
     return texts.map((_, row) => data.slice(row * dim, (row + 1) * dim));
 }
 function passageInput(text) {
-    return `${PASSAGE_PREFIX}${text}`;
+    return `${cfg_1.MODEL_PREFIXES.passage}${text}`;
 }
 function queryInput(text) {
-    return `${QUERY_PREFIX}${text}`;
+    return `${cfg_1.MODEL_PREFIXES.query}${text}`;
 }
 function embedPassage(texts, modelCacheDir) {
     return embed(texts.map(passageInput), modelCacheDir);
+}
+function embedQuestions(texts, modelCacheDir) {
+    return embed(texts.map(queryInput), modelCacheDir);
 }
 async function embedQuery(text, modelCacheDir) {
     const vectors = await embed([queryInput(text)], modelCacheDir);

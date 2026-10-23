@@ -1272,7 +1272,7 @@ describe("hooks storage outage", () => {
 describe("hooks model download", () => {
   const countModelInit = join(process.cwd(), "tests", "fixtures", "count-model-init.cjs");
   const downloadingNotice =
-    /adaptive-cognitive-memory is downloading its embedding model \(one time, about 135 MB\); prompt recall starts when it finishes/;
+    /adaptive-cognitive-memory is downloading its embedding model \(one time, about 120 MB\); prompt recall starts when it finishes/;
 
   function missingModelEnv(): { env: NodeJS.ProcessEnv; config: Config } {
     return freshEnv({
@@ -1343,7 +1343,7 @@ describe("hooks model download", () => {
     const retried = await sessionStart(env, startMarker());
 
     expect(systemMessage(retried)).toMatch(
-      /last embedding model download failed \(fetch failed.*\); retrying in the background \(one time, about 135 MB\)/,
+      /last embedding model download failed \(fetch failed.*\); retrying in the background \(one time, about 120 MB\)/,
     );
   }, 60_000);
 
