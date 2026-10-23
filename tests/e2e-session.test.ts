@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { describe, expect, it } from "vitest";
-import { testModelCacheDir } from "../vitest.config";
+import { testModelEnv } from "../vitest.config";
 import { runProcess, toolText } from "./fixtures/seed";
 
 const SESSION_A_CWD = "/tmp/acm-e2e-project-alpha";
@@ -66,7 +66,7 @@ async function sessionBPrompt(
   return runProcess({
     command: process.execPath,
     args: [distEntry("hooks.js")],
-    env: { CLAUDE_PLUGIN_DATA: pluginData, ACM_MODEL_CACHE_DIR: testModelCacheDir },
+    env: { CLAUDE_PLUGIN_DATA: pluginData, ...testModelEnv },
     cwd: SESSION_B_CWD,
     stdinText: JSON.stringify({
       hook_event_name: "UserPromptSubmit",
@@ -86,7 +86,7 @@ describe("two-session e2e (AC-28, AC-8)", () => {
     mkdirSync(SESSION_B_CWD, { recursive: true });
     const childEnv = {
       CLAUDE_PLUGIN_DATA: pluginData,
-      ACM_MODEL_CACHE_DIR: testModelCacheDir,
+      ...testModelEnv,
     };
 
     const client = new Client({ name: "acm-e2e-session", version: "0.0.0" });
@@ -157,7 +157,7 @@ describe("two-session e2e (AC-28, AC-8)", () => {
     execFileSync("git", ["init", "-q", root], { stdio: "ignore" });
     const childEnv = {
       CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-e2e-")),
-      ACM_MODEL_CACHE_DIR: testModelCacheDir,
+      ...testModelEnv,
       PATH: process.env.PATH ?? "",
     };
 
@@ -234,7 +234,7 @@ describe("two-session e2e (AC-28, AC-8)", () => {
           args: [distEntry("server.js")],
           env: {
             CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-e2e-")),
-            ACM_MODEL_CACHE_DIR: testModelCacheDir,
+            ...testModelEnv,
             CLAUDE_CONFIG_DIR: configDir,
             PATH: process.env.PATH ?? "",
           },

@@ -33,7 +33,7 @@ import {
   badgeLine,
   isBadgeSessionId,
 } from "../src/statusline/badge";
-import { testModelCacheDir } from "../vitest.config";
+import { testModelEnv } from "../vitest.config";
 import { type ProcessResult, runProcess } from "./fixtures/seed";
 
 const PROCESS_KILL_MS = 25_000;
@@ -117,7 +117,7 @@ function pluginEnv(pluginData: string, home: string): NodeJS.ProcessEnv {
     CLAUDE_PLUGIN_DATA: pluginData,
     HOME: home,
     CLAUDE_CONFIG_DIR: join(home, ".claude"),
-    ACM_MODEL_CACHE_DIR: testModelCacheDir,
+    ...testModelEnv,
     ACM_MODEL_REMOTE_HOST: UNREACHABLE_MODEL_HOST,
     CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false",
     PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,

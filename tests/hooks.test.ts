@@ -22,7 +22,7 @@ import {
   readDownloadFailure,
   readDownloadLock,
 } from "../src/modeldownload";
-import { testModelCacheDir } from "../vitest.config";
+import { testModelCacheDir, testModelEnv } from "../vitest.config";
 
 const CHILD_KILL_MS = 25_000;
 const UNREACHABLE_MODEL_HOST = "http://127.0.0.1:9/";
@@ -111,7 +111,7 @@ function freshEnv(overrides: Record<string, string> = {}): {
   const env: NodeJS.ProcessEnv = {
     CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-hooks-")),
     CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-hooks-claude-")),
-    ACM_MODEL_CACHE_DIR: testModelCacheDir,
+    ...testModelEnv,
     ...overrides,
   };
   return { env, config: loadConfig(env) };

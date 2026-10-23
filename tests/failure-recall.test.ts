@@ -6,7 +6,7 @@ import { DB_FILENAME, loadConfig } from "../src/cfg";
 import { type Db, openDatabase } from "../src/db/database";
 import { resolveProjectId } from "../src/ids";
 import { estimateTokens } from "../src/inject";
-import { testModelCacheDir } from "../vitest.config";
+import { testModelEnv } from "../vitest.config";
 import { FAKE_SECRETS } from "./fixtures/secrets";
 import { type ProcessResult, runProcess } from "./fixtures/seed";
 
@@ -66,7 +66,7 @@ function freshEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
     CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-failure-")),
     CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-failure-claude-")),
-    ACM_MODEL_CACHE_DIR: testModelCacheDir,
+    ...testModelEnv,
     ...overrides,
   };
 }

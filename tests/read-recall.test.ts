@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/cfg";
 import { openDatabase } from "../src/db/database";
 import { resolveProjectId } from "../src/ids";
-import { testModelCacheDir } from "../vitest.config";
+import { testModelEnv } from "../vitest.config";
 import { type ProcessResult, runProcess } from "./fixtures/seed";
 
 const HOOK_KILL_MS = 25_000;
@@ -54,7 +54,7 @@ function freshEnv(): NodeJS.ProcessEnv {
   return {
     CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-read-")),
     CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-read-claude-")),
-    ACM_MODEL_CACHE_DIR: testModelCacheDir,
+    ...testModelEnv,
   };
 }
 

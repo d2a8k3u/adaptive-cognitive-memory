@@ -17,7 +17,7 @@ import { projectIdentity, resolveProjectId } from "../src/ids";
 import type { MemoryKind } from "../src/policy";
 import { sessionStartLimit } from "../src/search";
 import { type PinnedCandidate, sessionStartMemories } from "../src/session";
-import { testModelCacheDir } from "../vitest.config";
+import { testModelEnv } from "../vitest.config";
 import { type ProcessResult, runProcess } from "./fixtures/seed";
 
 const HOOK_KILL_MS = 25_000;
@@ -205,7 +205,7 @@ function hookEnv(path: string | undefined): NodeJS.ProcessEnv {
   return {
     CLAUDE_PLUGIN_DATA: tempDir("acm-branch-data-"),
     CLAUDE_CONFIG_DIR: tempDir("acm-branch-claude-"),
-    ACM_MODEL_CACHE_DIR: testModelCacheDir,
+    ...testModelEnv,
     PATH: path,
     ...GIT_ISOLATION,
   };
