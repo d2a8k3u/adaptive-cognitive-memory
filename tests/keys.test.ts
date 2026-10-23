@@ -68,6 +68,41 @@ describe("toolLookup for Bash", () => {
     expect(anchors).not.toContain("t32");
   });
 
+  it("turns a path argument into the project-relative path, as a file and as a directory, without its parents", () => {
+    const paths = (command: string) =>
+      bashAnchors(command).filter((anchor) => anchor.includes("/") && !anchor.includes(" "));
+
+    expect(paths("go test -tags integration ./internal/it/...")).toEqual([
+      "internal/it",
+      "internal/it/",
+    ]);
+    expect(paths("go run ./cmd/backfill --from 2025-01-01")).toEqual([
+      "cmd/backfill",
+      "cmd/backfill/",
+    ]);
+    expect(paths("wc -l /repo/billing/tax.py")).toEqual(["billing/tax.py", "billing/tax.py/"]);
+  });
+
+  it("adds no path anchor for a command that only lists a directory, as Glob recalls nothing", () => {
+    expect(
+      bashAnchors("ls src/components && tree docs/").filter(
+        (anchor) => anchor.includes("/") && !anchor.includes(" "),
+      ),
+    ).toEqual([]);
+  });
+
+  it("adds no basename, extension, url or outside path as an anchor", () => {
+    const anchors = bashAnchors(
+      "curl -o out/report.json https://example.com/api/v1 && cat /etc/hosts",
+    );
+    expect(anchors).toEqual(expect.arrayContaining(["out/report.json"]));
+    expect(
+      anchors.filter((anchor) =>
+        /^(report\.json|\.json|https:.*|example\.com.*|etc\/.*|\/etc.*|hosts)$/.test(anchor),
+      ),
+    ).toEqual([]);
+  });
+
   it("offers the head words as tokens for the keyword signal", () => {
     expect(toolLookup("Bash", { command: "uv run alembic upgrade head" }, "/repo")?.tokens).toEqual(
       expect.arrayContaining(["uv", "run", "alembic", "upgrade"]),

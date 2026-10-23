@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MAX_HEAD_WORDS = void 0;
 exports.keyHit = keyHit;
-exports.parseStoredAnchors = parseStoredAnchors;
+exports.parseStoredList = parseStoredList;
 exports.anchorHit = anchorHit;
 exports.commandHead = commandHead;
 exports.toolLookup = toolLookup;
@@ -58,6 +58,10 @@ const OUTPUT_REDIRECTION = ">";
 const LIST_SEPARATORS = new Set([";", "\n"]);
 const QUOTES = new Set(["'", '"']);
 const WHITESPACE = /\s/;
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const LISTING_COMMANDS = new Set(["ls", "tree", "du"]);
+const GO_PACKAGE_WILDCARD = /\/\.\.\.$/;
+const TRAILING_SEPARATORS = /\/+$/;
 function topicSegments(conflictKey) {
     const segments = conflictKey.split(CONFLICT_KEY_NAMESPACE_SEPARATOR);
     const topic = segments.length > 1 ? segments.slice(1) : segments;
@@ -75,13 +79,13 @@ function keyHit(tokens, keys) {
         intersects(tokens, (0, prompt_1.wordsOf)(keys.keywords)) ||
         keys.anchors.some((anchor) => anchorWordsPresent(tokens, anchor)));
 }
-function parseStoredAnchors(memoryId, stored) {
+function parseStoredList(memoryId, field, stored) {
     if (stored === "") {
         return [];
     }
     const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed) || !parsed.every((anchor) => typeof anchor === "string")) {
-        throw new Error(`memory ${memoryId} has malformed anchors`);
+    if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+        throw new Error(`memory ${memoryId} has malformed ${field}`);
     }
     return parsed;
 }
@@ -195,13 +199,36 @@ function commandHeads(segment) {
     const runsAnotherCommand = subcommand !== undefined && (RUNNER_SUBCOMMANDS[command] ?? []).includes(subcommand);
     return runsAnotherCommand ? [...heads(words), ...commandHeads(words.slice(2))] : heads(words);
 }
-function bashLookup(command) {
+function pathArgument(word, projectDir) {
+    if (word.startsWith(FLAG_MARK) || !word.includes(DIRECTORY_SEPARATOR) || URL_SCHEME.test(word)) {
+        return undefined;
+    }
+    const path = word.replace(GO_PACKAGE_WILDCARD, "").replace(TRAILING_SEPARATORS, "");
+    return path === "" ? undefined : projectRelativePath(path, projectDir);
+}
+function pathArgumentAnchors(segment, projectDir) {
+    const [command, ...argumentWords] = withoutWrappers(segment);
+    if (command === undefined || LISTING_COMMANDS.has(command)) {
+        return [];
+    }
+    return argumentWords.flatMap((word) => {
+        const path = pathArgument(word, projectDir);
+        return path === undefined ? [] : [path, `${path}${DIRECTORY_SEPARATOR}`];
+    });
+}
+function bashLookup(command, projectDir) {
     const commands = shellPipelines(command).flat().slice(0, MAX_COMMAND_SEGMENTS);
-    const anchors = [...new Set(commands.flatMap(commandHeads))];
+    const heads = commands.flatMap(commandHeads);
+    const anchors = [
+        ...new Set([
+            ...heads,
+            ...commands.flatMap((segment) => pathArgumentAnchors(segment, projectDir)),
+        ]),
+    ];
     if (anchors.length === 0) {
         return undefined;
     }
-    return { anchors, tokens: (0, prompt_1.contentTokens)(anchors.join(" ")) };
+    return { anchors, tokens: (0, prompt_1.contentTokens)(heads.join(" ")) };
 }
 function projectRelativePath(filePath, projectDir) {
     const path = (0, node_path_1.relative)(projectDir, (0, node_path_1.resolve)(projectDir, filePath));
@@ -261,7 +288,7 @@ function commandHead(toolInput) {
 function toolLookup(toolName, toolInput, projectDir) {
     if (toolName === "Bash") {
         const command = stringProperty(toolInput, "command");
-        return command === undefined ? undefined : bashLookup(command);
+        return command === undefined ? undefined : bashLookup(command, projectDir);
     }
     if (PATH_TOOLS.has(toolName)) {
         const filePath = stringProperty(toolInput, "file_path");

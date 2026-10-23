@@ -62,6 +62,10 @@ const OUTPUT_REDIRECTION = ">";
 const LIST_SEPARATORS: ReadonlySet<string> = new Set([";", "\n"]);
 const QUOTES: ReadonlySet<string> = new Set(["'", '"']);
 const WHITESPACE = /\s/;
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const LISTING_COMMANDS: ReadonlySet<string> = new Set(["ls", "tree", "du"]);
+const GO_PACKAGE_WILDCARD = /\/\.\.\.$/;
+const TRAILING_SEPARATORS = /\/+$/;
 
 type ShellCommand = readonly string[];
 type ShellPipeline = readonly ShellCommand[];
@@ -94,13 +98,17 @@ export function keyHit(tokens: ReadonlySet<string>, keys: MemoryKeys): boolean {
   );
 }
 
-export function parseStoredAnchors(memoryId: string, stored: string): string[] {
+export function parseStoredList(
+  memoryId: string,
+  field: "anchors" | "questions",
+  stored: string,
+): string[] {
   if (stored === "") {
     return [];
   }
   const parsed: unknown = JSON.parse(stored);
-  if (!Array.isArray(parsed) || !parsed.every((anchor) => typeof anchor === "string")) {
-    throw new Error(`memory ${memoryId} has malformed anchors`);
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+    throw new Error(`memory ${memoryId} has malformed ${field}`);
   }
   return parsed;
 }
@@ -224,13 +232,38 @@ function commandHeads(segment: readonly string[]): string[] {
   return runsAnotherCommand ? [...heads(words), ...commandHeads(words.slice(2))] : heads(words);
 }
 
-function bashLookup(command: string): ToolLookup | undefined {
+function pathArgument(word: string, projectDir: string): string | undefined {
+  if (word.startsWith(FLAG_MARK) || !word.includes(DIRECTORY_SEPARATOR) || URL_SCHEME.test(word)) {
+    return undefined;
+  }
+  const path = word.replace(GO_PACKAGE_WILDCARD, "").replace(TRAILING_SEPARATORS, "");
+  return path === "" ? undefined : projectRelativePath(path, projectDir);
+}
+
+function pathArgumentAnchors(segment: readonly string[], projectDir: string): string[] {
+  const [command, ...argumentWords] = withoutWrappers(segment);
+  if (command === undefined || LISTING_COMMANDS.has(command)) {
+    return [];
+  }
+  return argumentWords.flatMap((word) => {
+    const path = pathArgument(word, projectDir);
+    return path === undefined ? [] : [path, `${path}${DIRECTORY_SEPARATOR}`];
+  });
+}
+
+function bashLookup(command: string, projectDir: string): ToolLookup | undefined {
   const commands = shellPipelines(command).flat().slice(0, MAX_COMMAND_SEGMENTS);
-  const anchors = [...new Set(commands.flatMap(commandHeads))];
+  const heads = commands.flatMap(commandHeads);
+  const anchors = [
+    ...new Set([
+      ...heads,
+      ...commands.flatMap((segment) => pathArgumentAnchors(segment, projectDir)),
+    ]),
+  ];
   if (anchors.length === 0) {
     return undefined;
   }
-  return { anchors, tokens: contentTokens(anchors.join(" ")) };
+  return { anchors, tokens: contentTokens(heads.join(" ")) };
 }
 
 function projectRelativePath(filePath: string, projectDir: string): string | undefined {
@@ -305,7 +338,7 @@ export function toolLookup(
 ): ToolLookup | undefined {
   if (toolName === "Bash") {
     const command = stringProperty(toolInput, "command");
-    return command === undefined ? undefined : bashLookup(command);
+    return command === undefined ? undefined : bashLookup(command, projectDir);
   }
   if (PATH_TOOLS.has(toolName)) {
     const filePath = stringProperty(toolInput, "file_path");
