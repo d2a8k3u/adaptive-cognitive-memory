@@ -44,6 +44,7 @@ function testCommand(overrides: Partial<StoreInput> = {}): StoreInput {
     valueText: "pnpm test",
     keywords: "pnpm test unit",
     anchors: [],
+    questions: [],
     scope: "project",
     resolution: { action: "ADD" },
     ...overrides,

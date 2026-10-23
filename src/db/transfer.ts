@@ -29,6 +29,7 @@ const MEMORY_COLUMNS = [
   "value_text",
   "keywords",
   "anchors",
+  "questions",
   "epistemic",
   "origin",
   "state",
@@ -103,7 +104,9 @@ function writeImport(db: Db, writes: ImportWrites): void {
   for (const memory of writes.memories) {
     insertMemory.run(
       ...MEMORY_COLUMNS.map((column) =>
-        column === "anchors" ? JSON.stringify(memory.anchors) : memory[column],
+        column === "anchors" || column === "questions"
+          ? JSON.stringify(memory[column])
+          : memory[column],
       ),
       contentHash(memory.content),
     );

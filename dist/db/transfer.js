@@ -22,6 +22,7 @@ const MEMORY_COLUMNS = [
     "value_text",
     "keywords",
     "anchors",
+    "questions",
     "epistemic",
     "origin",
     "state",
@@ -78,7 +79,9 @@ function writeImport(db, writes) {
     const insertMemory = db.prepare(`INSERT INTO memories (${MEMORY_COLUMNS.join(", ")}, content_hash)
      VALUES (${MEMORY_COLUMNS.map(() => "?").join(", ")}, ?)`);
     for (const memory of writes.memories) {
-        insertMemory.run(...MEMORY_COLUMNS.map((column) => column === "anchors" ? JSON.stringify(memory.anchors) : memory[column]), (0, policy_1.contentHash)(memory.content));
+        insertMemory.run(...MEMORY_COLUMNS.map((column) => column === "anchors" || column === "questions"
+            ? JSON.stringify(memory[column])
+            : memory[column]), (0, policy_1.contentHash)(memory.content));
     }
     const insertRelation = db.prepare("INSERT OR IGNORE INTO relations (source_id, target_id, relation_type) VALUES (?, ?, ?)");
     for (const relation of writes.relations) {

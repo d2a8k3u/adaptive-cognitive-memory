@@ -43,6 +43,7 @@ vi.mock("../src/embeddings", () => ({
     embedState.duringEmbed?.();
     return Promise.resolve(texts.map(() => embedState.queue.shift() ?? embedState.default));
   },
+  embedQuestions: (texts: string[]) => Promise.resolve(texts.map(() => embedState.default)),
 }));
 
 const vecState = vi.hoisted(() => ({ failLoad: false }));
@@ -93,6 +94,7 @@ function input(overrides: Partial<StoreInput> = {}): StoreInput {
     valueText: "",
     keywords: "",
     anchors: [],
+    questions: [],
     scope: "project",
     ...overrides,
   };
@@ -204,7 +206,7 @@ describe("store", () => {
       ),
     ).toBe(1);
     expect(embedState.inputs).toEqual([
-      "postgres migration recipe. Always run VACUUM after bulk load. project.migration_recipe vacuum bulk load",
+      "postgres migration recipe. Always run VACUUM after bulk load. More detail here. vacuum bulk load",
     ]);
     expect(
       env.db.prepare("SELECT memory_id, type, scope, project_id, state FROM memories_vec").all(),
@@ -380,13 +382,18 @@ describe("two-phase write protocol", () => {
 
   it("SUPERSEDE revokes the target with validity bounds, a transition and a revoked vector", async () => {
     const { env } = openEnv();
-    await store(env, { ...POSTGRES, ...ADD }, PROJECT_ALPHA);
+    const question = ["Which database do we run on?"];
+    await store(env, { ...POSTGRES, questions: question, ...ADD }, PROJECT_ALPHA);
     const postgresId = idByTitle(env, POSTGRES.title);
 
     const result = written(
       await store(
         env,
-        { ...MYSQL, resolution: { action: "SUPERSEDE", target: postgresId.slice(0, 10) } },
+        {
+          ...MYSQL,
+          questions: question,
+          resolution: { action: "SUPERSEDE", target: postgresId.slice(0, 10) },
+        },
         PROJECT_ALPHA,
       ),
     );
@@ -421,14 +428,16 @@ describe("two-phase write protocol", () => {
         related_id: result.id,
       },
     ]);
+    const vectorStates = [
+      { memory_id: postgresId, state: "revoked" },
+      { memory_id: result.id, state: "active" },
+    ].sort((a, b) => (a.memory_id < b.memory_id ? -1 : 1));
     expect(
       env.db.prepare("SELECT memory_id, state FROM memories_vec ORDER BY memory_id").all(),
-    ).toEqual(
-      [
-        { memory_id: postgresId, state: "revoked" },
-        { memory_id: result.id, state: "active" },
-      ].sort((a, b) => (a.memory_id < b.memory_id ? -1 : 1)),
-    );
+    ).toEqual(vectorStates);
+    expect(
+      env.db.prepare("SELECT memory_id, state FROM questions_vec ORDER BY memory_id").all(),
+    ).toEqual(vectorStates);
 
     const next = await store(
       env,
@@ -478,7 +487,7 @@ describe("two-phase write protocol", () => {
       ),
     ).toBe(1);
     expect(embedState.inputs).toEqual([
-      "Primary database is PostgreSQL 15.4. The service stores everything in PostgreSQL 15.4 on RDS. project.primary_database postgres rds",
+      "Primary database is PostgreSQL 15.4. The service stores everything in PostgreSQL 15.4 on RDS. postgres rds",
     ]);
     expect(env.db.prepare("SELECT memory_id, state FROM memories_vec").all()).toEqual([
       { memory_id: postgresId, state: "active" },
@@ -637,7 +646,7 @@ describe("update", () => {
       ),
     ).toBe(1);
     expect(embedState.inputs).toEqual([
-      "deploy guide v2. Use port 4000 for dev with key [REDACTED]. project.migration_recipe port",
+      "deploy guide v2. Use port 4000 for dev with key [REDACTED]. port",
     ]);
     expect(
       scalar(env, "SELECT count(*) AS n FROM memories_fts WHERE memories_fts MATCH '3000'"),
@@ -673,9 +682,7 @@ describe("update", () => {
       abstract: "Use port 4000 for dev.",
       content: "Use port 4000 for dev.",
     });
-    expect(embedState.inputs.at(-1)).toBe(
-      "deploy guide v2. Use port 4000 for dev. project.migration_recipe",
-    );
+    expect(embedState.inputs.at(-1)).toBe("deploy guide v2. Use port 4000 for dev.");
     const embedding = env.db
       .prepare("SELECT embedding FROM memories_vec WHERE memory_id = ?")
       .pluck()

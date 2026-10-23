@@ -65,6 +65,7 @@ vi.mock("../src/embeddings", async (importOriginal) => {
       return Promise.resolve([embedState.passageQueue.shift() ?? embedState.defaultVector]);
     },
     embedQuery: () => Promise.resolve(embedState.queryVector),
+    embedQuestions: (texts: string[]) => Promise.resolve(texts.map(() => embedState.queryVector)),
   };
 });
 
@@ -105,6 +106,13 @@ function openDeps(
 function rowCount(deps: ToolDeps): number {
   const row = deps.env.db.prepare("SELECT count(*) AS n FROM memories").get() as { n: number };
   return row.n;
+}
+
+function questionVectorCount(deps: ToolDeps, memoryId: string): number {
+  return deps.env.db
+    .prepare("SELECT count(*) FROM questions_vec WHERE memory_id = ?")
+    .pluck()
+    .get(memoryId) as number;
 }
 
 function storeArgs(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -195,6 +203,35 @@ describe("tools", () => {
       throw new Error(`post-delete search failed: ${gone.error.message}`);
     }
     expect(gone).toEqual({ results: [] });
+  });
+
+  it("stores redacted recall questions with one vector each, replaces them on update and drops them on delete", async () => {
+    const deps = openDeps();
+    const id = await storedId(
+      deps,
+      storeArgs({
+        questions: ["How do I roll back a deploy?", "Jak vrátím nasazení? password=abcdefgh"],
+      }),
+    );
+    const stored = await memoryGet(deps, { id });
+    const storedVectors = questionVectorCount(deps, id);
+    const updated = await memoryUpdate(deps, { id, questions: ["What undoes a release?"] });
+    const updatedVectors = questionVectorCount(deps, id);
+    await memoryDelete(deps, { id });
+
+    expect({
+      stored: isToolError(stored) ? stored : stored.questions,
+      storedVectors,
+      updated: isToolError(updated) ? updated : updated.questions,
+      updatedVectors,
+      deletedVectors: questionVectorCount(deps, id),
+    }).toEqual({
+      stored: ["How do I roll back a deploy?", "Jak vrátím nasazení? password=[REDACTED]"],
+      storedVectors: 2,
+      updated: ["What undoes a release?"],
+      updatedVectors: 1,
+      deletedVectors: 0,
+    });
   });
 
   it("stores a memory at the exact caps of every bounded argument", async () => {
@@ -332,6 +369,11 @@ describe("tools", () => {
         name: "anchor that no matcher can produce",
         args: storeArgs({ anchors: ["/Users/me/app/billing/tax.py"] }),
         field: "anchors",
+      },
+      {
+        name: "questions not a list",
+        args: storeArgs({ questions: "How do I roll back?" }),
+        field: "questions",
       },
       {
         name: "unknown resolution action",
@@ -686,7 +728,8 @@ describe("tools", () => {
     for (const args of [{ id: first.id }, { id: first.id, importance: 0.7 }]) {
       expect(await memoryUpdate(deps, args)).toEqual({
         error: {
-          message: "update requires at least one of title, abstract, content, keywords, anchors",
+          message:
+            "update requires at least one of title, abstract, content, keywords, anchors, questions",
         },
       });
     }
@@ -832,7 +875,7 @@ describe("tools", () => {
       expect({ afterAnchors, afterKeywords: embedState.passageInputs }).toEqual({
         afterAnchors: [],
         afterKeywords: [
-          "deploy rollback. Roll back via the release script. deploy.rollback betaword",
+          "deploy rollback. Roll back via the release script. Further details live in the runbook. betaword",
         ],
       });
     });

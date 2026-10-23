@@ -8,25 +8,41 @@ function recordTransition(db, transition) {
     db.prepare(`INSERT INTO transitions (memory_id, from_state, to_state, reason, evidence, related_id, at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(transition.memoryId, transition.fromState, transition.toState, transition.reason, transition.evidence, transition.relatedId, transition.at);
 }
-const DRIFTED_VECTORS = `FROM memories_vec v JOIN memories m ON m.id = v.memory_id
-  WHERE v.state IS NOT m.state`;
+const VECTOR_TABLES = ["memories_vec", "questions_vec"];
+function driftedVectors(table) {
+    return `FROM ${table} v JOIN memories m ON m.id = v.memory_id WHERE v.state IS NOT m.state`;
+}
+function setStateIn(db, id, state) {
+    for (const table of VECTOR_TABLES) {
+        db.prepare(`UPDATE ${table} SET state = ? WHERE memory_id = ?`).run(state, id);
+    }
+}
 function setVecState(store, id, state) {
     if (store.vecLoaded) {
-        store.db.prepare("UPDATE memories_vec SET state = ? WHERE memory_id = ?").run(state, id);
+        setStateIn(store.db, id, state);
     }
 }
 function driftedVecStateCount(db) {
-    return db.prepare(`SELECT count(*) ${DRIFTED_VECTORS}`).pluck().get();
+    return VECTOR_TABLES.reduce((sum, table) => sum +
+        db
+            .prepare(`SELECT count(*) ${driftedVectors(table)}`)
+            .pluck()
+            .get(), 0);
 }
 function reconcileVecStates(db) {
     return db
         .transaction(() => {
-        const drifted = db.prepare(`SELECT m.id, m.state ${DRIFTED_VECTORS}`).all();
-        const setState = db.prepare("UPDATE memories_vec SET state = ? WHERE memory_id = ?");
-        for (const row of drifted) {
-            setState.run(row.state, row.id);
+        const drifted = new Map();
+        for (const table of VECTOR_TABLES) {
+            const rows = db.prepare(`SELECT m.id, m.state ${driftedVectors(table)}`).all();
+            for (const row of rows) {
+                drifted.set(row.id, row.state);
+            }
         }
-        return drifted.length;
+        for (const [id, state] of drifted) {
+            setStateIn(db, id, state);
+        }
+        return drifted.size;
     })
         .immediate();
 }

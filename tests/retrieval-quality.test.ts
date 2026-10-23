@@ -21,6 +21,7 @@ function userNote(title: string, content: string, conflictKey: string): StoreInp
     valueText: "",
     keywords: "",
     anchors: [],
+    questions: [],
     scope: "user",
     resolution: { action: "ADD" },
   };

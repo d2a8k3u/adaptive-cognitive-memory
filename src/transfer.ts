@@ -8,7 +8,7 @@ import {
 } from "./cfg";
 import { storedKeyProblem, storedKeys } from "./db/memories";
 import { ID_MAX_CHARS, isMemoryId } from "./ids";
-import { parseStoredAnchors } from "./keys";
+import { parseStoredList } from "./keys";
 import {
   CARDINALITIES,
   EPISTEMIC_STATES,
@@ -45,6 +45,7 @@ export interface MemoryLine {
   readonly value_text: string;
   readonly keywords: string;
   readonly anchors: readonly string[];
+  readonly questions: readonly string[];
   readonly epistemic: string;
   readonly origin: string;
   readonly state: string;
@@ -88,8 +89,9 @@ export interface NumberedRecord {
   readonly record: ExportRecord;
 }
 
-export interface StoredMemoryRow extends Omit<MemoryLine, "record" | "anchors"> {
+export interface StoredMemoryRow extends Omit<MemoryLine, "record" | "anchors" | "questions"> {
   readonly anchors: string;
+  readonly questions: string;
 }
 
 export interface ExportSnapshot {
@@ -177,6 +179,10 @@ function legacyOr(check: Check): Check {
   return (field, value) => (value === LEGACY_CONFLICT_KEY ? undefined : check(field, value));
 }
 
+function absentOr(check: Check): Check {
+  return (field, value) => (value === undefined ? undefined : check(field, value));
+}
+
 const MEMORY_FIELDS: Readonly<Record<Exclude<keyof MemoryLine, "record">, Check>> = {
   id: memoryId,
   type: oneOf(MEMORY_TYPES),
@@ -191,6 +197,7 @@ const MEMORY_FIELDS: Readonly<Record<Exclude<keyof MemoryLine, "record">, Check>
   value_text: authoringCheck(storedKeyProblem.valueText),
   keywords: authoringCheck(storedKeyProblem.keywords),
   anchors: authoringCheck(storedKeyProblem.anchors),
+  questions: absentOr(authoringCheck(storedKeyProblem.questions)),
   epistemic: oneOf(EPISTEMIC_STATES),
   origin: oneOf(MEMORY_ORIGINS),
   state: oneOf(MEMORY_STATES),
@@ -253,6 +260,7 @@ function redactedMemoryLine(line: MemoryLine): MemoryLine {
     value_text: storedKeys.valueText(line.value_text),
     keywords: storedKeys.keywords(line.keywords),
     anchors: storedKeys.anchors(line.anchors),
+    questions: storedKeys.questions(line.questions),
   };
 }
 
@@ -275,7 +283,8 @@ export function memoryLine(row: StoredMemoryRow): MemoryLine {
     cardinality: row.cardinality,
     value_text: row.value_text,
     keywords: row.keywords,
-    anchors: parseStoredAnchors(row.id, row.anchors),
+    anchors: parseStoredList(row.id, "anchors", row.anchors),
+    questions: parseStoredList(row.id, "questions", row.questions),
     epistemic: row.epistemic,
     origin: row.origin,
     state: row.state,
@@ -358,6 +367,13 @@ function recordErrors(value: unknown): string[] {
   return [...unknownFields, ...invalidFields];
 }
 
+function withDefaults(record: ExportRecord): ExportRecord {
+  if (record.record !== "memory" || record.questions !== undefined) {
+    return record;
+  }
+  return { ...record, questions: [] };
+}
+
 export function parseImport(content: string): ParsedImport {
   const lines = content.split("\n");
   const errors: string[] = [];
@@ -377,7 +393,7 @@ export function parseImport(content: string): ParsedImport {
       return;
     }
     if ("value" in parsed) {
-      records.push({ line, record: parsed.value as ExportRecord });
+      records.push({ line, record: withDefaults(parsed.value as ExportRecord) });
     }
   });
   return errors.length === 0 ? { ok: true, records } : { ok: false, errors };

@@ -23,6 +23,7 @@ function fact(title: string, content: string): StoreInput {
     valueText: "",
     keywords: "",
     anchors: [],
+    questions: [],
     scope: "project",
   };
 }

@@ -154,6 +154,12 @@ function anchorsArgument(args) {
     }
     return writtenKey(args.anchors, isStringList, memories_1.storedKeyProblem.anchors);
 }
+function questionsArgument(args) {
+    if (args.questions === undefined) {
+        return undefined;
+    }
+    return writtenKey(args.questions, isStringList, memories_1.storedKeyProblem.questions);
+}
 function optionalResolution(args) {
     const value = args.resolution;
     if (value === undefined) {
@@ -210,6 +216,10 @@ function parseStoreArgs(args) {
     if (isToolError(anchors)) {
         return anchors;
     }
+    const questions = questionsArgument(args) ?? [];
+    if (isToolError(questions)) {
+        return questions;
+    }
     const scope = optionalEnum(args, "scope", policy_1.MEMORY_SCOPES);
     if (isToolError(scope)) {
         return scope;
@@ -233,6 +243,7 @@ function parseStoreArgs(args) {
         valueText,
         keywords,
         anchors,
+        questions,
         scope: scope ?? "project",
         resolution,
     };
@@ -388,15 +399,19 @@ async function memoryUpdate(deps, args) {
     if (isToolError(anchors)) {
         return anchors;
     }
+    const questions = questionsArgument(args);
+    if (isToolError(questions)) {
+        return questions;
+    }
     const immutable = IMMUTABLE_FIELDS.find((field) => args[field] !== undefined);
     if (immutable !== undefined) {
         return fieldError(immutable, `${immutable} cannot change in place; store the memory again with the new ${immutable}, then delete this one`);
     }
-    const edits = { title, abstract, content, keywords, anchors };
+    const edits = { title, abstract, content, keywords, anchors, questions };
     if (Object.values(edits).every((edit) => edit === undefined)) {
         return {
             error: {
-                message: "update requires at least one of title, abstract, content, keywords, anchors",
+                message: "update requires at least one of title, abstract, content, keywords, anchors, questions",
             },
         };
     }
@@ -471,6 +486,11 @@ const ANCHORS_PROPERTY = {
     items: { type: "string", maxLength: authoring_1.ANCHOR_MAX_CHARS },
     maxItems: authoring_1.ANCHORS_MAX_ITEMS,
 };
+const QUESTIONS_PROPERTY = {
+    type: "array",
+    items: { type: "string", maxLength: authoring_1.QUESTION_MAX_CHARS },
+    maxItems: authoring_1.QUESTIONS_MAX_ITEMS,
+};
 const SCOPE_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_SCOPES] };
 const TITLE_PROPERTY = { type: "string", maxLength: cfg_1.TITLE_MAX_CHARS };
 const CONTENT_PROPERTY = { type: "string", maxLength: cfg_1.CONTENT_MAX_CHARS };
@@ -478,7 +498,7 @@ const ABSTRACT_PROPERTY = { type: "string", maxLength: cfg_1.ABSTRACT_MAX_CHARS 
 exports.TOOL_DEFINITIONS = [
     {
         name: "memory_store",
-        description: "Store one durable lesson the moment it appears, without asking first: after a user correction the rule and its reason, a non-obvious convention you inferred, or the reasoning behind a solved problem (not the fix; the diff holds it). Store only what a future session could not re-derive from the code, git history or CLAUDE.md; content restating a line of CLAUDE.md, .claude/rules or the auto-memory MEMORY.md is rejected. English, one topic, insight first, searchable terms; scope=user only for facts that hold across projects. Always give kind, a stable lowercase dotted conflict_key naming the slot (project.primary_database, team.reviewers), cardinality, and value_text for a single-valued key. If the answer is needs_resolution, repeat the same call with resolution {action, target}: SUPERSEDE a changed single-valued fact, UPDATE to refine the same fact, NOOP when it is already known, ADD for a genuinely different memory.",
+        description: "Store one durable lesson the moment it appears, without asking first: after a user correction the rule and its reason, a non-obvious convention you inferred, or the reasoning behind a solved problem (not the fix; the diff holds it). Store only what a future session could not re-derive from the code, git history or CLAUDE.md; content restating a line of CLAUDE.md, .claude/rules or the auto-memory MEMORY.md is rejected. English, one topic, insight first, searchable terms; scope=user only for facts that hold across projects. Always give kind, a stable lowercase dotted conflict_key naming the slot (project.primary_database, team.reviewers), cardinality, and value_text for a single-valued key. Add questions users would type when it matters, in English and their language. If the answer is needs_resolution, repeat the same call with resolution {action, target}: SUPERSEDE a changed single-valued fact, UPDATE to refine the same fact, NOOP when it is already known, ADD for a genuinely different memory.",
         inputSchema: {
             type: "object",
             properties: {
@@ -495,6 +515,7 @@ exports.TOOL_DEFINITIONS = [
                 value_text: { type: "string", maxLength: authoring_1.VALUE_TEXT_MAX_CHARS },
                 keywords: KEYWORDS_PROPERTY,
                 anchors: ANCHORS_PROPERTY,
+                questions: QUESTIONS_PROPERTY,
                 scope: SCOPE_PROPERTY,
                 abstract: ABSTRACT_PROPERTY,
                 resolution: {
@@ -550,7 +571,7 @@ exports.TOOL_DEFINITIONS = [
     },
     {
         name: "memory_update",
-        description: "Update title, abstract, content, keywords or anchors in place; keywords and anchors replace the stored value whole. Revoked memories are immutable; scope and kind cannot change — re-store, then delete.",
+        description: "Update title, abstract, content, keywords, anchors or questions in place; each replaces the stored value whole. Revoked memories are immutable; scope and kind cannot change — re-store, then delete.",
         inputSchema: {
             type: "object",
             properties: {
@@ -560,6 +581,7 @@ exports.TOOL_DEFINITIONS = [
                 content: CONTENT_PROPERTY,
                 keywords: KEYWORDS_PROPERTY,
                 anchors: ANCHORS_PROPERTY,
+                questions: QUESTIONS_PROPERTY,
             },
             required: ["id"],
         },

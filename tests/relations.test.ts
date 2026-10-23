@@ -172,6 +172,7 @@ describe("relate", () => {
       valueText: value,
       keywords: "",
       anchors: [],
+      questions: [],
       scope: "project",
     });
     const idOf = (outcome: StoreOutcome): string => {

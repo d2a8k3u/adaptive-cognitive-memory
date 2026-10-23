@@ -2,13 +2,14 @@ import {
   type AuthoringProblem,
   anchorsProblem,
   keywordsProblem,
+  questionsProblem,
   redactedAnchorProblem,
   valueTextProblem,
 } from "../authoring";
 import { ABSTRACT_MAX_CHARS, CONTENT_MAX_CHARS, TITLE_MAX_CHARS } from "../cfg";
-import { embedPassage, modelCached } from "../embeddings";
+import { embedPassage, embedQuestions, modelCached } from "../embeddings";
 import { newId } from "../ids";
-import { parseStoredAnchors } from "../keys";
+import { parseStoredList } from "../keys";
 import {
   derivedImportance,
   FRESH_COUNTERS,
@@ -70,6 +71,7 @@ export interface StoreInput {
   readonly valueText: string;
   readonly keywords: string;
   readonly anchors: readonly string[];
+  readonly questions: readonly string[];
   readonly scope: MemoryScope;
   readonly resolution?: Resolution;
 }
@@ -104,6 +106,7 @@ export interface UpdateInput {
   content?: string;
   keywords?: string;
   anchors?: readonly string[];
+  questions?: readonly string[];
 }
 
 export interface MemoryRelation {
@@ -125,6 +128,7 @@ interface MemoryRow {
   value_text: string;
   keywords: string;
   anchors: string;
+  questions: string;
   state: MemoryState;
   importance: number;
   support_count: number;
@@ -136,13 +140,19 @@ interface MemoryRow {
   updated_at: string;
 }
 
-export interface MemoryRecord extends Omit<MemoryRow, "anchors"> {
+export interface MemoryRecord extends Omit<MemoryRow, "anchors" | "questions"> {
   anchors: string[];
+  questions: string[];
   relations: MemoryRelation[];
 }
 
+interface MemoryVectors {
+  readonly passage: Float32Array;
+  readonly questions: readonly Float32Array[];
+}
+
 type UpdatedText = Pick<MemoryRow, "title" | "abstract" | "content">;
-type UpdatedKeys = Pick<MemoryRow, "keywords" | "anchors">;
+type UpdatedKeys = Pick<MemoryRow, "keywords" | "anchors" | "questions">;
 
 const UPDATE_BASIS_COLUMNS = [
   "title",
@@ -151,6 +161,7 @@ const UPDATE_BASIS_COLUMNS = [
   "conflict_key",
   "keywords",
   "anchors",
+  "questions",
 ] as const satisfies readonly (keyof MemoryRow)[];
 
 interface PreparedRow extends Slot {
@@ -161,13 +172,13 @@ interface PreparedRow extends Slot {
   readonly content: string;
   readonly keywords: string;
   readonly anchors: string;
+  readonly questions: readonly string[];
   readonly contentHash: string;
 }
 
 export interface PassageFields {
   readonly title: string;
-  readonly abstract: string;
-  readonly conflictKey: string;
+  readonly content: string;
   readonly keywords: string;
 }
 
@@ -177,7 +188,7 @@ interface PartitionFilter {
 }
 
 const MEMORY_ROW_COLUMNS = `id, type, kind, scope, project_id, title, abstract, content, conflict_key,
-  cardinality, value_text, keywords, anchors, state, importance, support_count, valid_from,
+  cardinality, value_text, keywords, anchors, questions, state, importance, support_count, valid_from,
   invalid_at, expired_at, superseded_by, created_at, updated_at`;
 
 const SLOT_ROW_COLUMNS = `id, scope, project_id AS projectId, conflict_key AS conflictKey, cardinality,
@@ -193,6 +204,7 @@ export const storedKeys = {
   valueText: storedKeyText,
   keywords: storedKeyText,
   anchors: (anchors: readonly string[]): string[] => anchors.map(storedKeyText),
+  questions: (questions: readonly string[]): string[] => questions.map(storedKeyText),
 } as const;
 
 type KeyProblem = (value: unknown) => AuthoringProblem | undefined;
@@ -230,6 +242,9 @@ export const storedKeyProblem = {
   anchors: asStored(anchorsProblem, isTextList, (anchors) =>
     redactedAnchorProblem(anchors, storedKeys.anchors(anchors)),
   ),
+  questions: asStored(questionsProblem, isTextList, (questions) =>
+    questionsProblem(storedKeys.questions(questions)),
+  ),
 } as const;
 
 export function deriveAbstract(content: string): string {
@@ -239,7 +254,7 @@ export function deriveAbstract(content: string): string {
 }
 
 export function passageText(fields: PassageFields): string {
-  const tail = [fields.abstract, fields.conflictKey, fields.keywords].filter((part) => part !== "");
+  const tail = [fields.content, fields.keywords].filter((part) => part !== "");
   return `${fields.title}. ${tail.join(" ")}`;
 }
 
@@ -283,22 +298,30 @@ export async function store(
   projectId: string,
 ): Promise<StoreOutcome> {
   const row = prepareRow(input, projectId);
-  const embedding = await embedForStore(env, passageText(row));
+  const vectors = await embedForStore(env, {
+    passage: passageText(row),
+    questions: row.questions,
+  });
   const write = env.db.transaction(
-    (): StoreOutcome => resolveWrite(env, row, embedding, input.resolution, nowIso()),
+    (): StoreOutcome => resolveWrite(env, row, vectors, input.resolution, nowIso()),
   );
   return write.immediate();
 }
 
 export function get(env: MemoryEnv, idOrPrefix: string): MemoryRecord {
   const id = resolveMemoryId(env.db, idOrPrefix);
-  const { anchors, ...row } = fetchMemoryRow(env.db, id);
+  const { anchors, questions, ...row } = fetchMemoryRow(env.db, id);
   const relations = env.db
     .prepare(
       "SELECT target_id, relation_type FROM relations WHERE source_id = ? ORDER BY target_id, relation_type",
     )
     .all(id) as MemoryRelation[];
-  return { ...row, anchors: parseStoredAnchors(id, anchors), relations };
+  return {
+    ...row,
+    anchors: parseStoredList(id, "anchors", anchors),
+    questions: parseStoredList(id, "questions", questions),
+    relations,
+  };
 }
 
 export async function updateMemory(
@@ -338,15 +361,19 @@ function updatedKeys(row: MemoryRow, input: UpdateInput): UpdatedKeys {
     keywords: input.keywords === undefined ? row.keywords : storedKeys.keywords(input.keywords),
     anchors:
       input.anchors === undefined ? row.anchors : JSON.stringify(storedKeys.anchors(input.anchors)),
+    questions:
+      input.questions === undefined
+        ? row.questions
+        : JSON.stringify(storedKeys.questions(input.questions)),
   };
 }
 
-function passageEdited(input: UpdateInput): boolean {
+function vectorsEdited(input: UpdateInput): boolean {
   return (
     input.title !== undefined ||
-    input.abstract !== undefined ||
     input.content !== undefined ||
-    input.keywords !== undefined
+    input.keywords !== undefined ||
+    input.questions !== undefined
   );
 }
 
@@ -361,12 +388,12 @@ async function updateFromSnapshot(
 ): Promise<boolean> {
   const text = updatedText(snapshot, input);
   const keys = updatedKeys(snapshot, input);
-  const reembed = passageEdited(input);
-  const embedding = reembed
-    ? await embedForStore(
-        env,
-        passageText({ ...text, conflictKey: snapshot.conflict_key, keywords: keys.keywords }),
-      )
+  const reembed = vectorsEdited(input);
+  const vectors = reembed
+    ? await embedForStore(env, {
+        passage: passageText({ ...text, keywords: keys.keywords }),
+        questions: parseStoredList(snapshot.id, "questions", keys.questions),
+      })
     : undefined;
   const txn = env.db.transaction((): boolean => {
     const current = fetchMemoryRow(env.db, snapshot.id);
@@ -379,7 +406,7 @@ async function updateFromSnapshot(
     env.db
       .prepare(
         `UPDATE memories SET title = ?, abstract = ?, content = ?, keywords = ?, anchors = ?,
-           content_hash = ?, updated_at = ?
+           questions = ?, content_hash = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
@@ -388,12 +415,13 @@ async function updateFromSnapshot(
         text.content,
         keys.keywords,
         keys.anchors,
+        keys.questions,
         contentHash(text.content),
         nowIso(),
         current.id,
       );
     if (reembed) {
-      replaceVecRow(env, current, embedding);
+      replaceVectors(env, current, vectors);
     }
     return true;
   });
@@ -409,20 +437,27 @@ export async function embedMissing(
   if (rows.length === 0) {
     return 0;
   }
-  const passages = rows.map(passageOf);
-  const vectors = await embedPassage(passages, env.modelCacheDir);
-  if (vectors.length !== rows.length) {
-    throw new Error(`embedding ${rows.length} passages produced ${vectors.length} vectors`);
-  }
+  const vectors = await embedBatch(
+    env.modelCacheDir,
+    rows.map((row) => ({
+      passage: passageText(row),
+      questions: parseStoredList(row.id, "questions", row.questions),
+    })),
+  );
   const write = env.db.transaction((): number => {
     let embedded = 0;
     rows.forEach((row, index) => {
       const current = unembeddedRow(env.db, row.id, coverage);
-      const vector = vectors[index];
-      if (current === undefined || vector === undefined || passageOf(current) !== passages[index]) {
+      const rowVectors = vectors[index];
+      if (
+        current === undefined ||
+        rowVectors === undefined ||
+        passageText(current) !== passageText(row) ||
+        current.questions !== row.questions
+      ) {
         return;
       }
-      insertVecRow(env.db, vector, current);
+      insertVectors(env.db, current, rowVectors);
       embedded += 1;
     });
     return embedded;
@@ -444,7 +479,7 @@ export function deleteMemory(env: MemoryEnv, idOrPrefix: string): { deleted: tru
       );
     }
     if (env.vecLoaded) {
-      env.db.prepare("DELETE FROM memories_vec WHERE memory_id = ?").run(id);
+      deleteVectors(env.db, id);
     }
     env.db.prepare("DELETE FROM memories WHERE id = ?").run(id);
   });
@@ -470,6 +505,7 @@ function prepareRow(input: StoreInput, projectId: string): PreparedRow {
     content,
     keywords: storedKeys.keywords(input.keywords),
     anchors: JSON.stringify(storedKeys.anchors(input.anchors)),
+    questions: storedKeys.questions(input.questions),
     contentHash: contentHash(content),
   };
 }
@@ -477,7 +513,7 @@ function prepareRow(input: StoreInput, projectId: string): PreparedRow {
 function resolveWrite(
   env: MemoryEnv,
   row: PreparedRow,
-  embedding: Float32Array | undefined,
+  vectors: MemoryVectors | undefined,
   resolution: Resolution | undefined,
   now: string,
 ): StoreOutcome {
@@ -492,27 +528,27 @@ function resolveWrite(
     }
   }
   if (resolution === undefined) {
-    const candidates = writeCandidates(env, row, embedding);
+    const candidates = writeCandidates(env, row, vectors);
     if (candidates.length > 0) {
       return { outcome: "needs_resolution", candidates };
     }
-    return written(addMemory(env, row, embedding, now));
+    return written(addMemory(env, row, vectors, now));
   }
   if (resolution.action === "ADD") {
     return guarded(addVerdict(row, singleKeyHolders(env.db, row)), () =>
-      addMemory(env, row, embedding, now),
+      addMemory(env, row, vectors, now),
     );
   }
   const target = slotRow(env.db, resolveMemoryId(env.db, resolution.target));
   switch (resolution.action) {
     case "SUPERSEDE":
       return guarded(supersedeVerdict(row, target), () =>
-        supersede(env, row, embedding, target, now),
+        supersede(env, row, vectors, target, now),
       );
     case "UPDATE":
       return guarded(reassertionVerdict(env.db, updateVerdict(row, target), target), () =>
         reasserted(env, target, "store_update", row.title, now, () =>
-          rewrite(env, row, embedding, target.id, now),
+          rewrite(env, row, vectors, target.id, now),
         ),
       );
     case "NOOP":
@@ -558,17 +594,17 @@ function guarded(verdict: Verdict, write: () => StoreResult): StoreOutcome {
 function addMemory(
   env: MemoryEnv,
   row: PreparedRow,
-  embedding: Float32Array | undefined,
+  vectors: MemoryVectors | undefined,
   now: string,
 ): StoreResult {
-  const id = insertMemory(env, row, embedding, now);
-  return withPromotion({ id, action: "created" }, promote(env, id, row, embedding, now));
+  const id = insertMemory(env, row, vectors, now);
+  return withPromotion({ id, action: "created" }, promote(env, id, row, vectors, now));
 }
 
 function supersede(
   env: MemoryEnv,
   row: PreparedRow,
-  embedding: Float32Array | undefined,
+  vectors: MemoryVectors | undefined,
   target: SlotRow,
   now: string,
 ): StoreResult {
@@ -577,7 +613,7 @@ function supersede(
       "UPDATE memories SET state = 'revoked', invalid_at = ?, expired_at = ?, updated_at = ? WHERE id = ?",
     )
     .run(now, now, now, target.id);
-  const id = insertMemory(env, row, embedding, now);
+  const id = insertMemory(env, row, vectors, now);
   env.db.prepare("UPDATE memories SET superseded_by = ? WHERE id = ?").run(id, target.id);
   recordTransition(env.db, {
     memoryId: target.id,
@@ -591,21 +627,21 @@ function supersede(
   setVecState(env, target.id, "revoked");
   return withPromotion(
     { id, action: "superseded", refId: target.id },
-    promote(env, id, row, embedding, now),
+    promote(env, id, row, vectors, now),
   );
 }
 
 function rewrite(
   env: MemoryEnv,
   row: PreparedRow,
-  embedding: Float32Array | undefined,
+  vectors: MemoryVectors | undefined,
   targetId: string,
   now: string,
 ): StoreResult {
   env.db
     .prepare(
       `UPDATE memories SET title = ?, abstract = ?, content = ?, value_text = ?, keywords = ?,
-         anchors = ?, kind = ?, content_hash = ?, updated_at = ? WHERE id = ?`,
+         anchors = ?, questions = ?, kind = ?, content_hash = ?, updated_at = ? WHERE id = ?`,
     )
     .run(
       row.title,
@@ -614,15 +650,16 @@ function rewrite(
       row.valueText,
       row.keywords,
       row.anchors,
+      JSON.stringify(row.questions),
       row.kind,
       row.contentHash,
       now,
       targetId,
     );
-  replaceVecRow(env, fetchMemoryRow(env.db, targetId), embedding);
+  replaceVectors(env, fetchMemoryRow(env.db, targetId), vectors);
   return withPromotion(
     { id: targetId, action: "updated" },
-    promote(env, targetId, row, embedding, now),
+    promote(env, targetId, row, vectors, now),
   );
 }
 
@@ -635,7 +672,7 @@ function promote(
   env: MemoryEnv,
   writtenId: string,
   row: PreparedRow,
-  embedding: Float32Array | undefined,
+  vectors: MemoryVectors | undefined,
   now: string,
 ): string | undefined {
   const writtenSlot: SlotRow = { ...row, id: writtenId, state: "active" };
@@ -643,7 +680,7 @@ function promote(
   if (contributors.length === 0) {
     return undefined;
   }
-  const userId = insertMemory(env, { ...row, scope: "user" }, embedding, now);
+  const userId = insertMemory(env, { ...row, scope: "user" }, vectors, now);
   for (const contributor of contributors) {
     recordTransition(env.db, {
       memoryId: contributor.id,
@@ -665,16 +702,16 @@ function withPromotion(result: StoreResult, promotedId: string | undefined): Sto
 function insertMemory(
   env: MemoryEnv,
   row: PreparedRow,
-  embedding: Float32Array | undefined,
+  vectors: MemoryVectors | undefined,
   now: string,
 ): string {
   const id = newId();
   env.db
     .prepare(
       `INSERT INTO memories (id, type, kind, scope, project_id, title, abstract, content, conflict_key,
-         cardinality, value_text, keywords, anchors, content_hash, importance, valid_from,
+         cardinality, value_text, keywords, anchors, questions, content_hash, importance, valid_from,
          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -690,20 +727,19 @@ function insertMemory(
       row.valueText,
       row.keywords,
       row.anchors,
+      JSON.stringify(row.questions),
       row.contentHash,
       derivedImportance(FRESH_COUNTERS),
       now,
       now,
       now,
     );
-  if (embedding !== undefined) {
-    insertVecRow(env.db, embedding, {
-      id,
-      type: row.type,
-      scope: row.scope,
-      project_id: row.projectId,
-      state: "active",
-    });
+  if (vectors !== undefined) {
+    insertVectors(
+      env.db,
+      { id, type: row.type, scope: row.scope, project_id: row.projectId, state: "active" },
+      vectors,
+    );
   }
   return id;
 }
@@ -716,23 +752,49 @@ interface VecRowFields {
   readonly state: MemoryState;
 }
 
-function insertVecRow(db: Db, embedding: Float32Array, fields: VecRowFields): void {
+function insertVectors(db: Db, fields: VecRowFields, vectors: MemoryVectors): void {
   db.prepare(
     "INSERT INTO memories_vec (memory_id, embedding, type, scope, project_id, state) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(fields.id, vecBlob(embedding), fields.type, fields.scope, fields.project_id, fields.state);
+  ).run(
+    fields.id,
+    vecBlob(vectors.passage),
+    fields.type,
+    fields.scope,
+    fields.project_id,
+    fields.state,
+  );
+  const insertQuestion = db.prepare(
+    `INSERT INTO questions_vec (question_id, embedding, memory_id, scope, project_id, state)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  vectors.questions.forEach((vector, index) => {
+    insertQuestion.run(
+      `${fields.id}:${index}`,
+      vecBlob(vector),
+      fields.id,
+      fields.scope,
+      fields.project_id,
+      fields.state,
+    );
+  });
 }
 
-function replaceVecRow(
+function deleteVectors(db: Db, memoryId: string): void {
+  db.prepare("DELETE FROM memories_vec WHERE memory_id = ?").run(memoryId);
+  db.prepare("DELETE FROM questions_vec WHERE memory_id = ?").run(memoryId);
+}
+
+function replaceVectors(
   env: MemoryEnv,
   fields: VecRowFields,
-  embedding: Float32Array | undefined,
+  vectors: MemoryVectors | undefined,
 ): void {
   if (!env.vecLoaded) {
     return;
   }
-  env.db.prepare("DELETE FROM memories_vec WHERE memory_id = ?").run(fields.id);
-  if (embedding !== undefined) {
-    insertVecRow(env.db, embedding, fields);
+  deleteVectors(env.db, fields.id);
+  if (vectors !== undefined) {
+    insertVectors(env.db, fields, vectors);
   }
 }
 
@@ -756,11 +818,11 @@ function exactDuplicate(db: Db, row: PreparedRow): SlotRow | undefined {
 function writeCandidates(
   env: MemoryEnv,
   row: PreparedRow,
-  embedding: Float32Array | undefined,
+  vectors: MemoryVectors | undefined,
 ): Candidate[] {
   const ids = new Set([
     ...sameKeyIds(env.db, row),
-    ...(embedding === undefined ? [] : neighbourIds(env.db, row, embedding)),
+    ...(vectors === undefined ? [] : neighbourIds(env.db, row, vectors.passage)),
     ...keywordHitIds(env.db, row),
   ]);
   return candidatesByIds(env.db, [...ids]);
@@ -846,13 +908,13 @@ function keyHolders(db: Db, conflictKey: string): SlotRow[] {
 
 interface UnembeddedRow extends VecRowFields {
   readonly title: string;
-  readonly abstract: string;
-  readonly conflict_key: string;
+  readonly content: string;
   readonly keywords: string;
+  readonly questions: string;
 }
 
-const UNEMBEDDED_ROW_SELECT = `SELECT m.id, m.type, m.scope, m.project_id, m.state, m.title, m.abstract,
-    m.conflict_key, m.keywords
+const UNEMBEDDED_ROW_SELECT = `SELECT m.id, m.type, m.scope, m.project_id, m.state, m.title, m.content,
+    m.keywords, m.questions
   FROM memories m
   WHERE NOT EXISTS (SELECT 1 FROM memories_vec v WHERE v.memory_id = m.id)
     AND (? = 'all' OR m.state = 'active')`;
@@ -876,15 +938,6 @@ function unembeddedRow(db: Db, id: string, coverage: EmbeddingCoverage): Unembed
     | undefined;
 }
 
-function passageOf(row: UnembeddedRow): string {
-  return passageText({
-    title: row.title,
-    abstract: row.abstract,
-    conflictKey: row.conflict_key,
-    keywords: row.keywords,
-  });
-}
-
 export function slotRow(db: Db, id: string): SlotRow {
   const row = db.prepare(`SELECT ${SLOT_ROW_COLUMNS} FROM memories WHERE id = ?`).get(id) as
     | SlotRow
@@ -895,16 +948,47 @@ export function slotRow(db: Db, id: string): SlotRow {
   return row;
 }
 
-async function embedForStore(env: MemoryEnv, text: string): Promise<Float32Array | undefined> {
+interface EmbeddingSource {
+  readonly passage: string;
+  readonly questions: readonly string[];
+}
+
+function vectorCountGuard(kind: string, expected: number, actual: number): void {
+  if (actual !== expected) {
+    throw new Error(`embedding ${expected} ${kind} produced ${actual} vectors`);
+  }
+}
+
+async function embedBatch(
+  modelCacheDir: string,
+  sources: readonly EmbeddingSource[],
+): Promise<MemoryVectors[]> {
+  const passages = await embedPassage(
+    sources.map((source) => source.passage),
+    modelCacheDir,
+  );
+  vectorCountGuard("passages", sources.length, passages.length);
+  const questionTexts = sources.flatMap((source) => source.questions);
+  const questions =
+    questionTexts.length === 0 ? [] : await embedQuestions(questionTexts, modelCacheDir);
+  vectorCountGuard("questions", questionTexts.length, questions.length);
+  let next = 0;
+  return sources.map((source, index) => {
+    const own = questions.slice(next, next + source.questions.length);
+    next += source.questions.length;
+    return { passage: passages[index] as Float32Array, questions: own };
+  });
+}
+
+async function embedForStore(
+  env: MemoryEnv,
+  source: EmbeddingSource,
+): Promise<MemoryVectors | undefined> {
   if (!env.vecLoaded || !modelCached(env.modelCacheDir)) {
     return undefined;
   }
-  const vectors = await embedPassage([text], env.modelCacheDir);
-  const vector = vectors.at(0);
-  if (vectors.length !== 1 || vector === undefined) {
-    throw new Error(`embedding passage produced ${vectors.length} vectors, expected 1`);
-  }
-  return vector;
+  const [vectors] = await embedBatch(env.modelCacheDir, [source]);
+  return vectors;
 }
 
 function fetchMemoryRow(db: Db, id: string): MemoryRow {

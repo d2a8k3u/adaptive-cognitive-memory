@@ -234,6 +234,7 @@ describe("server", () => {
       "content",
       "keywords",
       "kind",
+      "questions",
       "resolution",
       "scope",
       "title",

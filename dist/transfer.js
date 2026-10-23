@@ -55,6 +55,9 @@ function authoringCheck(problemOf) {
 function legacyOr(check) {
     return (field, value) => (value === LEGACY_CONFLICT_KEY ? undefined : check(field, value));
 }
+function absentOr(check) {
+    return (field, value) => (value === undefined ? undefined : check(field, value));
+}
 const MEMORY_FIELDS = {
     id: memoryId,
     type: oneOf(policy_1.MEMORY_TYPES),
@@ -69,6 +72,7 @@ const MEMORY_FIELDS = {
     value_text: authoringCheck(memories_1.storedKeyProblem.valueText),
     keywords: authoringCheck(memories_1.storedKeyProblem.keywords),
     anchors: authoringCheck(memories_1.storedKeyProblem.anchors),
+    questions: absentOr(authoringCheck(memories_1.storedKeyProblem.questions)),
     epistemic: oneOf(policy_1.EPISTEMIC_STATES),
     origin: oneOf(policy_1.MEMORY_ORIGINS),
     state: oneOf(policy_1.MEMORY_STATES),
@@ -123,6 +127,7 @@ function redactedMemoryLine(line) {
         value_text: memories_1.storedKeys.valueText(line.value_text),
         keywords: memories_1.storedKeys.keywords(line.keywords),
         anchors: memories_1.storedKeys.anchors(line.anchors),
+        questions: memories_1.storedKeys.questions(line.questions),
     };
 }
 function redactedTransitionLine(line) {
@@ -143,7 +148,8 @@ function memoryLine(row) {
         cardinality: row.cardinality,
         value_text: row.value_text,
         keywords: row.keywords,
-        anchors: (0, keys_1.parseStoredAnchors)(row.id, row.anchors),
+        anchors: (0, keys_1.parseStoredList)(row.id, "anchors", row.anchors),
+        questions: (0, keys_1.parseStoredList)(row.id, "questions", row.questions),
         epistemic: row.epistemic,
         origin: row.origin,
         state: row.state,
@@ -218,6 +224,12 @@ function recordErrors(value) {
     });
     return [...unknownFields, ...invalidFields];
 }
+function withDefaults(record) {
+    if (record.record !== "memory" || record.questions !== undefined) {
+        return record;
+    }
+    return { ...record, questions: [] };
+}
 function parseImport(content) {
     const lines = content.split("\n");
     const errors = [];
@@ -237,7 +249,7 @@ function parseImport(content) {
             return;
         }
         if ("value" in parsed) {
-            records.push({ line, record: parsed.value });
+            records.push({ line, record: withDefaults(parsed.value) });
         }
     });
     return errors.length === 0 ? { ok: true, records } : { ok: false, errors };

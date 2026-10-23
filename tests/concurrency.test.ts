@@ -71,6 +71,7 @@ function runnerSource(): string {
     "      valueText: '',",
     "      keywords: '',",
     "      anchors: [],",
+    "      questions: [],",
     "      scope: 'project',",
     "      resolution: { action: 'ADD' },",
     "    }, process.env.ACM_RUNNER_PROJECT_ID);",

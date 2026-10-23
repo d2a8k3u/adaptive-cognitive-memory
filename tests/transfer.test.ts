@@ -13,6 +13,7 @@ const SECRET = FAKE_SECRETS.githubClassicLowercase;
 const SUPERSEDED_ID = "01J8TRANSFER0000000000OLD1";
 const REPLACEMENT_ID = "01J8TRANSFER0000000000REP1";
 const LABELED_SECRET = "token=abcdefgh";
+const SEEDED_QUESTIONS = ["Where do we deploy?", "Kam nasazujeme?"];
 const URL_CREDENTIAL = "https://:p@";
 const SECRET_ANCHOR_ERROR = {
   field: "anchors",
@@ -121,6 +122,10 @@ function seedSource(db: Db): void {
     REPLACEMENT_ID,
     SUPERSEDED_ID,
   );
+  db.prepare("UPDATE memories SET questions = ? WHERE id = ?").run(
+    JSON.stringify(SEEDED_QUESTIONS),
+    REPLACEMENT_ID,
+  );
   insertMemory(db, { id: "01J8TRANSFER000000000USER1", scope: "user", kind: "preference" });
   insertMemory(db, { id: "01J8TRANSFER0000000000HYP1", state: "hypothesis" });
   db.prepare(
@@ -174,6 +179,7 @@ describe("cli export and import", () => {
     expect(readFileSync(third, "utf8")).toBe(exported);
     expect(exported).not.toContain(SECRET);
     expect(exported).toContain("Deploy to ECS with token [REDACTED] from the vault.");
+    expect(exported).toContain(`"questions":${JSON.stringify(SEEDED_QUESTIONS)}`);
     expect(exported.split("\n").filter((line) => line !== "")).toHaveLength(8);
     expect(print.mock.calls.flat()).toEqual([
       `exported 4 memories, 1 relations, 2 transitions to ${first}`,
@@ -552,6 +558,14 @@ describe("parseImport", () => {
       text: fileOf(EXPORT_HEADER, { ...VALID_MEMORY, value_text: "v".repeat(201) }),
       error: /^line 2: value_text must be a string of at most 200 characters$/,
     },
+    {
+      name: "a question list over the cap",
+      text: fileOf(EXPORT_HEADER, {
+        ...VALID_MEMORY,
+        questions: Array.from({ length: 9 }, (_, index) => `q${index}`),
+      }),
+      error: /^line 2: questions must be a list of at most 8 non-empty strings/,
+    },
   ])("rejects $name", ({ text, error }) => {
     const parsed = parseImport(text);
 
@@ -572,6 +586,14 @@ describe("parseImport", () => {
     const parsed = parseImport(fileOf(EXPORT_HEADER, { ...VALID_MEMORY, title: "t".repeat(200) }));
 
     expect(parsed.ok).toBe(true);
+  });
+
+  it("reads a memory exported before recall questions existed as one without questions", () => {
+    const parsed = parseImport(fileOf(EXPORT_HEADER, VALID_MEMORY));
+
+    expect(parsed.ok ? parsed.records.map(({ record }) => record) : parsed.errors).toEqual([
+      { ...VALID_MEMORY, questions: [] },
+    ]);
   });
 });
 

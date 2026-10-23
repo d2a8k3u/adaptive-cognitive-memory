@@ -31,31 +31,53 @@ export function recordTransition(db: Db, transition: TransitionRecord): void {
   );
 }
 
-const DRIFTED_VECTORS = `FROM memories_vec v JOIN memories m ON m.id = v.memory_id
-  WHERE v.state IS NOT m.state`;
+const VECTOR_TABLES = ["memories_vec", "questions_vec"] as const;
+
+function driftedVectors(table: (typeof VECTOR_TABLES)[number]): string {
+  return `FROM ${table} v JOIN memories m ON m.id = v.memory_id WHERE v.state IS NOT m.state`;
+}
+
+function setStateIn(db: Db, id: string, state: MemoryState): void {
+  for (const table of VECTOR_TABLES) {
+    db.prepare(`UPDATE ${table} SET state = ? WHERE memory_id = ?`).run(state, id);
+  }
+}
 
 export function setVecState(store: StateStore, id: string, state: MemoryState): void {
   if (store.vecLoaded) {
-    store.db.prepare("UPDATE memories_vec SET state = ? WHERE memory_id = ?").run(state, id);
+    setStateIn(store.db, id, state);
   }
 }
 
 export function driftedVecStateCount(db: Db): number {
-  return db.prepare(`SELECT count(*) ${DRIFTED_VECTORS}`).pluck().get() as number;
+  return VECTOR_TABLES.reduce(
+    (sum, table) =>
+      sum +
+      (db
+        .prepare(`SELECT count(*) ${driftedVectors(table)}`)
+        .pluck()
+        .get() as number),
+    0,
+  );
 }
 
 export function reconcileVecStates(db: Db): number {
   return db
     .transaction((): number => {
-      const drifted = db.prepare(`SELECT m.id, m.state ${DRIFTED_VECTORS}`).all() as {
-        id: string;
-        state: MemoryState;
-      }[];
-      const setState = db.prepare("UPDATE memories_vec SET state = ? WHERE memory_id = ?");
-      for (const row of drifted) {
-        setState.run(row.state, row.id);
+      const drifted = new Map<string, MemoryState>();
+      for (const table of VECTOR_TABLES) {
+        const rows = db.prepare(`SELECT m.id, m.state ${driftedVectors(table)}`).all() as {
+          id: string;
+          state: MemoryState;
+        }[];
+        for (const row of rows) {
+          drifted.set(row.id, row.state);
+        }
       }
-      return drifted.length;
+      for (const [id, state] of drifted) {
+        setStateIn(db, id, state);
+      }
+      return drifted.size;
     })
     .immediate();
 }

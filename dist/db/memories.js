@@ -38,9 +38,10 @@ const UPDATE_BASIS_COLUMNS = [
     "conflict_key",
     "keywords",
     "anchors",
+    "questions",
 ];
 const MEMORY_ROW_COLUMNS = `id, type, kind, scope, project_id, title, abstract, content, conflict_key,
-  cardinality, value_text, keywords, anchors, state, importance, support_count, valid_from,
+  cardinality, value_text, keywords, anchors, questions, state, importance, support_count, valid_from,
   invalid_at, expired_at, superseded_by, created_at, updated_at`;
 const SLOT_ROW_COLUMNS = `id, scope, project_id AS projectId, conflict_key AS conflictKey, cardinality,
   value_text AS valueText, state, kind`;
@@ -52,6 +53,7 @@ exports.storedKeys = {
     valueText: storedKeyText,
     keywords: storedKeyText,
     anchors: (anchors) => anchors.map(storedKeyText),
+    questions: (questions) => questions.map(storedKeyText),
 };
 function isText(value) {
     return typeof value === "string";
@@ -75,6 +77,7 @@ exports.storedKeyProblem = {
     valueText: asStored(authoring_1.valueTextProblem, isText, (text) => (0, authoring_1.valueTextProblem)(exports.storedKeys.valueText(text))),
     keywords: asStored(authoring_1.keywordsProblem, isText, (text) => (0, authoring_1.keywordsProblem)(exports.storedKeys.keywords(text))),
     anchors: asStored(authoring_1.anchorsProblem, isTextList, (anchors) => (0, authoring_1.redactedAnchorProblem)(anchors, exports.storedKeys.anchors(anchors))),
+    questions: asStored(authoring_1.questionsProblem, isTextList, (questions) => (0, authoring_1.questionsProblem)(exports.storedKeys.questions(questions))),
 };
 function deriveAbstract(content) {
     const text = content.trim();
@@ -82,7 +85,7 @@ function deriveAbstract(content) {
     return sentence.length > cfg_1.ABSTRACT_MAX_CHARS ? sentence.slice(0, cfg_1.ABSTRACT_MAX_CHARS) : sentence;
 }
 function passageText(fields) {
-    const tail = [fields.abstract, fields.conflictKey, fields.keywords].filter((part) => part !== "");
+    const tail = [fields.content, fields.keywords].filter((part) => part !== "");
     return `${fields.title}. ${tail.join(" ")}`;
 }
 function resolveMemoryId(db, idOrPrefix) {
@@ -116,17 +119,25 @@ function resolveIdAmong(db, idOrPrefix, among) {
 }
 async function store(env, input, projectId) {
     const row = prepareRow(input, projectId);
-    const embedding = await embedForStore(env, passageText(row));
-    const write = env.db.transaction(() => resolveWrite(env, row, embedding, input.resolution, nowIso()));
+    const vectors = await embedForStore(env, {
+        passage: passageText(row),
+        questions: row.questions,
+    });
+    const write = env.db.transaction(() => resolveWrite(env, row, vectors, input.resolution, nowIso()));
     return write.immediate();
 }
 function get(env, idOrPrefix) {
     const id = resolveMemoryId(env.db, idOrPrefix);
-    const { anchors, ...row } = fetchMemoryRow(env.db, id);
+    const { anchors, questions, ...row } = fetchMemoryRow(env.db, id);
     const relations = env.db
         .prepare("SELECT target_id, relation_type FROM relations WHERE source_id = ? ORDER BY target_id, relation_type")
         .all(id);
-    return { ...row, anchors: (0, keys_1.parseStoredAnchors)(id, anchors), relations };
+    return {
+        ...row,
+        anchors: (0, keys_1.parseStoredList)(id, "anchors", anchors),
+        questions: (0, keys_1.parseStoredList)(id, "questions", questions),
+        relations,
+    };
 }
 async function updateMemory(env, idOrPrefix, input) {
     const id = resolveMemoryId(env.db, idOrPrefix);
@@ -154,13 +165,16 @@ function updatedKeys(row, input) {
     return {
         keywords: input.keywords === undefined ? row.keywords : exports.storedKeys.keywords(input.keywords),
         anchors: input.anchors === undefined ? row.anchors : JSON.stringify(exports.storedKeys.anchors(input.anchors)),
+        questions: input.questions === undefined
+            ? row.questions
+            : JSON.stringify(exports.storedKeys.questions(input.questions)),
     };
 }
-function passageEdited(input) {
+function vectorsEdited(input) {
     return (input.title !== undefined ||
-        input.abstract !== undefined ||
         input.content !== undefined ||
-        input.keywords !== undefined);
+        input.keywords !== undefined ||
+        input.questions !== undefined);
 }
 function sameUpdateBasis(current, snapshot) {
     return UPDATE_BASIS_COLUMNS.every((column) => current[column] === snapshot[column]);
@@ -168,9 +182,12 @@ function sameUpdateBasis(current, snapshot) {
 async function updateFromSnapshot(env, snapshot, input) {
     const text = updatedText(snapshot, input);
     const keys = updatedKeys(snapshot, input);
-    const reembed = passageEdited(input);
-    const embedding = reembed
-        ? await embedForStore(env, passageText({ ...text, conflictKey: snapshot.conflict_key, keywords: keys.keywords }))
+    const reembed = vectorsEdited(input);
+    const vectors = reembed
+        ? await embedForStore(env, {
+            passage: passageText({ ...text, keywords: keys.keywords }),
+            questions: (0, keys_1.parseStoredList)(snapshot.id, "questions", keys.questions),
+        })
         : undefined;
     const txn = env.db.transaction(() => {
         const current = fetchMemoryRow(env.db, snapshot.id);
@@ -182,11 +199,11 @@ async function updateFromSnapshot(env, snapshot, input) {
         }
         env.db
             .prepare(`UPDATE memories SET title = ?, abstract = ?, content = ?, keywords = ?, anchors = ?,
-           content_hash = ?, updated_at = ?
+           questions = ?, content_hash = ?, updated_at = ?
          WHERE id = ?`)
-            .run(text.title, text.abstract, text.content, keys.keywords, keys.anchors, (0, policy_1.contentHash)(text.content), nowIso(), current.id);
+            .run(text.title, text.abstract, text.content, keys.keywords, keys.anchors, keys.questions, (0, policy_1.contentHash)(text.content), nowIso(), current.id);
         if (reembed) {
-            replaceVecRow(env, current, embedding);
+            replaceVectors(env, current, vectors);
         }
         return true;
     });
@@ -197,20 +214,22 @@ async function embedMissing(env, limit, coverage) {
     if (rows.length === 0) {
         return 0;
     }
-    const passages = rows.map(passageOf);
-    const vectors = await (0, embeddings_1.embedPassage)(passages, env.modelCacheDir);
-    if (vectors.length !== rows.length) {
-        throw new Error(`embedding ${rows.length} passages produced ${vectors.length} vectors`);
-    }
+    const vectors = await embedBatch(env.modelCacheDir, rows.map((row) => ({
+        passage: passageText(row),
+        questions: (0, keys_1.parseStoredList)(row.id, "questions", row.questions),
+    })));
     const write = env.db.transaction(() => {
         let embedded = 0;
         rows.forEach((row, index) => {
             const current = unembeddedRow(env.db, row.id, coverage);
-            const vector = vectors[index];
-            if (current === undefined || vector === undefined || passageOf(current) !== passages[index]) {
+            const rowVectors = vectors[index];
+            if (current === undefined ||
+                rowVectors === undefined ||
+                passageText(current) !== passageText(row) ||
+                current.questions !== row.questions) {
                 return;
             }
-            insertVecRow(env.db, vector, current);
+            insertVectors(env.db, current, rowVectors);
             embedded += 1;
         });
         return embedded;
@@ -229,7 +248,7 @@ function deleteMemory(env, idOrPrefix) {
             throw new MemoryRejection(`memory ${id} cannot be deleted: it is the superseded_by of ${history}; delete ${history} first to drop that history, or keep ${id} and replace its value with memory_store resolution SUPERSEDE`);
         }
         if (env.vecLoaded) {
-            env.db.prepare("DELETE FROM memories_vec WHERE memory_id = ?").run(id);
+            deleteVectors(env.db, id);
         }
         env.db.prepare("DELETE FROM memories WHERE id = ?").run(id);
     });
@@ -253,10 +272,11 @@ function prepareRow(input, projectId) {
         content,
         keywords: exports.storedKeys.keywords(input.keywords),
         anchors: JSON.stringify(exports.storedKeys.anchors(input.anchors)),
+        questions: exports.storedKeys.questions(input.questions),
         contentHash: (0, policy_1.contentHash)(content),
     };
 }
-function resolveWrite(env, row, embedding, resolution, now) {
+function resolveWrite(env, row, vectors, resolution, now) {
     if (resolution === undefined || resolution.action === "ADD") {
         const duplicate = exactDuplicate(env.db, row);
         if (duplicate !== undefined) {
@@ -264,21 +284,21 @@ function resolveWrite(env, row, embedding, resolution, now) {
         }
     }
     if (resolution === undefined) {
-        const candidates = writeCandidates(env, row, embedding);
+        const candidates = writeCandidates(env, row, vectors);
         if (candidates.length > 0) {
             return { outcome: "needs_resolution", candidates };
         }
-        return written(addMemory(env, row, embedding, now));
+        return written(addMemory(env, row, vectors, now));
     }
     if (resolution.action === "ADD") {
-        return guarded((0, policy_1.addVerdict)(row, singleKeyHolders(env.db, row)), () => addMemory(env, row, embedding, now));
+        return guarded((0, policy_1.addVerdict)(row, singleKeyHolders(env.db, row)), () => addMemory(env, row, vectors, now));
     }
     const target = slotRow(env.db, resolveMemoryId(env.db, resolution.target));
     switch (resolution.action) {
         case "SUPERSEDE":
-            return guarded((0, policy_1.supersedeVerdict)(row, target), () => supersede(env, row, embedding, target, now));
+            return guarded((0, policy_1.supersedeVerdict)(row, target), () => supersede(env, row, vectors, target, now));
         case "UPDATE":
-            return guarded(reassertionVerdict(env.db, (0, policy_1.updateVerdict)(row, target), target), () => reasserted(env, target, "store_update", row.title, now, () => rewrite(env, row, embedding, target.id, now)));
+            return guarded(reassertionVerdict(env.db, (0, policy_1.updateVerdict)(row, target), target), () => reasserted(env, target, "store_update", row.title, now, () => rewrite(env, row, vectors, target.id, now)));
         case "NOOP":
             return guarded(reassertionVerdict(env.db, (0, policy_1.noopVerdict)(row, target), target), () => reasserted(env, target, "store_noop", row.title, now, () => countSupport(env.db, target.id)));
     }
@@ -302,15 +322,15 @@ function written(result) {
 function guarded(verdict, write) {
     return verdict.allowed ? written(write()) : { outcome: "rejected", reason: verdict.reason };
 }
-function addMemory(env, row, embedding, now) {
-    const id = insertMemory(env, row, embedding, now);
-    return withPromotion({ id, action: "created" }, promote(env, id, row, embedding, now));
+function addMemory(env, row, vectors, now) {
+    const id = insertMemory(env, row, vectors, now);
+    return withPromotion({ id, action: "created" }, promote(env, id, row, vectors, now));
 }
-function supersede(env, row, embedding, target, now) {
+function supersede(env, row, vectors, target, now) {
     env.db
         .prepare("UPDATE memories SET state = 'revoked', invalid_at = ?, expired_at = ?, updated_at = ? WHERE id = ?")
         .run(now, now, now, target.id);
-    const id = insertMemory(env, row, embedding, now);
+    const id = insertMemory(env, row, vectors, now);
     env.db.prepare("UPDATE memories SET superseded_by = ? WHERE id = ?").run(id, target.id);
     (0, transitions_1.recordTransition)(env.db, {
         memoryId: target.id,
@@ -322,27 +342,27 @@ function supersede(env, row, embedding, target, now) {
         at: now,
     });
     (0, transitions_1.setVecState)(env, target.id, "revoked");
-    return withPromotion({ id, action: "superseded", refId: target.id }, promote(env, id, row, embedding, now));
+    return withPromotion({ id, action: "superseded", refId: target.id }, promote(env, id, row, vectors, now));
 }
-function rewrite(env, row, embedding, targetId, now) {
+function rewrite(env, row, vectors, targetId, now) {
     env.db
         .prepare(`UPDATE memories SET title = ?, abstract = ?, content = ?, value_text = ?, keywords = ?,
-         anchors = ?, kind = ?, content_hash = ?, updated_at = ? WHERE id = ?`)
-        .run(row.title, row.abstract, row.content, row.valueText, row.keywords, row.anchors, row.kind, row.contentHash, now, targetId);
-    replaceVecRow(env, fetchMemoryRow(env.db, targetId), embedding);
-    return withPromotion({ id: targetId, action: "updated" }, promote(env, targetId, row, embedding, now));
+         anchors = ?, questions = ?, kind = ?, content_hash = ?, updated_at = ? WHERE id = ?`)
+        .run(row.title, row.abstract, row.content, row.valueText, row.keywords, row.anchors, JSON.stringify(row.questions), row.kind, row.contentHash, now, targetId);
+    replaceVectors(env, fetchMemoryRow(env.db, targetId), vectors);
+    return withPromotion({ id: targetId, action: "updated" }, promote(env, targetId, row, vectors, now));
 }
 function countSupport(db, id) {
     db.prepare("UPDATE memories SET support_count = support_count + 1 WHERE id = ?").run(id);
     return { id, action: "noop" };
 }
-function promote(env, writtenId, row, embedding, now) {
+function promote(env, writtenId, row, vectors, now) {
     const writtenSlot = { ...row, id: writtenId, state: "active" };
     const contributors = (0, policy_1.promotionContributors)(writtenSlot, keyHolders(env.db, row.conflictKey));
     if (contributors.length === 0) {
         return undefined;
     }
-    const userId = insertMemory(env, { ...row, scope: "user" }, embedding, now);
+    const userId = insertMemory(env, { ...row, scope: "user" }, vectors, now);
     for (const contributor of contributors) {
         (0, transitions_1.recordTransition)(env.db, {
             memoryId: contributor.id,
@@ -359,35 +379,38 @@ function promote(env, writtenId, row, embedding, now) {
 function withPromotion(result, promotedId) {
     return promotedId === undefined ? result : { ...result, promotedId };
 }
-function insertMemory(env, row, embedding, now) {
+function insertMemory(env, row, vectors, now) {
     const id = (0, ids_1.newId)();
     env.db
         .prepare(`INSERT INTO memories (id, type, kind, scope, project_id, title, abstract, content, conflict_key,
-         cardinality, value_text, keywords, anchors, content_hash, importance, valid_from,
+         cardinality, value_text, keywords, anchors, questions, content_hash, importance, valid_from,
          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, row.type, row.kind, row.scope, row.projectId, row.title, row.abstract, row.content, row.conflictKey, row.cardinality, row.valueText, row.keywords, row.anchors, row.contentHash, (0, lifecycle_1.derivedImportance)(lifecycle_1.FRESH_COUNTERS), now, now, now);
-    if (embedding !== undefined) {
-        insertVecRow(env.db, embedding, {
-            id,
-            type: row.type,
-            scope: row.scope,
-            project_id: row.projectId,
-            state: "active",
-        });
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, row.type, row.kind, row.scope, row.projectId, row.title, row.abstract, row.content, row.conflictKey, row.cardinality, row.valueText, row.keywords, row.anchors, JSON.stringify(row.questions), row.contentHash, (0, lifecycle_1.derivedImportance)(lifecycle_1.FRESH_COUNTERS), now, now, now);
+    if (vectors !== undefined) {
+        insertVectors(env.db, { id, type: row.type, scope: row.scope, project_id: row.projectId, state: "active" }, vectors);
     }
     return id;
 }
-function insertVecRow(db, embedding, fields) {
-    db.prepare("INSERT INTO memories_vec (memory_id, embedding, type, scope, project_id, state) VALUES (?, ?, ?, ?, ?, ?)").run(fields.id, vecBlob(embedding), fields.type, fields.scope, fields.project_id, fields.state);
+function insertVectors(db, fields, vectors) {
+    db.prepare("INSERT INTO memories_vec (memory_id, embedding, type, scope, project_id, state) VALUES (?, ?, ?, ?, ?, ?)").run(fields.id, vecBlob(vectors.passage), fields.type, fields.scope, fields.project_id, fields.state);
+    const insertQuestion = db.prepare(`INSERT INTO questions_vec (question_id, embedding, memory_id, scope, project_id, state)
+     VALUES (?, ?, ?, ?, ?, ?)`);
+    vectors.questions.forEach((vector, index) => {
+        insertQuestion.run(`${fields.id}:${index}`, vecBlob(vector), fields.id, fields.scope, fields.project_id, fields.state);
+    });
 }
-function replaceVecRow(env, fields, embedding) {
+function deleteVectors(db, memoryId) {
+    db.prepare("DELETE FROM memories_vec WHERE memory_id = ?").run(memoryId);
+    db.prepare("DELETE FROM questions_vec WHERE memory_id = ?").run(memoryId);
+}
+function replaceVectors(env, fields, vectors) {
     if (!env.vecLoaded) {
         return;
     }
-    env.db.prepare("DELETE FROM memories_vec WHERE memory_id = ?").run(fields.id);
-    if (embedding !== undefined) {
-        insertVecRow(env.db, embedding, fields);
+    deleteVectors(env.db, fields.id);
+    if (vectors !== undefined) {
+        insertVectors(env.db, fields, vectors);
     }
 }
 function partitionFilter(slot, alias = "") {
@@ -403,10 +426,10 @@ function exactDuplicate(db, row) {
        ORDER BY state = 'active' DESC LIMIT 1`)
         .get(row.contentHash, ...partition.params);
 }
-function writeCandidates(env, row, embedding) {
+function writeCandidates(env, row, vectors) {
     const ids = new Set([
         ...sameKeyIds(env.db, row),
-        ...(embedding === undefined ? [] : neighbourIds(env.db, row, embedding)),
+        ...(vectors === undefined ? [] : neighbourIds(env.db, row, vectors.passage)),
         ...keywordHitIds(env.db, row),
     ]);
     return candidatesByIds(env.db, [...ids]);
@@ -468,8 +491,8 @@ function keyHolders(db, conflictKey) {
         .prepare(`SELECT ${SLOT_ROW_COLUMNS} FROM memories WHERE conflict_key = ? AND state = 'active'`)
         .all(conflictKey);
 }
-const UNEMBEDDED_ROW_SELECT = `SELECT m.id, m.type, m.scope, m.project_id, m.state, m.title, m.abstract,
-    m.conflict_key, m.keywords
+const UNEMBEDDED_ROW_SELECT = `SELECT m.id, m.type, m.scope, m.project_id, m.state, m.title, m.content,
+    m.keywords, m.questions
   FROM memories m
   WHERE NOT EXISTS (SELECT 1 FROM memories_vec v WHERE v.memory_id = m.id)
     AND (? = 'all' OR m.state = 'active')`;
@@ -487,14 +510,6 @@ function unembeddedRows(db, limit, coverage) {
 function unembeddedRow(db, id, coverage) {
     return db.prepare(`${UNEMBEDDED_ROW_SELECT} AND m.id = ?`).get(coverage, id);
 }
-function passageOf(row) {
-    return passageText({
-        title: row.title,
-        abstract: row.abstract,
-        conflictKey: row.conflict_key,
-        keywords: row.keywords,
-    });
-}
 function slotRow(db, id) {
     const row = db.prepare(`SELECT ${SLOT_ROW_COLUMNS} FROM memories WHERE id = ?`).get(id);
     if (row === undefined) {
@@ -502,16 +517,30 @@ function slotRow(db, id) {
     }
     return row;
 }
-async function embedForStore(env, text) {
+function vectorCountGuard(kind, expected, actual) {
+    if (actual !== expected) {
+        throw new Error(`embedding ${expected} ${kind} produced ${actual} vectors`);
+    }
+}
+async function embedBatch(modelCacheDir, sources) {
+    const passages = await (0, embeddings_1.embedPassage)(sources.map((source) => source.passage), modelCacheDir);
+    vectorCountGuard("passages", sources.length, passages.length);
+    const questionTexts = sources.flatMap((source) => source.questions);
+    const questions = questionTexts.length === 0 ? [] : await (0, embeddings_1.embedQuestions)(questionTexts, modelCacheDir);
+    vectorCountGuard("questions", questionTexts.length, questions.length);
+    let next = 0;
+    return sources.map((source, index) => {
+        const own = questions.slice(next, next + source.questions.length);
+        next += source.questions.length;
+        return { passage: passages[index], questions: own };
+    });
+}
+async function embedForStore(env, source) {
     if (!env.vecLoaded || !(0, embeddings_1.modelCached)(env.modelCacheDir)) {
         return undefined;
     }
-    const vectors = await (0, embeddings_1.embedPassage)([text], env.modelCacheDir);
-    const vector = vectors.at(0);
-    if (vectors.length !== 1 || vector === undefined) {
-        throw new Error(`embedding passage produced ${vectors.length} vectors, expected 1`);
-    }
-    return vector;
+    const [vectors] = await embedBatch(env.modelCacheDir, [source]);
+    return vectors;
 }
 function fetchMemoryRow(db, id) {
     const row = db.prepare(`SELECT ${MEMORY_ROW_COLUMNS} FROM memories WHERE id = ?`).get(id);
