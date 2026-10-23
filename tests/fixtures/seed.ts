@@ -6,6 +6,7 @@ import { type OpenedDb, openDatabase } from '../../src/db/database';
 import type { MemoryType } from '../../src/db/memories';
 import { embedPassage } from '../../src/embeddings';
 import type { MemoryScope } from '../../src/policy';
+import { testEmbedDeadlineMs } from '../../vitest.config';
 
 export interface SeedMemory {
   id: string;
@@ -49,6 +50,7 @@ export function seedConfig(pluginData: string, modelCacheDir: string): Config {
     autoDownloadModel: false,
     budgetTokens: 1200,
     pretoolBudgetTokens: 300,
+    embedDeadlineMs: testEmbedDeadlineMs,
   };
 }
 

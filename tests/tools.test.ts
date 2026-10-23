@@ -95,6 +95,7 @@ function openDeps(
   return {
     env,
     projectId: "proj-tools",
+    embedDeadlineMs: config.embedDeadlineMs,
     processEnv: {
       CLAUDE_PLUGIN_DATA: pluginData,
       CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-tools-claude-")),

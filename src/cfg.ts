@@ -7,6 +7,8 @@ export const MODEL_PREFIXES = { query: "", passage: "" } as const;
 export const MODEL_DOWNLOAD_SIZE = "about 120 MB";
 export const EMBED_DIM = 384;
 export const EMBED_DEADLINE_MS = 1500;
+const EMBED_DEADLINE_MIN_MS = 1;
+const TIMER_MAX_MS = 2_147_483_647;
 export const TITLE_MAX_CHARS = 200;
 export const ABSTRACT_MAX_CHARS = 200;
 export const CONTENT_MAX_CHARS = 32000;
@@ -28,6 +30,7 @@ export interface Config {
   autoDownloadModel: boolean;
   budgetTokens: number;
   pretoolBudgetTokens: number;
+  embedDeadlineMs: number;
 }
 
 const RECALL_BUDGET_OPTION = "CLAUDE_PLUGIN_OPTION_RECALL_BUDGET_TOKENS";
@@ -47,15 +50,28 @@ function switchFromEnv(env: NodeJS.ProcessEnv, name: string, fallback: boolean):
   return parsed;
 }
 
-function budgetFromEnv(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+interface IntegerBounds {
+  readonly min: number;
+  readonly max: number;
+}
+
+const BUDGET_BOUNDS: IntegerBounds = { min: BUDGET_MIN_TOKENS, max: BUDGET_MAX_TOKENS };
+const EMBED_DEADLINE_BOUNDS: IntegerBounds = { min: EMBED_DEADLINE_MIN_MS, max: TIMER_MAX_MS };
+
+function integerFromEnv(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number,
+  bounds: IntegerBounds,
+): number {
   const value = env[name];
   if (value === undefined) {
     return fallback;
   }
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < BUDGET_MIN_TOKENS || parsed > BUDGET_MAX_TOKENS) {
+  if (!Number.isInteger(parsed) || parsed < bounds.min || parsed > bounds.max) {
     throw new Error(
-      `${name} must be an integer between ${BUDGET_MIN_TOKENS} and ${BUDGET_MAX_TOKENS}, got: ${value}`,
+      `${name} must be an integer between ${bounds.min} and ${bounds.max}, got: ${value}`,
     );
   }
   return parsed;
@@ -72,7 +88,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     modelCacheDir: env.ACM_MODEL_CACHE_DIR ?? join(pluginData, "models"),
     modelRemoteHost: env.ACM_MODEL_REMOTE_HOST,
     autoDownloadModel: switchFromEnv(env, DOWNLOAD_MODEL_OPTION, DEFAULT_DOWNLOAD_MODEL),
-    budgetTokens: budgetFromEnv(env, RECALL_BUDGET_OPTION, DEFAULT_BUDGET_TOKENS),
-    pretoolBudgetTokens: budgetFromEnv(env, PRETOOL_BUDGET_OPTION, DEFAULT_PRETOOL_BUDGET_TOKENS),
+    budgetTokens: integerFromEnv(env, RECALL_BUDGET_OPTION, DEFAULT_BUDGET_TOKENS, BUDGET_BOUNDS),
+    pretoolBudgetTokens: integerFromEnv(
+      env,
+      PRETOOL_BUDGET_OPTION,
+      DEFAULT_PRETOOL_BUDGET_TOKENS,
+      BUDGET_BOUNDS,
+    ),
+    embedDeadlineMs: integerFromEnv(
+      env,
+      "ACM_EMBED_DEADLINE_MS",
+      EMBED_DEADLINE_MS,
+      EMBED_DEADLINE_BOUNDS,
+    ),
   };
 }

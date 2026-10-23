@@ -1,4 +1,3 @@
-import { EMBED_DEADLINE_MS } from "./cfg";
 import type { Db } from "./db/database";
 import { clearEmbeddingTimeout, recordEmbeddingTimeout } from "./db/health";
 import { VISIBLE_TO_PROJECT } from "./db/visibility";
@@ -32,6 +31,7 @@ type QueryEmbedding =
 export interface RecallOptions {
   projectId: string;
   modelCacheDir: string;
+  embedDeadlineMs: number;
   query: string;
   limit?: number;
   type?: MemoryType;
@@ -70,6 +70,7 @@ export interface TicketRequest {
 export interface PromptRequest {
   readonly projectId: string;
   readonly modelCacheDir: string;
+  readonly embedDeadlineMs: number;
   readonly prompt: string;
   readonly tokens: readonly string[];
   readonly now: string;
@@ -199,9 +200,19 @@ function environmentDegradation(
   return flags.vec || flags.model ? flags : undefined;
 }
 
-async function queryEmbedding(query: string, modelCacheDir: string): Promise<QueryEmbedding> {
+interface QueryEmbedder {
+  readonly modelCacheDir: string;
+  readonly embedDeadlineMs: number;
+}
+
+async function queryEmbedding(query: string, embedder: QueryEmbedder): Promise<QueryEmbedding> {
   try {
-    return { vector: await withDeadline(embedQuery(query, modelCacheDir), EMBED_DEADLINE_MS) };
+    return {
+      vector: await withDeadline(
+        embedQuery(query, embedder.modelCacheDir),
+        embedder.embedDeadlineMs,
+      ),
+    };
   } catch (error) {
     return {
       degraded:
@@ -224,7 +235,7 @@ export async function recall(opened: RecallSource, options: RecallOptions): Prom
   if (options.ftsOnly || degraded !== undefined) {
     return { rows: ftsRecall(opened.db, options, now), degraded };
   }
-  const embedded = await queryEmbedding(options.query, options.modelCacheDir);
+  const embedded = await queryEmbedding(options.query, options);
   if (embedded.vector === undefined) {
     return { rows: ftsRecall(opened.db, options, now), degraded: embedded.degraded };
   }
@@ -290,9 +301,7 @@ export async function promptCandidates(
   );
   const environment = environmentDegradation(source, request.modelCacheDir);
   const embedded =
-    environment === undefined
-      ? await queryEmbedding(request.prompt, request.modelCacheDir)
-      : undefined;
+    environment === undefined ? await queryEmbedding(request.prompt, request) : undefined;
   if (embedded !== undefined) {
     recordPromptEmbedding(source.db, embedded, request.now);
   }

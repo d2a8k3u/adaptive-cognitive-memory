@@ -391,6 +391,7 @@ describe("cli export and import", () => {
         modelCacheDir: loadConfig(source).modelCacheDir,
       },
       projectId: "proj-transfer",
+      embedDeadlineMs: loadConfig(source).embedDeadlineMs,
       processEnv: source,
       instructionSources: {
         projectDir,

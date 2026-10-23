@@ -10,6 +10,8 @@ exports.MODEL_PREFIXES = { query: "", passage: "" };
 exports.MODEL_DOWNLOAD_SIZE = "about 120 MB";
 exports.EMBED_DIM = 384;
 exports.EMBED_DEADLINE_MS = 1500;
+const EMBED_DEADLINE_MIN_MS = 1;
+const TIMER_MAX_MS = 2_147_483_647;
 exports.TITLE_MAX_CHARS = 200;
 exports.ABSTRACT_MAX_CHARS = 200;
 exports.CONTENT_MAX_CHARS = 32000;
@@ -37,14 +39,16 @@ function switchFromEnv(env, name, fallback) {
     }
     return parsed;
 }
-function budgetFromEnv(env, name, fallback) {
+const BUDGET_BOUNDS = { min: exports.BUDGET_MIN_TOKENS, max: exports.BUDGET_MAX_TOKENS };
+const EMBED_DEADLINE_BOUNDS = { min: EMBED_DEADLINE_MIN_MS, max: TIMER_MAX_MS };
+function integerFromEnv(env, name, fallback, bounds) {
     const value = env[name];
     if (value === undefined) {
         return fallback;
     }
     const parsed = Number(value);
-    if (!Number.isInteger(parsed) || parsed < exports.BUDGET_MIN_TOKENS || parsed > exports.BUDGET_MAX_TOKENS) {
-        throw new Error(`${name} must be an integer between ${exports.BUDGET_MIN_TOKENS} and ${exports.BUDGET_MAX_TOKENS}, got: ${value}`);
+    if (!Number.isInteger(parsed) || parsed < bounds.min || parsed > bounds.max) {
+        throw new Error(`${name} must be an integer between ${bounds.min} and ${bounds.max}, got: ${value}`);
     }
     return parsed;
 }
@@ -59,7 +63,8 @@ function loadConfig(env = process.env) {
         modelCacheDir: env.ACM_MODEL_CACHE_DIR ?? (0, node_path_1.join)(pluginData, "models"),
         modelRemoteHost: env.ACM_MODEL_REMOTE_HOST,
         autoDownloadModel: switchFromEnv(env, DOWNLOAD_MODEL_OPTION, exports.DEFAULT_DOWNLOAD_MODEL),
-        budgetTokens: budgetFromEnv(env, RECALL_BUDGET_OPTION, exports.DEFAULT_BUDGET_TOKENS),
-        pretoolBudgetTokens: budgetFromEnv(env, PRETOOL_BUDGET_OPTION, exports.DEFAULT_PRETOOL_BUDGET_TOKENS),
+        budgetTokens: integerFromEnv(env, RECALL_BUDGET_OPTION, exports.DEFAULT_BUDGET_TOKENS, BUDGET_BOUNDS),
+        pretoolBudgetTokens: integerFromEnv(env, PRETOOL_BUDGET_OPTION, exports.DEFAULT_PRETOOL_BUDGET_TOKENS, BUDGET_BOUNDS),
+        embedDeadlineMs: integerFromEnv(env, "ACM_EMBED_DEADLINE_MS", exports.EMBED_DEADLINE_MS, EMBED_DEADLINE_BOUNDS),
     };
 }

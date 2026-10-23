@@ -64,6 +64,7 @@ import { type StatusReport, statusReport } from "./status";
 export interface ToolDeps {
   env: MemoryEnv;
   projectId: string;
+  embedDeadlineMs: number;
   processEnv: NodeJS.ProcessEnv;
   instructionSources: InstructionSources;
 }
@@ -442,6 +443,7 @@ export async function memorySearch(
     const recalled = await recall(deps.env, {
       projectId: deps.projectId,
       modelCacheDir: deps.env.modelCacheDir,
+      embedDeadlineMs: deps.embedDeadlineMs,
       query,
       limit: limit ?? DEFAULT_RECALL_LIMIT,
       type,

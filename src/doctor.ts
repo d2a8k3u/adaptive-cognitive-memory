@@ -2,7 +2,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { type AutoMemory, claudeConfigDir, readAutoMemory } from "./automemory";
 import { CALIBRATED_EMBEDDING, CALIBRATION_RUN } from "./calibration";
-import { type Config, EMBED_DEADLINE_MS, loadConfig } from "./cfg";
+import { type Config, loadConfig } from "./cfg";
 import { type Db, type OpenedDb, openDatabase, probeNativeModule } from "./db/database";
 import { lastBackfillFailure, lastEmbeddingTimeout } from "./db/health";
 import { unembeddedActiveCount } from "./db/memories";
@@ -206,7 +206,7 @@ function checkModel(config: Config | undefined, opened: OpenedDb | undefined): D
       ? passOrFail(true, `model cached at ${path}`)
       : {
           status: "warn",
-          detail: `model cached at ${path}, but the last prompt's query embedding at ${timedOutAt} exceeded the ${EMBED_DEADLINE_MS} ms deadline, so recall fell back to keyword search`,
+          detail: `model cached at ${path}, but the last prompt's query embedding at ${timedOutAt} exceeded the ${config.embedDeadlineMs} ms deadline, so recall fell back to keyword search`,
         };
   });
 }

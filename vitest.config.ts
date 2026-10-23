@@ -9,6 +9,13 @@ export const testModelCacheDir = join(
   "models",
 );
 
+export const testEmbedDeadlineMs = 20_000;
+
+export const testModelEnv = {
+  ACM_MODEL_CACHE_DIR: testModelCacheDir,
+  ACM_EMBED_DEADLINE_MS: String(testEmbedDeadlineMs),
+};
+
 export default defineConfig({
   test: {
     env: {

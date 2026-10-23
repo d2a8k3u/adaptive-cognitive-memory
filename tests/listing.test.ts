@@ -44,6 +44,7 @@ function openDeps(): ToolDeps {
   return {
     env: { db: opened.db, vecLoaded: opened.vecLoaded, modelCacheDir: config.modelCacheDir },
     projectId: PROJECT,
+    embedDeadlineMs: config.embedDeadlineMs,
     processEnv: { CLAUDE_PLUGIN_DATA: pluginData },
     instructionSources: { projectDir, autoMemoryIndex: undefined },
   };

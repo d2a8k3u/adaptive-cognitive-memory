@@ -143,7 +143,7 @@ function checkModel(config, opened) {
             ? passOrFail(true, `model cached at ${path}`)
             : {
                 status: "warn",
-                detail: `model cached at ${path}, but the last prompt's query embedding at ${timedOutAt} exceeded the ${cfg_1.EMBED_DEADLINE_MS} ms deadline, so recall fell back to keyword search`,
+                detail: `model cached at ${path}, but the last prompt's query embedding at ${timedOutAt} exceeded the ${config.embedDeadlineMs} ms deadline, so recall fell back to keyword search`,
             };
     });
 }

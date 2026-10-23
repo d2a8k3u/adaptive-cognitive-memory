@@ -416,6 +416,7 @@ async function promptRecall(
   const found = await promptCandidates(opened, {
     projectId,
     modelCacheDir: scope.config.modelCacheDir,
+    embedDeadlineMs: scope.config.embedDeadlineMs,
     prompt,
     tokens: admission.tokens,
     now: scope.now,

@@ -322,6 +322,7 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
       await recall(opened, {
         projectId,
         modelCacheDir: config.modelCacheDir,
+        embedDeadlineMs: config.embedDeadlineMs,
         query: RECALL_PROMPT,
         limit: 10,
       });
@@ -331,6 +332,7 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
         const result = await recall(opened, {
           projectId,
           modelCacheDir: config.modelCacheDir,
+          embedDeadlineMs: config.embedDeadlineMs,
           query: RECALL_PROMPT,
           limit: 10,
         });

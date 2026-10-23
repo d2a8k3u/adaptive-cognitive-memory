@@ -11,7 +11,6 @@ exports.sessionEarlierMemories = sessionEarlierMemories;
 exports.ticketCandidates = ticketCandidates;
 exports.promptCandidates = promptCandidates;
 exports.toolCandidates = toolCandidates;
-const cfg_1 = require("./cfg");
 const health_1 = require("./db/health");
 const visibility_1 = require("./db/visibility");
 const embeddings_1 = require("./embeddings");
@@ -76,9 +75,11 @@ function environmentDegradation(source, modelCacheDir) {
     }
     return flags.vec || flags.model ? flags : undefined;
 }
-async function queryEmbedding(query, modelCacheDir) {
+async function queryEmbedding(query, embedder) {
     try {
-        return { vector: await (0, embeddings_1.withDeadline)((0, embeddings_1.embedQuery)(query, modelCacheDir), cfg_1.EMBED_DEADLINE_MS) };
+        return {
+            vector: await (0, embeddings_1.withDeadline)((0, embeddings_1.embedQuery)(query, embedder.modelCacheDir), embedder.embedDeadlineMs),
+        };
     }
     catch (error) {
         return {
@@ -100,7 +101,7 @@ async function recall(opened, options) {
     if (options.ftsOnly || degraded !== undefined) {
         return { rows: ftsRecall(opened.db, options, now), degraded };
     }
-    const embedded = await queryEmbedding(options.query, options.modelCacheDir);
+    const embedded = await queryEmbedding(options.query, options);
     if (embedded.vector === undefined) {
         return { rows: ftsRecall(opened.db, options, now), degraded: embedded.degraded };
     }
@@ -144,9 +145,7 @@ async function promptCandidates(source, request) {
             hit.rank,
         ]));
     const environment = environmentDegradation(source, request.modelCacheDir);
-    const embedded = environment === undefined
-        ? await queryEmbedding(request.prompt, request.modelCacheDir)
-        : undefined;
+    const embedded = environment === undefined ? await queryEmbedding(request.prompt, request) : undefined;
     if (embedded !== undefined) {
         recordPromptEmbedding(source.db, embedded, request.now);
     }

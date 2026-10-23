@@ -294,6 +294,7 @@ async function memorySearch(deps, args) {
         const recalled = await (0, search_1.recall)(deps.env, {
             projectId: deps.projectId,
             modelCacheDir: deps.env.modelCacheDir,
+            embedDeadlineMs: deps.embedDeadlineMs,
             query,
             limit: limit ?? search_1.DEFAULT_RECALL_LIMIT,
             type,

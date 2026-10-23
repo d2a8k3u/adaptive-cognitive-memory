@@ -5,7 +5,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CALIBRATED_EMBEDDING, CALIBRATION_RUN } from "../src/calibration";
-import { EMBED_DEADLINE_MS, EMBED_DIM, loadConfig } from "../src/cfg";
+import { EMBED_DIM, loadConfig } from "../src/cfg";
 import { runCli } from "../src/cli";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import { recordEmbeddingTimeout } from "../src/db/health";
@@ -259,8 +259,8 @@ describe("runDoctor", () => {
     });
   });
 
-  it("warns with the time and the deadline when the last prompt's query embedding timed out", () => {
-    const env = healthyEnv();
+  it("warns with the time and the configured deadline when the last prompt's query embedding timed out", () => {
+    const env = { ...healthyEnv(), ACM_EMBED_DEADLINE_MS: "2500" };
     const opened = openDatabase(loadConfig(env));
     try {
       recordEmbeddingTimeout(opened.db, "2026-10-14T09:15:00.000Z");
@@ -273,7 +273,7 @@ describe("runDoctor", () => {
     expect(report.status).toBe("ok");
     expect(checkByName(report, "model")).toMatchObject({
       status: "warn",
-      detail: `model cached at ${modelCachePath(testModelCacheDir)}, but the last prompt's query embedding at 2026-10-14T09:15:00.000Z exceeded the ${EMBED_DEADLINE_MS} ms deadline, so recall fell back to keyword search`,
+      detail: `model cached at ${modelCachePath(testModelCacheDir)}, but the last prompt's query embedding at 2026-10-14T09:15:00.000Z exceeded the 2500 ms deadline, so recall fell back to keyword search`,
       fix: expect.stringContaining("model-init"),
     });
   });

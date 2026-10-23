@@ -18,7 +18,7 @@ import {
   rrfFuse,
   sessionStartLimit,
 } from "../src/search";
-import { testModelCacheDir } from "../vitest.config";
+import { testEmbedDeadlineMs, testModelCacheDir } from "../vitest.config";
 
 const vecState = vi.hoisted(() => ({ failGetLoadablePath: false }));
 
@@ -202,6 +202,7 @@ function hybridOptions(overrides: Partial<RecallOptions> = {}): RecallOptions {
   return {
     projectId: PROJECT_B,
     modelCacheDir: testModelCacheDir,
+    embedDeadlineMs: testEmbedDeadlineMs,
     query: "database deployment",
     ...overrides,
   };
@@ -220,7 +221,7 @@ async function pastEmbeddingDeadline<T>(work: () => Promise<T>): Promise<T> {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   embedState.hangEmbedQuery = true;
   const pending = work();
-  await vi.advanceTimersByTimeAsync(EMBED_DEADLINE_MS);
+  await vi.advanceTimersByTimeAsync(testEmbedDeadlineMs);
   const settled = await pending;
   embedState.hangEmbedQuery = false;
   vi.useRealTimers();
@@ -543,6 +544,7 @@ describe("promptCandidates", () => {
       const found = await promptCandidates(opened, {
         projectId: PROJECT_B,
         modelCacheDir: testModelCacheDir,
+        embedDeadlineMs: testEmbedDeadlineMs,
         prompt,
         tokens: [],
         now: NOW,
@@ -585,6 +587,7 @@ describe("promptCandidates", () => {
       const found = await promptCandidates(opened, {
         projectId: PROJECT_B,
         modelCacheDir: testModelCacheDir,
+        embedDeadlineMs: testEmbedDeadlineMs,
         prompt,
         tokens: [],
         now: NOW,
@@ -701,6 +704,7 @@ describe("recall degraded mode", () => {
     const request = {
       projectId: PROJECT_B,
       modelCacheDir: testModelCacheDir,
+      embedDeadlineMs: testEmbedDeadlineMs,
       prompt: "database deployment runbook",
       tokens: ["database", "deployment", "runbook"],
       now: NOW,
@@ -719,6 +723,48 @@ describe("recall degraded mode", () => {
       opened.db.close();
     }
   });
+
+  it.each([
+    {
+      entry: "recall",
+      search: (opened: OpenedDb, embedDeadlineMs: number) =>
+        recall(opened, hybridOptions({ embedDeadlineMs })),
+    },
+    {
+      entry: "promptCandidates",
+      search: (opened: OpenedDb, embedDeadlineMs: number) =>
+        promptCandidates(opened, {
+          projectId: PROJECT_B,
+          modelCacheDir: testModelCacheDir,
+          embedDeadlineMs,
+          prompt: "database deployment runbook",
+          tokens: ["database", "deployment", "runbook"],
+          now: NOW,
+        }),
+    },
+  ])(
+    "$entry waits for the configured embedding deadline before it falls back",
+    async ({ search }) => {
+      const configuredDeadlineMs = EMBED_DEADLINE_MS * 4;
+      const opened = await openSeeded([]);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      embedState.hangEmbedQuery = true;
+      try {
+        let settled = false;
+        const pending = search(opened, configuredDeadlineMs).finally(() => {
+          settled = true;
+        });
+        await vi.advanceTimersByTimeAsync(EMBED_DEADLINE_MS);
+        const settledAtDefaultDeadline = settled;
+        await vi.advanceTimersByTimeAsync(configuredDeadlineMs - EMBED_DEADLINE_MS);
+
+        expect(settledAtDefaultDeadline).toBe(false);
+        expect((await pending).degraded).toEqual({ embedding_timeout: true });
+      } finally {
+        opened.db.close();
+      }
+    },
+  );
 
   it("finds a row through fts when only some query terms occur in it", async () => {
     const opened = await openSeeded([

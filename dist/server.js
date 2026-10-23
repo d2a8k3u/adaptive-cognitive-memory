@@ -83,6 +83,7 @@ function toolBackend(config, env, projectDir) {
         deps: {
             env: memoryEnv,
             projectId: (0, ids_1.projectIdentity)(location),
+            embedDeadlineMs: config.embedDeadlineMs,
             processEnv: env,
             instructionSources: {
                 projectDir,

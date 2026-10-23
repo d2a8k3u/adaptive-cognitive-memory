@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import { type MemoryEnv, type StoreInput, type StoreOutcome, store } from "../src/db/memories";
 import { recall } from "../src/search";
-import { testModelCacheDir } from "../vitest.config";
+import { testEmbedDeadlineMs, testModelCacheDir } from "../vitest.config";
 import { seedConfig } from "./fixtures/seed";
 
 const RECALL_PROJECT_ID = "proj-quality";
@@ -123,6 +123,7 @@ describe("retrieval quality", () => {
     const ftsOnly = await recall(opened, {
       projectId: RECALL_PROJECT_ID,
       modelCacheDir: env.modelCacheDir,
+      embedDeadlineMs: testEmbedDeadlineMs,
       query: PARAPHRASE_QUERY,
       limit: 10,
       ftsOnly: true,
@@ -132,6 +133,7 @@ describe("retrieval quality", () => {
     const result = await recall(opened, {
       projectId: RECALL_PROJECT_ID,
       modelCacheDir: env.modelCacheDir,
+      embedDeadlineMs: testEmbedDeadlineMs,
       query: PARAPHRASE_QUERY,
       limit: 3,
     });
@@ -145,6 +147,7 @@ describe("retrieval quality", () => {
     const result = await recall(opened, {
       projectId: RECALL_PROJECT_ID,
       modelCacheDir: env.modelCacheDir,
+      embedDeadlineMs: testEmbedDeadlineMs,
       query: CZECH_QUERY,
       limit: 3,
     });

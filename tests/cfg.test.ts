@@ -46,7 +46,26 @@ describe("loadConfig", () => {
       autoDownloadModel: true,
       budgetTokens: 1200,
       pretoolBudgetTokens: 300,
+      embedDeadlineMs: 1500,
     });
+  });
+
+  it.each([
+    { value: "1", accepted: true },
+    { value: "0", accepted: false },
+    { value: "2147483647", accepted: true },
+    { value: "2147483648", accepted: false },
+    { value: "250.5", accepted: false },
+  ])("accepts an embedding deadline of $value ms: $accepted", ({ value, accepted }) => {
+    const load = () => loadConfig({ CLAUDE_PLUGIN_DATA: "/data", ACM_EMBED_DEADLINE_MS: value });
+
+    if (accepted) {
+      expect(load().embedDeadlineMs).toBe(Number(value));
+    } else {
+      expect(load).toThrow(
+        `ACM_EMBED_DEADLINE_MS must be an integer between 1 and 2147483647, got: ${value}`,
+      );
+    }
   });
 
   it("resolves path and download source overrides", () => {

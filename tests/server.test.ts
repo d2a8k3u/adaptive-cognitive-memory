@@ -12,7 +12,7 @@ import { type OpenedDb, openDatabase } from "../src/db/database";
 import type { MemoryEnv } from "../src/db/memories";
 import { modelCachePath } from "../src/embeddings";
 import { createMcpServer } from "../src/server";
-import { testModelCacheDir } from "../vitest.config";
+import { testEmbedDeadlineMs, testModelEnv } from "../vitest.config";
 import { type ToolCallResult, toolText } from "./fixtures/seed";
 
 const START_BACKFILL_BATCH = 32;
@@ -57,6 +57,7 @@ async function connect(
     deps: {
       env,
       projectId: "proj-server",
+      embedDeadlineMs: testEmbedDeadlineMs,
       processEnv: {
         CLAUDE_PLUGIN_DATA: pluginData,
         CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-server-claude-")),
@@ -334,7 +335,7 @@ describe("server", () => {
     );
     const client = await spawnedServer({
       CLAUDE_PLUGIN_DATA: pluginData,
-      ACM_MODEL_CACHE_DIR: testModelCacheDir,
+      ...testModelEnv,
     });
 
     await waitFor("the start-up backfill", () => vectors.all().length > 1);

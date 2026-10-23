@@ -106,6 +106,7 @@ function toolBackend(config: Config, env: NodeJS.ProcessEnv, projectDir: string)
     deps: {
       env: memoryEnv,
       projectId: projectIdentity(location),
+      embedDeadlineMs: config.embedDeadlineMs,
       processEnv: env,
       instructionSources: {
         projectDir,

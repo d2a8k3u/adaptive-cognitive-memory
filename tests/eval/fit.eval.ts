@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CALIBRATION_RUN, PROMPT_GATE, PROMPT_MIN_WORDS } from "../../src/calibration";
-import { loadConfig } from "../../src/cfg";
+import { EMBED_DEADLINE_MS, loadConfig } from "../../src/cfg";
 import { type OpenedDb, openDatabase } from "../../src/db/database";
 import {
   NEIGHBOURHOOD_SIZE,
@@ -78,6 +78,7 @@ async function collectCases(stored: StoredWorld): Promise<PromptCase[]> {
         ? await promptCandidates(opened, {
             projectId: projectIds.get(item.project) ?? item.project,
             modelCacheDir: stored.world.modelCacheDir,
+            embedDeadlineMs: EMBED_DEADLINE_MS,
             prompt: item.prompt,
             tokens: admission.tokens,
             now,
