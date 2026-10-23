@@ -15,6 +15,7 @@ import {
 } from "./narrow";
 
 export const LANGS = ["en", "cs"] as const;
+export const TRANSLATION_LANGS = ["de", "es", "pl", "ja"] as const;
 export const SPLITS = ["calibration", "confirmation"] as const;
 export const PRETOOL_SPLITS = ["calibration", "heldout"] as const;
 export const DISTRACTOR_ID_PREFIX = "dx-";
@@ -52,6 +53,7 @@ export const HARNESS_MARKERS = [
 ] as const;
 
 export type Lang = (typeof LANGS)[number];
+export type TranslationLang = (typeof TRANSLATION_LANGS)[number];
 export type Split = (typeof SPLITS)[number];
 export type PretoolSplit = (typeof PRETOOL_SPLITS)[number];
 export type Scope = (typeof SCOPES)[number];
@@ -83,6 +85,7 @@ export interface FixtureMemory {
   readonly value_text: string;
   readonly keywords: string;
   readonly anchors: readonly string[];
+  readonly questions: readonly string[];
 }
 
 export interface Corpus {
@@ -179,6 +182,20 @@ export interface RedactionSample {
   readonly secret: string;
 }
 
+export interface TranslatedPrompt {
+  readonly id: string;
+  readonly source: string;
+  readonly lang: TranslationLang;
+  readonly prompt: string;
+}
+
+export interface Translation {
+  readonly id: string;
+  readonly source: string;
+  readonly lang: TranslationLang;
+  readonly text: string;
+}
+
 export interface Fixtures {
   readonly corpus: Corpus;
   readonly positives: readonly PositivePrompt[];
@@ -188,6 +205,8 @@ export interface Fixtures {
   readonly contradictions: readonly ContradictionCase[];
   readonly cues: readonly CaptureCue[];
   readonly redaction: readonly RedactionSample[];
+  readonly multilingualPrompts: readonly TranslatedPrompt[];
+  readonly multilingualCues: readonly Translation[];
 }
 
 export const FIXTURE_FILES = [
@@ -199,6 +218,9 @@ export const FIXTURE_FILES = [
   "capture-cues.json",
   "redaction.json",
   "errors.json",
+  "multilingual.json",
+  "capture-cues-multilingual.json",
+  "recall-questions.json",
 ] as const;
 
 type FixtureFile = (typeof FIXTURE_FILES)[number];
@@ -221,18 +243,31 @@ function parseMemory(record: JsonRecord, path: string): FixtureMemory {
     value_text: requireString(record, "value_text", path),
     keywords: requireString(record, "keywords", path),
     anchors: requireStringArray(record, "anchors", path),
+    questions: [],
   };
 }
 
-function parseCorpus(root: JsonRecord): Corpus {
+function parseCorpus(root: JsonRecord, questions: JsonRecord): Corpus {
+  const memories = records(root.memories, "corpus.memories").map((record, index) =>
+    parseMemory(record, `corpus.memories[${index}]`),
+  );
+  const ids = new Set(memories.map((memory) => memory.id));
+  const unknown = Object.keys(questions).filter((id) => !ids.has(id));
+  if (unknown.length > 0) {
+    throw new TypeError(`recall-questions names no corpus memory: ${unknown.join(", ")}`);
+  }
   return {
     projects: records(root.projects, "corpus.projects").map((record, index) => ({
       key: requireString(record, "key", `corpus.projects[${index}]`),
       description: requireString(record, "description", `corpus.projects[${index}]`),
     })),
-    memories: records(root.memories, "corpus.memories").map((record, index) =>
-      parseMemory(record, `corpus.memories[${index}]`),
-    ),
+    memories: memories.map((memory) => ({
+      ...memory,
+      questions:
+        questions[memory.id] === undefined
+          ? []
+          : requireStringArray(questions, memory.id, "recall-questions"),
+    })),
   };
 }
 
@@ -370,6 +405,19 @@ export function parseRedaction(record: JsonRecord, path: string): RedactionSampl
   };
 }
 
+function translations(value: unknown, path: string): Translation[] {
+  return Object.entries(requireRecord(value, path)).flatMap(([source, byLang]) => {
+    const sourcePath = `${path}.${source}`;
+    const record = requireRecord(byLang, sourcePath);
+    return TRANSLATION_LANGS.map((lang) => ({
+      id: `${source}#${lang}`,
+      source,
+      lang,
+      text: requireString(record, lang, sourcePath),
+    }));
+  });
+}
+
 function readFixture(dir: string, file: FixtureFile): unknown {
   return JSON.parse(readFileSync(join(dir, file), "utf8"));
 }
@@ -389,7 +437,10 @@ export function errorCases(dir: string): ErrorCase[] {
 export function loadFixtures(dir: string): Fixtures {
   const prompts = requireRecord(readFixture(dir, "prompts.json"), "prompts");
   return {
-    corpus: parseCorpus(requireRecord(readFixture(dir, "corpus.json"), "corpus")),
+    corpus: parseCorpus(
+      requireRecord(readFixture(dir, "corpus.json"), "corpus"),
+      requireRecord(readFixture(dir, "recall-questions.json"), "recall-questions"),
+    ),
     positives: records(prompts.positives, "prompts.positives").map((record, index) =>
       parsePositive(record, `prompts.positives[${index}]`),
     ),
@@ -409,6 +460,13 @@ export function loadFixtures(dir: string): Fixtures {
       parseCue(record, `capture-cues[${index}]`),
     ),
     redaction: redactionSamples(dir),
+    multilingualPrompts: translations(readFixture(dir, "multilingual.json"), "multilingual").map(
+      ({ text, ...rest }) => ({ ...rest, prompt: text }),
+    ),
+    multilingualCues: translations(
+      readFixture(dir, "capture-cues-multilingual.json"),
+      "capture-cues-multilingual",
+    ),
   };
 }
 
@@ -761,6 +819,19 @@ function redactionProblems(fixtures: Fixtures): string[] {
   ];
 }
 
+function translationProblems(fixtures: Fixtures): string[] {
+  const promptIds = new Set(idsOf([...fixtures.positives, ...fixtures.negatives]));
+  const humanCueIds = new Set(idsOf(fixtures.cues.filter((cue) => cue.origin === "human")));
+  return [
+    ...fixtures.multilingualPrompts
+      .filter((item) => !promptIds.has(item.source))
+      .map((item) => `${item.id}: no labelled prompt ${item.source}`),
+    ...fixtures.multilingualCues
+      .filter((item) => !humanCueIds.has(item.source))
+      .map((item) => `${item.id}: no human cue ${item.source}`),
+  ];
+}
+
 export function referenceProblems(fixtures: Fixtures): string[] {
   const keys = new Set(fixtures.corpus.projects.map((project) => project.key));
   const memories = fixtures.corpus.memories;
@@ -786,6 +857,7 @@ export function referenceProblems(fixtures: Fixtures): string[] {
     ...contradictionProblems(fixtures, keys),
     ...cueProblems(fixtures),
     ...redactionProblems(fixtures),
+    ...translationProblems(fixtures),
   ];
 }
 

@@ -31,6 +31,8 @@ import {
   type Split,
   type SupersessionCase,
   sizeProblems,
+  TRANSLATION_LANGS,
+  type TranslationLang,
 } from "./fixtures";
 import {
   type ContextDelivery,
@@ -228,9 +230,13 @@ interface Observation {
   readonly run: HookRun;
 }
 
+type CaseLang = Lang | TranslationLang;
+
+const MULTILINGUAL_LANGS: readonly CaseLang[] = ["en", ...TRANSLATION_LANGS];
+
 interface CaseLabels {
   readonly split: Split | PretoolSplit | null;
-  readonly lang: Lang | null;
+  readonly lang: CaseLang | null;
   readonly category: string | null;
   readonly gold: readonly string[];
 }
@@ -655,7 +661,74 @@ interface RecallObservation {
   readonly observation: Observation;
 }
 
-function recallMetrics(observed: readonly RecallObservation[]): Record<string, MetricEntry> {
+function recallCases(fixtures: Fixtures): RecallCase[] {
+  return [
+    ...fixtures.positives.map((item) => ({ ...item, category: "positive", positive: true })),
+    ...fixtures.negatives.map((item) => ({ ...item, positive: false })),
+  ];
+}
+
+function translatedRecallCases(fixtures: Fixtures): RecallCase[] {
+  const sources = new Map(recallCases(fixtures).map((item) => [item.id, item]));
+  const sourceOf = (id: string): RecallCase => {
+    const source = sources.get(id);
+    if (source === undefined) {
+      throw new Error(`translation names unknown prompt ${id}`);
+    }
+    return source;
+  };
+  const sourceIds = [...new Set(fixtures.multilingualPrompts.map((item) => item.source))];
+  return [
+    ...sourceIds.map(sourceOf),
+    ...fixtures.multilingualPrompts.map((item) => ({
+      ...sourceOf(item.source),
+      id: item.id,
+      lang: item.lang,
+      prompt: item.prompt,
+    })),
+  ];
+}
+
+async function runRecallCases(
+  state: RunState,
+  corpus: StoredWorld,
+  suite: string,
+  cases: readonly RecallCase[],
+): Promise<RecallObservation[]> {
+  const observed = await mapPool(cases, HOOK_POOL_SIZE, async (item) => ({
+    item,
+    observation: await observe(
+      state,
+      corpus.world,
+      corpus.owners,
+      promptInvocation(projectDirs(corpus.world, item.project).root, item.prompt),
+    ),
+  }));
+  appendRecords(
+    observed.map(({ item, observation }) => {
+      const injected = observation.injected;
+      const scored = item.positive
+        ? {
+            recall_at_5: recallAtK(injected, item.gold, RANK_CUTOFF),
+            ndcg_at_5: ndcgAtK(injected, item.gold, RANK_CUTOFF),
+            gold_hit: goldHit(injected, item.gold),
+            precision: precisionOf(injected, item.gold),
+          }
+        : {};
+      return hookCaseRecord(state, suite, item.id, item, observation, {
+        project: item.project,
+        rows: injected.length,
+        ...scored,
+      });
+    }),
+  );
+  return observed;
+}
+
+function recallMetrics(
+  observed: readonly RecallObservation[],
+  langs: readonly CaseLang[],
+): Record<string, MetricEntry> {
   const positives = observed.filter(({ item }) => item.positive);
   const negatives = observed.filter(({ item }) => !item.positive);
   const summaryOf = (subset: readonly RecallObservation[]) =>
@@ -672,7 +745,7 @@ function recallMetrics(observed: readonly RecallObservation[]): Record<string, M
   return {
     positive_gold_hit_rate: hits(positives),
     ...Object.fromEntries(
-      LANGS.map((lang) => [
+      langs.map((lang) => [
         `positive_gold_hit_rate_${lang}`,
         hits(positives.filter(({ item }) => item.lang === lang)),
       ]),
@@ -700,7 +773,7 @@ function recallMetrics(observed: readonly RecallObservation[]): Record<string, M
       ]),
     ),
     ...Object.fromEntries(
-      LANGS.flatMap((lang) => {
+      langs.flatMap((lang) => {
         const inLanguage = observed.filter(({ item }) => item.lang === lang);
         return [
           [`precision_all_injected_${lang}`, ratioMetric(summaryOf(inLanguage).precisionAll)],
@@ -723,10 +796,49 @@ function deliveredCue(text: string): DetectedCue | undefined {
   return lines.includes(CORRECTION_CUE_LINE) ? "correction" : undefined;
 }
 
+type LabelledCue = Omit<CaptureCue, "lang"> & { readonly lang: CaseLang };
+
 interface CueObservation {
-  readonly cue: CaptureCue;
+  readonly cue: LabelledCue;
   readonly detected: DetectedCue | undefined;
   readonly observation: Observation;
+}
+
+function translatedCues(fixtures: Fixtures): LabelledCue[] {
+  const sources = new Map(fixtures.cues.map((cue) => [cue.id, cue]));
+  return fixtures.multilingualCues.map((item) => {
+    const source = sources.get(item.source);
+    if (source === undefined) {
+      throw new Error(`translation names unknown cue ${item.source}`);
+    }
+    return { ...source, id: item.id, lang: item.lang, text: item.text };
+  });
+}
+
+async function runCueCases(
+  state: RunState,
+  suite: string,
+  cues: readonly LabelledCue[],
+): Promise<CueObservation[]> {
+  const world = await newWorld(state, [CAPTURE_PROJECT], testModelCacheDir);
+  const root = projectDirs(world, CAPTURE_PROJECT).root;
+  const observed: CueObservation[] = await mapPool(cues, HOOK_POOL_SIZE, async (cue) => {
+    const observation = await observe(state, world, new Map(), promptInvocation(root, cue.text));
+    return { cue, detected: deliveredCue(observation.delivery.text), observation };
+  });
+  appendRecords(
+    observed.map(({ cue, detected, observation }) =>
+      hookCaseRecord(
+        state,
+        suite,
+        cue.id,
+        { split: null, lang: cue.lang, category: `${cue.origin}:${cue.label}`, gold: [] },
+        observation,
+        { origin: cue.origin, label: cue.label, detected: detected ?? null },
+      ),
+    ),
+  );
+  return observed;
 }
 
 function cueLabelMetrics(
@@ -757,7 +869,10 @@ function cueLabelMetrics(
   );
 }
 
-function cueMetrics(observed: readonly CueObservation[]): Record<string, MetricEntry> {
+function cueMetrics(
+  observed: readonly CueObservation[],
+  langs: readonly CaseLang[],
+): Record<string, MetricEntry> {
   const human = observed.filter(({ cue }) => cue.origin === "human");
   const harness = observed.filter(({ cue }) => cue.origin === "harness");
   const anyCue = ({ detected }: CueObservation) => detected !== undefined;
@@ -771,7 +886,7 @@ function cueMetrics(observed: readonly CueObservation[]): Record<string, MetricE
   return {
     ...cueLabelMetrics(human, ""),
     ...Object.fromEntries(
-      LANGS.flatMap((lang) =>
+      langs.flatMap((lang) =>
         Object.entries(
           cueLabelMetrics(
             human.filter(({ cue }) => cue.lang === lang),
@@ -791,7 +906,7 @@ function cueMetrics(observed: readonly CueObservation[]): Record<string, MetricE
     ),
     neutral_false_cue_rate: neutralRate(human),
     ...Object.fromEntries(
-      LANGS.map((lang) => [
+      langs.map((lang) => [
         `neutral_false_cue_rate_${lang}`,
         neutralRate(human.filter(({ cue }) => cue.lang === lang)),
       ]),
@@ -922,58 +1037,34 @@ describe("memory evaluation at the host boundary", () => {
 
   it("recall: UserPromptSubmit on labelled positive and negative prompts", async () => {
     const { corpus } = requireWorlds(state);
-    const cases: RecallCase[] = sampleEvenly(
-      [
-        ...state.fixtures.positives.map((item) => ({
-          ...item,
-          category: "positive",
-          positive: true,
-        })),
-        ...state.fixtures.negatives.map((item) => ({ ...item, positive: false })),
-      ],
-      state.sample,
-    );
-    const observed = await mapPool(cases, HOOK_POOL_SIZE, async (item) => ({
-      item,
-      observation: await observe(
-        state,
-        corpus.world,
-        corpus.owners,
-        promptInvocation(projectDirs(corpus.world, item.project).root, item.prompt),
-      ),
-    }));
-    const records = observed.map(({ item, observation }) => {
-      const injected = observation.injected;
-      const scored = item.positive
-        ? {
-            recall_at_5: recallAtK(injected, item.gold, RANK_CUTOFF),
-            ndcg_at_5: ndcgAtK(injected, item.gold, RANK_CUTOFF),
-            gold_hit: goldHit(injected, item.gold),
-            precision: precisionOf(injected, item.gold),
-          }
-        : {};
-      return hookCaseRecord(state, "recall", item.id, item, observation, {
-        project: item.project,
-        rows: injected.length,
-        ...scored,
-      });
-    });
-    appendRecords(records);
+    const cases = sampleEvenly(recallCases(state.fixtures), state.sample);
+    const observed = await runRecallCases(state, corpus, "recall", cases);
     for (const { item, observation } of observed.filter(({ item }) => item.positive)) {
       state.rootInjectedByPositive.set(item.id, observation.injected);
     }
     writeAggregate(state, "recall", {
-      ...recallMetrics(observed),
+      ...recallMetrics(observed, LANGS),
       ...observationDistributions(observed.map(({ observation }) => observation)),
     });
     for (const split of SPLITS) {
       writeAggregate(
         state,
         `recall_${split}`,
-        recallMetrics(observed.filter(({ item }) => item.split === split)),
+        recallMetrics(
+          observed.filter(({ item }) => item.split === split),
+          LANGS,
+        ),
       );
     }
-    expect(records).toHaveLength(cases.length);
+    expect(observed).toHaveLength(cases.length);
+  });
+
+  it("recall_multilingual: held-out translations of labelled prompts beside their English sources", async () => {
+    const { corpus } = requireWorlds(state);
+    const cases = sampleEvenly(translatedRecallCases(state.fixtures), state.sample);
+    const observed = await runRecallCases(state, corpus, "recall_multilingual", cases);
+    writeAggregate(state, "recall_multilingual", recallMetrics(observed, MULTILINGUAL_LANGS));
+    expect(observed).toHaveLength(cases.length);
   });
 
   it("session_dedup: the same confirmation positive prompt twice in one session", async () => {
@@ -1717,31 +1808,21 @@ describe("memory evaluation at the host boundary", () => {
   });
 
   it("capture_cues: every labelled cue as a UserPromptSubmit, typed by the user or by the harness", async () => {
-    const world = await newWorld(state, [CAPTURE_PROJECT], testModelCacheDir);
-    const root = projectDirs(world, CAPTURE_PROJECT).root;
     const cues = sampleEvenly(state.fixtures.cues, state.sample);
-    const observed: CueObservation[] = await mapPool(cues, HOOK_POOL_SIZE, async (cue) => {
-      const observation = await observe(state, world, new Map(), promptInvocation(root, cue.text));
-      return { cue, detected: deliveredCue(observation.delivery.text), observation };
-    });
-    appendRecords(
-      observed.map(({ cue, detected, observation }) =>
-        hookCaseRecord(
-          state,
-          "capture_cues",
-          cue.id,
-          { split: null, lang: cue.lang, category: `${cue.origin}:${cue.label}`, gold: [] },
-          observation,
-          { origin: cue.origin, label: cue.label, detected: detected ?? null },
-        ),
-      ),
-    );
-    writeAggregate(state, "capture_cues", cueMetrics(observed));
+    const observed = await runCueCases(state, "capture_cues", cues);
+    writeAggregate(state, "capture_cues", cueMetrics(observed, LANGS));
     expect(
       observed
         .filter(({ cue, detected }) => cue.origin === "harness" && detected !== undefined)
         .map(({ cue }) => cue.id),
     ).toEqual([]);
+  });
+
+  it("capture_cues_multilingual: held-out translations of the human cues", async () => {
+    const cues = sampleEvenly(translatedCues(state.fixtures), state.sample);
+    const observed = await runCueCases(state, "capture_cues_multilingual", cues);
+    writeAggregate(state, "capture_cues_multilingual", cueMetrics(observed, TRANSLATION_LANGS));
+    expect(observed).toHaveLength(cues.length);
   });
 
   it("checkpoint: corrections, receipts, resolutions and stop_hook_active at the host boundary", async () => {

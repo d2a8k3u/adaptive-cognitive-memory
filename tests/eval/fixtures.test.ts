@@ -49,6 +49,7 @@ function memory(id: string, project: string | undefined): FixtureMemory {
     value_text: id,
     keywords: id,
     anchors: [],
+    questions: [],
   };
 }
 
@@ -80,6 +81,8 @@ function validFixtures(): Fixtures {
     contradictions: [],
     cues: [],
     redaction: [],
+    multilingualPrompts: [],
+    multilingualCues: [],
   };
 }
 
@@ -177,6 +180,29 @@ describe("referenceProblems", () => {
       expect.stringMatching(/dx-anchored.*must not carry anchors/),
       expect.stringMatching(/dx-sharing.*shares conflict key test\.m2/),
       expect.stringMatching(/pos-m1-2.*gold names distractor dx-gold/),
+    ]);
+  });
+
+  it("reports translations whose source is not a labelled prompt or a human cue", () => {
+    const base = validFixtures();
+    const fixtures: Fixtures = {
+      ...base,
+      cues: [
+        { id: "cue-1", lang: "en", origin: "human", label: "correction", text: "No, use pnpm." },
+        { id: "cue-2", lang: "en", origin: "harness", label: "neutral", text: "<agent-message>" },
+      ],
+      multilingualPrompts: [
+        { id: "pos-m1-1#de", source: "pos-m1-1", lang: "de", prompt: "Frage" },
+        { id: "pos-gone-1#ja", source: "pos-gone-1", lang: "ja", prompt: "質問" },
+      ],
+      multilingualCues: [
+        { id: "cue-1#es", source: "cue-1", lang: "es", text: "No, usa pnpm." },
+        { id: "cue-2#pl", source: "cue-2", lang: "pl", text: "<agent-message>" },
+      ],
+    };
+    expect(referenceProblems(fixtures)).toEqual([
+      expect.stringMatching(/pos-gone-1#ja.*no labelled prompt pos-gone-1/),
+      expect.stringMatching(/cue-2#pl.*no human cue cue-2/),
     ]);
   });
 

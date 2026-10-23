@@ -78,6 +78,7 @@ export interface StoreArguments {
   readonly value_text: string;
   readonly keywords: string;
   readonly anchors: readonly string[];
+  readonly questions?: readonly string[];
 }
 
 export type PhaseOneStatus = "written" | typeof NEEDS_RESOLUTION;

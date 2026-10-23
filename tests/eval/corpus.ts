@@ -41,6 +41,7 @@ export function storeArguments(memory: FixtureMemory): StoreArguments {
     value_text: memory.value_text,
     keywords: memory.keywords,
     anchors: memory.anchors,
+    questions: memory.questions,
   };
 }
 
