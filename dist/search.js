@@ -24,6 +24,7 @@ exports.TICKET_ROWS_MAX = 3;
 const RRF_K = 60;
 const FTS_QUERY_MAX_TERMS = 32;
 const KNN_LIMIT = 10;
+const QUESTION_KNN_LIMIT = 40;
 const FTS_HYBRID_LIMIT = 10;
 const FTS_CANDIDATE_LIMIT = 20;
 const ACTIVE_STATE = "active";
@@ -151,12 +152,12 @@ async function promptCandidates(source, request) {
     }
     const degraded = environment ?? embedded?.degraded;
     const vector = embedded?.vector;
-    const cosines = new Map(vector === undefined
+    const cosines = closestCosines(vector === undefined
         ? []
-        : ownPartitionKnn(source.db, vector, request.projectId).map((hit) => [
-            hit.id,
-            1 - hit.distance,
-        ]));
+        : [
+            ...ownPartitionKnn(source.db, vector, request.projectId),
+            ...ownPartitionQuestionKnn(source.db, vector, request.projectId),
+        ]);
     const tokens = new Set(request.tokens);
     const candidates = memoriesByIds(source.db, [...cosines.keys(), ...ranks.keys()], request.now).map((memory) => ({
         ...recalledMemory(memory),
@@ -194,7 +195,7 @@ function memoryKeys(memory) {
     return {
         conflictKey: memory.conflictKey,
         keywords: memory.keywords,
-        anchors: (0, keys_1.parseStoredAnchors)(memory.id, memory.anchors),
+        anchors: (0, keys_1.parseStoredList)(memory.id, "anchors", memory.anchors),
     };
 }
 function memoriesByIds(db, ids, now) {
@@ -238,6 +239,26 @@ function ownPartitionKnn(db, vector, projectId) {
         ...knnHits(db, vector, { scope: "user" }),
         ...knnHits(db, vector, { scope: "project", projectId }),
     ];
+}
+function ownPartitionQuestionKnn(db, vector, projectId) {
+    const nearest = (partition, params) => db
+        .prepare(`SELECT memory_id AS id, distance FROM questions_vec
+         WHERE state = ? AND ${partition} AND embedding MATCH ? AND k = ?`)
+        .all(ACTIVE_STATE, ...params, JSON.stringify(Array.from(vector)), QUESTION_KNN_LIMIT);
+    return [
+        ...nearest("scope = 'user'", []),
+        ...nearest("scope = 'project' AND project_id = ?", [projectId]),
+    ];
+}
+function closestCosines(hits) {
+    const closest = new Map();
+    for (const hit of hits) {
+        const cosine = 1 - hit.distance;
+        if (cosine > (closest.get(hit.id) ?? Number.NEGATIVE_INFINITY)) {
+            closest.set(hit.id, cosine);
+        }
+    }
+    return closest;
 }
 function ftsRecall(db, options, now) {
     const match = ftsMatchExpression(options.query);

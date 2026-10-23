@@ -5,7 +5,7 @@ import { VISIBLE_TO_PROJECT } from "./db/visibility";
 import { DeadlineExceededError, embedQuery, modelCached, withDeadline } from "./embeddings";
 import type { PromptCandidate, RecalledMemory, ToolCandidate } from "./gate";
 import { minLineTokens } from "./inject";
-import { anchorHit, keyHit, type MemoryKeys, parseStoredAnchors, type ToolLookup } from "./keys";
+import { anchorHit, keyHit, type MemoryKeys, parseStoredList, type ToolLookup } from "./keys";
 import type { Epistemic, MemoryKind, MemoryScope, MemoryType } from "./policy";
 import { contentTokens } from "./prompt";
 import { PINNED_KINDS, type PinnedCandidate } from "./session";
@@ -94,6 +94,7 @@ export const TICKET_ROWS_MAX = 3;
 const RRF_K = 60;
 const FTS_QUERY_MAX_TERMS = 32;
 const KNN_LIMIT = 10;
+const QUESTION_KNN_LIMIT = 40;
 const FTS_HYBRID_LIMIT = 10;
 const FTS_CANDIDATE_LIMIT = 20;
 const ACTIVE_STATE = "active";
@@ -297,13 +298,13 @@ export async function promptCandidates(
   }
   const degraded = environment ?? embedded?.degraded;
   const vector = embedded?.vector;
-  const cosines = new Map(
+  const cosines = closestCosines(
     vector === undefined
       ? []
-      : ownPartitionKnn(source.db, vector, request.projectId).map((hit) => [
-          hit.id,
-          1 - hit.distance,
-        ]),
+      : [
+          ...ownPartitionKnn(source.db, vector, request.projectId),
+          ...ownPartitionQuestionKnn(source.db, vector, request.projectId),
+        ],
   );
   const tokens = new Set(request.tokens);
   const candidates = memoriesByIds(
@@ -349,7 +350,7 @@ function memoryKeys(memory: StoredMemory): MemoryKeys {
   return {
     conflictKey: memory.conflictKey,
     keywords: memory.keywords,
-    anchors: parseStoredAnchors(memory.id, memory.anchors),
+    anchors: parseStoredList(memory.id, "anchors", memory.anchors),
   };
 }
 
@@ -408,6 +409,36 @@ function ownPartitionKnn(db: Db, vector: Float32Array, projectId: string): KnnHi
     ...knnHits(db, vector, { scope: "user" }),
     ...knnHits(db, vector, { scope: "project", projectId }),
   ];
+}
+
+function ownPartitionQuestionKnn(db: Db, vector: Float32Array, projectId: string): KnnHit[] {
+  const nearest = (partition: string, params: readonly unknown[]) =>
+    db
+      .prepare(
+        `SELECT memory_id AS id, distance FROM questions_vec
+         WHERE state = ? AND ${partition} AND embedding MATCH ? AND k = ?`,
+      )
+      .all(
+        ACTIVE_STATE,
+        ...params,
+        JSON.stringify(Array.from(vector)),
+        QUESTION_KNN_LIMIT,
+      ) as KnnHit[];
+  return [
+    ...nearest("scope = 'user'", []),
+    ...nearest("scope = 'project' AND project_id = ?", [projectId]),
+  ];
+}
+
+function closestCosines(hits: readonly KnnHit[]): Map<string, number> {
+  const closest = new Map<string, number>();
+  for (const hit of hits) {
+    const cosine = 1 - hit.distance;
+    if (cosine > (closest.get(hit.id) ?? Number.NEGATIVE_INFINITY)) {
+      closest.set(hit.id, cosine);
+    }
+  }
+  return closest;
 }
 
 function ftsRecall(db: Db, options: RecallOptions, now: string): RecallRow[] {

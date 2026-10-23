@@ -144,7 +144,7 @@ describe("runDoctor", () => {
     expect(checkByName(report, "auto_memory").fix).toContain(
       '"autoMemoryEnabled": false in .claude/settings.json',
     );
-    expect(checkByName(report, "calibration").detail).toContain(CALIBRATION_RUN.sweepRunId);
+    expect(checkByName(report, "calibration").detail).toContain(CALIBRATION_RUN.runId);
     expect(checkByName(report, "calibration").detail).toContain(CALIBRATED_EMBEDDING.modelId);
   });
 

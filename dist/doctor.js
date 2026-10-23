@@ -187,7 +187,7 @@ function checkFts(opened, openDetail) {
     });
 }
 function checkCalibration() {
-    return rated("calibration", passOrFail(true, `gate calibrated for ${calibration_1.CALIBRATED_EMBEDDING.modelId} ${calibration_1.CALIBRATED_EMBEDDING.dtype} by sweep ${calibration_1.CALIBRATION_RUN.sweepRunId} (${calibration_1.CALIBRATION_RUN.date})`), "");
+    return rated("calibration", passOrFail(true, `gate calibrated for ${calibration_1.CALIBRATED_EMBEDDING.modelId} ${calibration_1.CALIBRATED_EMBEDDING.dtype} by eval run ${calibration_1.CALIBRATION_RUN.runId} (${calibration_1.CALIBRATION_RUN.date})`), "");
 }
 function autoMemoryCheck(autoMemory) {
     const decided = `as far as the readable settings show (decided by ${autoMemory.decidedBy})`;

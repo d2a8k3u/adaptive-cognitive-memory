@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EMBED_DEADLINE_MS, EMBED_DIM, loadConfig } from "../src/cfg";
 import { type Db, type OpenedDb, openDatabase } from "../src/db/database";
 import { lastEmbeddingTimeout } from "../src/db/health";
-import { embedPassage } from "../src/embeddings";
+import { embedPassage, embedQuestions } from "../src/embeddings";
 import type { MemoryKind, MemoryScope, MemoryType } from "../src/policy";
 import {
   anyTermMatchExpression,
@@ -81,6 +81,7 @@ interface SeedMemory {
   state?: "hypothesis" | "active" | "revoked";
   invalidAt?: string;
   vector?: boolean;
+  questions?: readonly string[];
 }
 
 function tempConfig() {
@@ -130,6 +131,29 @@ async function openSeeded(rows: readonly SeedMemory[]): Promise<OpenedDb> {
         row.id,
         JSON.stringify(Array.from(vectors[index]!)),
         row.type,
+        row.scope,
+        row.projectId,
+        row.state ?? "active",
+      );
+    });
+  }
+  const questioned = rows.flatMap((row) =>
+    (row.questions ?? []).map((question, index) => ({ row, question, index })),
+  );
+  if (questioned.length > 0) {
+    const vectors = await embedQuestions(
+      questioned.map(({ question }) => question),
+      testModelCacheDir,
+    );
+    const insertQuestion = opened.db.prepare(
+      `INSERT INTO questions_vec (question_id, embedding, memory_id, scope, project_id, state)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    questioned.forEach(({ row, index }, position) => {
+      insertQuestion.run(
+        `${row.id}:${index}`,
+        JSON.stringify(Array.from(vectors[position]!)),
+        row.id,
         row.scope,
         row.projectId,
         row.state ?? "active",
@@ -531,6 +555,46 @@ describe("promptCandidates", () => {
       ]);
       expect(found.neighbourhood).toHaveLength(3);
       expect([...found.neighbourhood].sort(ascending)).toEqual(visibleCosines.sort(ascending));
+    } finally {
+      opened.db.close();
+    }
+  });
+
+  it("scores a memory by its closest recall question, filtering questions to the visible, active partition", async () => {
+    const prompt = "how do I undo a release";
+    const questionedRow = (id: string, projectId: string, state?: "revoked"): SeedMemory => ({
+      id,
+      projectId,
+      scope: "project",
+      type: "procedural",
+      title: "release script flags",
+      abstract: "the release script takes an environment flag",
+      importance: 0.5,
+      vector: true,
+      questions: [prompt],
+      ...(state === undefined ? {} : { state }),
+    });
+    const opened = await openSeeded([
+      questionedRow("q-own", PROJECT_B),
+      questionedRow("q-foreign", PROJECT_A),
+      questionedRow("q-revoked", PROJECT_B, "revoked"),
+    ]);
+    try {
+      const found = await promptCandidates(opened, {
+        projectId: PROJECT_B,
+        modelCacheDir: testModelCacheDir,
+        prompt,
+        tokens: [],
+        now: NOW,
+      });
+
+      expect(
+        found.candidates.map((candidate) => ({
+          id: candidate.id,
+          cosine: Number(candidate.cosine?.toFixed(3)),
+        })),
+      ).toEqual([{ id: "q-own", cosine: 1 }]);
+      expect(found.neighbourhood.map((cosine) => Number(cosine.toFixed(3)))).toEqual([1]);
     } finally {
       opened.db.close();
     }

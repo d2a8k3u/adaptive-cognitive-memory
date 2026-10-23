@@ -270,7 +270,7 @@ function checkCalibration(): DoctorCheck {
     "calibration",
     passOrFail(
       true,
-      `gate calibrated for ${CALIBRATED_EMBEDDING.modelId} ${CALIBRATED_EMBEDDING.dtype} by sweep ${CALIBRATION_RUN.sweepRunId} (${CALIBRATION_RUN.date})`,
+      `gate calibrated for ${CALIBRATED_EMBEDDING.modelId} ${CALIBRATED_EMBEDDING.dtype} by eval run ${CALIBRATION_RUN.runId} (${CALIBRATION_RUN.date})`,
     ),
     "",
   );

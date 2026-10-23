@@ -10,7 +10,7 @@
     "build": "tsc",
     "check": "tsc --noEmit && tsc -p tsconfig.test.json && biome check --error-on-warnings . && vitest run",
     "eval": "tsc && vitest run --config vitest.eval.config.ts run.eval",
-    "eval:sweep": "tsc && vitest run --config vitest.eval.config.ts sweep.eval",
+    "eval:fit": "tsc && vitest run --config vitest.eval.config.ts fit.eval",
     "test": "vitest run"
   },
   "dependencies": {

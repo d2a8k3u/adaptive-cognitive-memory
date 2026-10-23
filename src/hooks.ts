@@ -37,7 +37,7 @@ import { collectLocationFacts, type LocationFacts, projectIdentity, resolveProje
 import { type Injection, renderInjection } from "./inject";
 import { commandHead, type ToolLookup, toolLookup } from "./keys";
 import { sessionNotice, storageOutage } from "./outage";
-import { admitPrompt, promptLanguage } from "./prompt";
+import { admitPrompt } from "./prompt";
 import { daysBefore, RECALL_EVENTS_KEPT, SESSION_HISTORY_RETENTION_DAYS } from "./retention";
 import type { DegradedFlags } from "./search";
 import {
@@ -424,7 +424,7 @@ async function promptRecall(
   const rows = selectPromptMemories(
     found.candidates,
     PROMPT_GATE,
-    { language: promptLanguage(prompt), neighbourhood: found.neighbourhood },
+    { neighbourhood: found.neighbourhood },
     alreadyInjected(opened, scope),
   );
   return injectAndRecord(opened, scope, {

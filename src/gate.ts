@@ -1,9 +1,16 @@
 import type { Epistemic, MemoryKind, MemoryScope } from "./policy";
-import type { PromptLanguage } from "./prompt";
 
-export const KEY_MODES = ["disjunction", "conjunction", "ignored"] as const;
-export type KeyMode = (typeof KEY_MODES)[number];
 export const NEIGHBOURHOOD_SIZE = 10;
+export const RELEVANCE_FEATURES = [
+  "cosine",
+  "gapToTop",
+  "gapToNeighbourhood",
+  "lexical",
+  "top",
+  "keyHit",
+] as const;
+export type RelevanceFeature = (typeof RELEVANCE_FEATURES)[number];
+export type RelevanceFeatures = Readonly<Record<RelevanceFeature, number>>;
 
 export interface RecalledMemory {
   readonly id: string;
@@ -20,23 +27,15 @@ export interface PromptCandidate extends RecalledMemory {
   readonly keyHit: boolean;
 }
 
-export interface SimilarityThresholds {
-  readonly floor: number;
-  readonly floorOpen: number;
-  readonly margin: number;
-  readonly fallbackTau: number;
-  readonly fallbackTauOpen: number;
-  readonly tauKey: number;
-}
-
 export interface PromptGate {
-  readonly thresholds: Readonly<Record<PromptLanguage, SimilarityThresholds>>;
-  readonly keyMode: KeyMode;
+  readonly bias: number;
+  readonly weights: RelevanceFeatures;
+  readonly threshold: number;
   readonly maxRows: number;
+  readonly neighbourhoodPrior: number;
 }
 
 export interface PromptContext {
-  readonly language: PromptLanguage;
   readonly neighbourhood: readonly number[];
 }
 
@@ -50,92 +49,57 @@ export interface ToolGate {
   readonly keywordSignal: boolean;
 }
 
-const FAIL_OPEN_KINDS: ReadonlySet<MemoryKind> = new Set(["constraint", "preference"]);
+interface ScoredCandidate {
+  readonly candidate: PromptCandidate;
+  readonly score: number;
+}
 
 function descending(a: number, b: number): number {
   return b - a;
 }
 
-export function neighbourhoodReference(partitionCosines: readonly number[]): number | undefined {
-  if (partitionCosines.length < NEIGHBOURHOOD_SIZE) {
+export function nearestMean(cosines: readonly number[], neighbourhoodPrior: number): number {
+  const nearest = [...cosines].sort(descending).slice(0, NEIGHBOURHOOD_SIZE);
+  const missing = NEIGHBOURHOOD_SIZE - nearest.length;
+  return (
+    (nearest.reduce((sum, cosine) => sum + cosine, 0) + missing * neighbourhoodPrior) /
+    NEIGHBOURHOOD_SIZE
+  );
+}
+
+function bm25Strength(ftsRank: number | undefined): number {
+  return ftsRank === undefined ? 0 : Math.max(0, -ftsRank);
+}
+
+export function relevanceFeatures(
+  candidate: PromptCandidate,
+  context: PromptContext,
+  neighbourhoodPrior: number,
+): RelevanceFeatures | undefined {
+  const { cosine } = candidate;
+  if (cosine === undefined) {
     return undefined;
   }
-  const nearest = [...partitionCosines].sort(descending).slice(0, NEIGHBOURHOOD_SIZE);
-  return nearest.reduce((sum, cosine) => sum + cosine, 0) / NEIGHBOURHOOD_SIZE;
+  const top = Math.max(cosine, ...context.neighbourhood);
+  return {
+    cosine,
+    gapToTop: cosine - top,
+    gapToNeighbourhood: cosine - nearestMean(context.neighbourhood, neighbourhoodPrior),
+    lexical: Math.log1p(bm25Strength(candidate.ftsRank)),
+    top: cosine === top ? 1 : 0,
+    keyHit: candidate.keyHit ? 1 : 0,
+  };
 }
 
-function floorFor(kind: MemoryKind, thresholds: SimilarityThresholds): number {
-  return FAIL_OPEN_KINDS.has(kind) ? thresholds.floorOpen : thresholds.floor;
-}
-
-function fallbackTauFor(kind: MemoryKind, thresholds: SimilarityThresholds): number {
-  return FAIL_OPEN_KINDS.has(kind) ? thresholds.fallbackTauOpen : thresholds.fallbackTau;
-}
-
-function reachesSimilarity(
-  candidate: PromptCandidate,
-  thresholds: SimilarityThresholds,
-  reference: number | undefined,
-): boolean {
-  const { cosine, kind } = candidate;
-  if (cosine === undefined) {
-    return false;
-  }
-  if (reference === undefined) {
-    return cosine >= fallbackTauFor(kind, thresholds);
-  }
-  return cosine >= floorFor(kind, thresholds) && cosine - reference >= thresholds.margin;
-}
-
-function reaches(cosine: number | undefined, threshold: number): boolean {
-  return cosine !== undefined && cosine >= threshold;
+export function relevanceScore(features: RelevanceFeatures, gate: PromptGate): number {
+  return RELEVANCE_FEATURES.reduce(
+    (score, feature) => score + gate.weights[feature] * features[feature],
+    gate.bias,
+  );
 }
 
 function requiresKeyHit(memory: RecalledMemory): boolean {
   return memory.kind === "belief" || memory.epistemic === "unverified";
-}
-
-function admittedByKey(
-  candidate: PromptCandidate,
-  keyMode: KeyMode,
-  thresholds: SimilarityThresholds,
-): boolean {
-  switch (keyMode) {
-    case "disjunction":
-      return candidate.keyHit;
-    case "conjunction":
-      return candidate.keyHit && reaches(candidate.cosine, thresholds.tauKey);
-    case "ignored":
-      return false;
-  }
-}
-
-function passesPromptGate(
-  candidate: PromptCandidate,
-  keyMode: KeyMode,
-  thresholds: SimilarityThresholds,
-  reference: number | undefined,
-): boolean {
-  if (requiresKeyHit(candidate) && !candidate.keyHit) {
-    return false;
-  }
-  return (
-    reachesSimilarity(candidate, thresholds, reference) ||
-    admittedByKey(candidate, keyMode, thresholds)
-  );
-}
-
-function descendingDefinedFirst(a: number | undefined, b: number | undefined): number {
-  if (a === b) {
-    return 0;
-  }
-  if (a === undefined) {
-    return 1;
-  }
-  if (b === undefined) {
-    return -1;
-  }
-  return b - a;
 }
 
 function byId(a: RecalledMemory, b: RecalledMemory): number {
@@ -145,17 +109,20 @@ function byId(a: RecalledMemory, b: RecalledMemory): number {
   return a.id < b.id ? -1 : 1;
 }
 
-function bm25Strength(candidate: PromptCandidate): number | undefined {
-  return candidate.ftsRank === undefined ? undefined : -candidate.ftsRank;
-}
-
-function byRelevance(a: PromptCandidate, b: PromptCandidate): number {
-  return (
-    descendingDefinedFirst(a.cosine, b.cosine) ||
-    Number(b.keyHit) - Number(a.keyHit) ||
-    descendingDefinedFirst(bm25Strength(a), bm25Strength(b)) ||
-    byId(a, b)
-  );
+function scored(
+  candidate: PromptCandidate,
+  gate: PromptGate,
+  context: PromptContext,
+): ScoredCandidate[] {
+  if (requiresKeyHit(candidate) && !candidate.keyHit) {
+    return [];
+  }
+  const features = relevanceFeatures(candidate, context, gate.neighbourhoodPrior);
+  if (features === undefined) {
+    return [];
+  }
+  const score = relevanceScore(features, gate);
+  return score >= gate.threshold ? [{ candidate, score }] : [];
 }
 
 export function selectPromptMemories(
@@ -164,16 +131,12 @@ export function selectPromptMemories(
   context: PromptContext,
   alreadyInjected: ReadonlySet<string>,
 ): PromptCandidate[] {
-  const thresholds = gate.thresholds[context.language];
-  const reference = neighbourhoodReference(context.neighbourhood);
   return candidates
-    .filter(
-      (candidate) =>
-        !alreadyInjected.has(candidate.id) &&
-        passesPromptGate(candidate, gate.keyMode, thresholds, reference),
-    )
-    .sort(byRelevance)
-    .slice(0, gate.maxRows);
+    .filter((candidate) => !alreadyInjected.has(candidate.id))
+    .flatMap((candidate) => scored(candidate, gate, context))
+    .sort((a, b) => b.score - a.score || byId(a.candidate, b.candidate))
+    .slice(0, gate.maxRows)
+    .map(({ candidate }) => candidate);
 }
 
 export function passesToolGate(candidate: ToolCandidate, gate: ToolGate): boolean {

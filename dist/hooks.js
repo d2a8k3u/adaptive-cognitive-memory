@@ -261,7 +261,7 @@ async function promptRecall(opened, scope, projectId, prompt) {
         tokens: admission.tokens,
         now: scope.now,
     });
-    const rows = (0, gate_1.selectPromptMemories)(found.candidates, calibration_1.PROMPT_GATE, { language: (0, prompt_1.promptLanguage)(prompt), neighbourhood: found.neighbourhood }, alreadyInjected(opened, scope));
+    const rows = (0, gate_1.selectPromptMemories)(found.candidates, calibration_1.PROMPT_GATE, { neighbourhood: found.neighbourhood }, alreadyInjected(opened, scope));
     return injectAndRecord(opened, scope, {
         event: "UserPromptSubmit",
         rows,

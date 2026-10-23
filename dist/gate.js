@@ -1,73 +1,53 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NEIGHBOURHOOD_SIZE = exports.KEY_MODES = void 0;
-exports.neighbourhoodReference = neighbourhoodReference;
+exports.RELEVANCE_FEATURES = exports.NEIGHBOURHOOD_SIZE = void 0;
+exports.nearestMean = nearestMean;
+exports.relevanceFeatures = relevanceFeatures;
+exports.relevanceScore = relevanceScore;
 exports.selectPromptMemories = selectPromptMemories;
 exports.passesToolGate = passesToolGate;
 exports.selectToolMemories = selectToolMemories;
-exports.KEY_MODES = ["disjunction", "conjunction", "ignored"];
 exports.NEIGHBOURHOOD_SIZE = 10;
-const FAIL_OPEN_KINDS = new Set(["constraint", "preference"]);
+exports.RELEVANCE_FEATURES = [
+    "cosine",
+    "gapToTop",
+    "gapToNeighbourhood",
+    "lexical",
+    "top",
+    "keyHit",
+];
 function descending(a, b) {
     return b - a;
 }
-function neighbourhoodReference(partitionCosines) {
-    if (partitionCosines.length < exports.NEIGHBOURHOOD_SIZE) {
+function nearestMean(cosines, neighbourhoodPrior) {
+    const nearest = [...cosines].sort(descending).slice(0, exports.NEIGHBOURHOOD_SIZE);
+    const missing = exports.NEIGHBOURHOOD_SIZE - nearest.length;
+    return ((nearest.reduce((sum, cosine) => sum + cosine, 0) + missing * neighbourhoodPrior) /
+        exports.NEIGHBOURHOOD_SIZE);
+}
+function bm25Strength(ftsRank) {
+    return ftsRank === undefined ? 0 : Math.max(0, -ftsRank);
+}
+function relevanceFeatures(candidate, context, neighbourhoodPrior) {
+    const { cosine } = candidate;
+    if (cosine === undefined) {
         return undefined;
     }
-    const nearest = [...partitionCosines].sort(descending).slice(0, exports.NEIGHBOURHOOD_SIZE);
-    return nearest.reduce((sum, cosine) => sum + cosine, 0) / exports.NEIGHBOURHOOD_SIZE;
+    const top = Math.max(cosine, ...context.neighbourhood);
+    return {
+        cosine,
+        gapToTop: cosine - top,
+        gapToNeighbourhood: cosine - nearestMean(context.neighbourhood, neighbourhoodPrior),
+        lexical: Math.log1p(bm25Strength(candidate.ftsRank)),
+        top: cosine === top ? 1 : 0,
+        keyHit: candidate.keyHit ? 1 : 0,
+    };
 }
-function floorFor(kind, thresholds) {
-    return FAIL_OPEN_KINDS.has(kind) ? thresholds.floorOpen : thresholds.floor;
-}
-function fallbackTauFor(kind, thresholds) {
-    return FAIL_OPEN_KINDS.has(kind) ? thresholds.fallbackTauOpen : thresholds.fallbackTau;
-}
-function reachesSimilarity(candidate, thresholds, reference) {
-    const { cosine, kind } = candidate;
-    if (cosine === undefined) {
-        return false;
-    }
-    if (reference === undefined) {
-        return cosine >= fallbackTauFor(kind, thresholds);
-    }
-    return cosine >= floorFor(kind, thresholds) && cosine - reference >= thresholds.margin;
-}
-function reaches(cosine, threshold) {
-    return cosine !== undefined && cosine >= threshold;
+function relevanceScore(features, gate) {
+    return exports.RELEVANCE_FEATURES.reduce((score, feature) => score + gate.weights[feature] * features[feature], gate.bias);
 }
 function requiresKeyHit(memory) {
     return memory.kind === "belief" || memory.epistemic === "unverified";
-}
-function admittedByKey(candidate, keyMode, thresholds) {
-    switch (keyMode) {
-        case "disjunction":
-            return candidate.keyHit;
-        case "conjunction":
-            return candidate.keyHit && reaches(candidate.cosine, thresholds.tauKey);
-        case "ignored":
-            return false;
-    }
-}
-function passesPromptGate(candidate, keyMode, thresholds, reference) {
-    if (requiresKeyHit(candidate) && !candidate.keyHit) {
-        return false;
-    }
-    return (reachesSimilarity(candidate, thresholds, reference) ||
-        admittedByKey(candidate, keyMode, thresholds));
-}
-function descendingDefinedFirst(a, b) {
-    if (a === b) {
-        return 0;
-    }
-    if (a === undefined) {
-        return 1;
-    }
-    if (b === undefined) {
-        return -1;
-    }
-    return b - a;
 }
 function byId(a, b) {
     if (a.id === b.id) {
@@ -75,23 +55,24 @@ function byId(a, b) {
     }
     return a.id < b.id ? -1 : 1;
 }
-function bm25Strength(candidate) {
-    return candidate.ftsRank === undefined ? undefined : -candidate.ftsRank;
-}
-function byRelevance(a, b) {
-    return (descendingDefinedFirst(a.cosine, b.cosine) ||
-        Number(b.keyHit) - Number(a.keyHit) ||
-        descendingDefinedFirst(bm25Strength(a), bm25Strength(b)) ||
-        byId(a, b));
+function scored(candidate, gate, context) {
+    if (requiresKeyHit(candidate) && !candidate.keyHit) {
+        return [];
+    }
+    const features = relevanceFeatures(candidate, context, gate.neighbourhoodPrior);
+    if (features === undefined) {
+        return [];
+    }
+    const score = relevanceScore(features, gate);
+    return score >= gate.threshold ? [{ candidate, score }] : [];
 }
 function selectPromptMemories(candidates, gate, context, alreadyInjected) {
-    const thresholds = gate.thresholds[context.language];
-    const reference = neighbourhoodReference(context.neighbourhood);
     return candidates
-        .filter((candidate) => !alreadyInjected.has(candidate.id) &&
-        passesPromptGate(candidate, gate.keyMode, thresholds, reference))
-        .sort(byRelevance)
-        .slice(0, gate.maxRows);
+        .filter((candidate) => !alreadyInjected.has(candidate.id))
+        .flatMap((candidate) => scored(candidate, gate, context))
+        .sort((a, b) => b.score - a.score || byId(a.candidate, b.candidate))
+        .slice(0, gate.maxRows)
+        .map(({ candidate }) => candidate);
 }
 function passesToolGate(candidate, gate) {
     return (gate.kinds.includes(candidate.kind) &&
