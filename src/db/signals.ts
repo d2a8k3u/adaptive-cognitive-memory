@@ -49,7 +49,7 @@ export function closeSessionSignals(
   ).run(at, closedBy, sessionId);
 }
 
-export function openSignal(db: Db, opening: SignalOpening): void {
+function openSignal(db: Db, opening: SignalOpening): void {
   db.prepare(
     "INSERT INTO session_signals (session_id, kind, detail, opened_at) VALUES (?, ?, ?, ?)",
   ).run(opening.sessionId, opening.kind, opening.detail, opening.at);

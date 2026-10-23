@@ -35,8 +35,6 @@ const RECEIPT_TOOL_NAMES = [
 ] as const;
 const POST_TOOL_MATCHER =
   "Bash|mcp__plugin_adaptive-cognitive-memory_memory__memory_(feedback|store|update)";
-const CORRECTION_LINE =
-  "If this message corrects how you work, store the rule and the reason with mcp__plugin_adaptive-cognitive-memory_memory__memory_store before continuing.";
 const ROUTING_LINE =
   "Native auto memory is also on: store durable lessons with mcp__plugin_adaptive-cognitive-memory_memory__memory_store, not in the auto-memory MEMORY.md.";
 
@@ -259,40 +257,10 @@ function bashEvent(
 }
 
 describe("hooks continuous capture", () => {
-  it.each([
-    { lang: "en", prompt: "Don't mock the database in the billing tests", detail: "don't" },
-    { lang: "cs", prompt: "nedělej to", detail: "nedelej" },
-  ])(
-    "adds the store line to a human correction in $lang and opens a correction signal",
-    async ({ prompt, detail }) => {
-      const { env, config } = freshEnv();
-
-      const result = await spawnHook(env, promptEvent("session-cue", prompt));
-
-      expect(result.stderr).toBe("");
-      expect(injectedContext(result, "UserPromptSubmit")).toBe(CORRECTION_LINE);
-      expect(sessionSignals(config, "session-cue")).toEqual([
-        { kind: "correction", detail, closedBy: null },
-      ]);
-    },
-    30_000,
-  );
-
-  it.each([
-    "[Subagent hand-back] Don't mock the database in the billing tests",
-    'Another Claude session sent a message:\n<agent-message from="a1">\nnedělej to\n</agent-message>',
-  ])(
-    "adds nothing for an agent message carrying the same words: %s",
-    async (prompt) => {
-      const { env, config } = freshEnv();
-
-      const result = await spawnHook(env, promptEvent("session-handback", prompt));
-
-      expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
-      expect(sessionSignals(config, "session-handback")).toEqual([]);
-    },
-    30_000,
-  );
+  async function resolveFailingCommand(env: NodeJS.ProcessEnv, sessionId: string): Promise<void> {
+    await spawnHook(env, bashEvent(sessionId, "pytest -q", "failed"));
+    await spawnHook(env, bashEvent(sessionId, "pytest -q", "passed"));
+  }
 
   it("opens one resolution signal when a command that failed passes later in the session", async () => {
     const { env, config } = freshEnv();
@@ -362,7 +330,7 @@ describe("hooks continuous capture", () => {
 
   it("returns the checkpoint at the first ordinary stop only, never while a stop hook continues", async () => {
     const { env, config } = freshEnv();
-    await spawnHook(env, promptEvent("session-stop", "nedělej to"));
+    await resolveFailingCommand(env, "session-stop");
 
     const continuing = await spawnHook(env, stopEvent("session-stop", true));
     const first = await spawnHook(env, stopEvent("session-stop", false));
@@ -371,11 +339,11 @@ describe("hooks continuous capture", () => {
     expect(continuing).toEqual({ code: 0, stdout: "", stderr: "" });
     expect(first.stderr).toBe("");
     expect(injectedContext(first, "Stop")).toBe(
-      'Memory checkpoint: you were corrected about "nedelej" — store the durable lesson under the memory rules with mcp__plugin_adaptive-cognitive-memory_memory__memory_store, or state that there is none, then finish.',
+      "Memory checkpoint: you resolved a failing `pytest` — store the durable lesson under the memory rules with mcp__plugin_adaptive-cognitive-memory_memory__memory_store, or state that there is none, then finish.",
     );
     expect(second).toEqual({ code: 0, stdout: "", stderr: "" });
     expect(sessionSignals(config, "session-stop")).toEqual([
-      { kind: "correction", detail: "nedelej", closedBy: "checkpoint" },
+      { kind: "resolution", detail: "pytest", closedBy: "checkpoint" },
     ]);
   });
 
@@ -383,7 +351,7 @@ describe("hooks continuous capture", () => {
     "closes the open signals on a %s receipt so the stop stays silent",
     async (toolName) => {
       const { env, config } = freshEnv();
-      await spawnHook(env, promptEvent("session-stored", "nedělej to"));
+      await resolveFailingCommand(env, "session-stored");
 
       const receipt = await spawnHook(
         env,
@@ -401,7 +369,7 @@ describe("hooks continuous capture", () => {
       expect(receipt).toEqual({ code: 0, stdout: "", stderr: "" });
       expect(stop).toEqual({ code: 0, stdout: "", stderr: "" });
       expect(sessionSignals(config, "session-stored")).toEqual([
-        { kind: "correction", detail: "nedelej", closedBy: "receipt" },
+        { kind: "resolution", detail: "pytest", closedBy: "receipt" },
       ]);
     },
   );
@@ -830,7 +798,7 @@ describe("hooks auto memory routing", () => {
 });
 
 describe("hooks recall switch", () => {
-  it("injects no memories for a project whose recall is off, while the routing and capture lines stay", async () => {
+  it("injects no memories for a project whose recall is off, while the routing line stays", async () => {
     const { env, config } = freshEnv();
     await seedMemories(config, RECALL_GATED_SEEDS);
     const opened = openDatabase(config);
@@ -857,16 +825,15 @@ describe("hooks recall switch", () => {
         tool_input: { command: "pytest -q" },
       }),
     );
-    const correction = await spawnHook(
+    const prompt = await spawnHook(
       env,
-      promptEvent("session-switch", "Don't release from a feature branch with pytest skipped"),
+      promptEvent("session-switch", "how do we release the billing service with pytest"),
     );
 
     expect(sessionStart.stderr).toBe("");
     expect(injectedContext(sessionStart, "SessionStart")).toBe(ROUTING_LINE);
     expect(preTool).toEqual({ code: 0, stdout: "", stderr: "" });
-    expect(correction.stderr).toBe("");
-    expect(injectedContext(correction, "UserPromptSubmit")).toBe(CORRECTION_LINE);
+    expect(prompt).toEqual({ code: 0, stdout: "", stderr: "" });
     expect(recallEvents(config)).toEqual([]);
   }, 30_000);
 });

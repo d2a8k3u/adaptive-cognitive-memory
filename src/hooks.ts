@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { readAutoMemory } from "./automemory";
 import { ticketId } from "./branch";
 import { FAILURE_GATE, PROMPT_GATE, PROMPT_MIN_WORDS, TOOL_GATE } from "./calibration";
-import { checkpoint, cueLine, detectCue, signalDetail } from "./capture";
+import { checkpoint, signalDetail } from "./capture";
 import { type Config, loadConfig } from "./cfg";
 import type { Db, OpenedDb } from "./db/database";
 import { pruneRecallEvents, type RecallEventName, recordRecallEvent } from "./db/events";
@@ -19,7 +19,6 @@ import { recallEnabled } from "./db/projects";
 import {
   closeSessionSignals,
   closeSignals,
-  openSignal,
   openSignals,
   pruneSessionHistory,
   recordCommandFailure,
@@ -440,21 +439,12 @@ function contextLines(parts: readonly string[]): string {
 }
 
 function promptText(scope: HookScope, prompt: string): Promise<string> {
-  const cue = detectCue(prompt);
   const projectId = resolveProjectId(scope.projectDir);
   return withDatabase(scope.config, async (opened) => {
-    if (cue !== undefined && scope.sessionId !== undefined) {
-      openSignal(opened.db, {
-        sessionId: scope.sessionId,
-        kind: cue.kind,
-        detail: signalDetail(cue.detail),
-        at: scope.now,
-      });
-    }
     const recallOn = recallEnabled(opened.db, projectId);
     const recall = recallOn ? await promptRecall(opened, scope, projectId, prompt) : "";
     updateBadge(opened, scope, "UserPromptSubmit", recallOn);
-    return contextLines([cue === undefined ? "" : cueLine(cue.kind), recall]);
+    return recall;
   });
 }
 

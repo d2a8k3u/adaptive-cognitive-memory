@@ -3,7 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.openSignals = openSignals;
 exports.closeSignals = closeSignals;
 exports.closeSessionSignals = closeSessionSignals;
-exports.openSignal = openSignal;
 exports.pruneSessionHistory = pruneSessionHistory;
 exports.recordCommandFailure = recordCommandFailure;
 exports.resolveCommand = resolveCommand;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Cue, checkpoint, detectCue, type OpenSignal, signalDetail } from "../src/capture";
+import { checkpoint, type OpenSignal, signalDetail } from "../src/capture";
 
 const OPEN_SIGNALS: readonly OpenSignal[] = [
   { id: 11, kind: "correction", detail: "nedelej" },
@@ -74,76 +74,5 @@ describe("signalDetail", () => {
 
     expect(detail).toHaveLength(200);
     expect(detail).not.toContain("hunter2");
-  });
-});
-
-describe("detectCue", () => {
-  it.each<{ prompt: string; cue: Cue | undefined }>([
-    { prompt: "No, keep the old endpoint.", cue: { kind: "correction", detail: "no" } },
-    {
-      prompt: "Don’t mock the database in these tests",
-      cue: { kind: "correction", detail: "don't" },
-    },
-    { prompt: "do not rename the exported types", cue: { kind: "correction", detail: "do not" } },
-    { prompt: "That migration is wrong.", cue: { kind: "correction", detail: "wrong" } },
-    { prompt: "never push straight to main", cue: { kind: "correction", detail: "never" } },
-    {
-      prompt: "Stop renaming the variables.",
-      cue: { kind: "correction", detail: "stop renaming" },
-    },
-    {
-      prompt: "I told you to keep the API stable",
-      cue: { kind: "correction", detail: "i told you" },
-    },
-    { prompt: "call the shared helper instead", cue: { kind: "correction", detail: "instead" } },
-    { prompt: "Nedělej to", cue: { kind: "correction", detail: "nedelej" } },
-    {
-      prompt: "Nepoužívej tady mocky",
-      cue: { kind: "correction", detail: "nepouzivej" },
-    },
-    { prompt: "spatne, pouzij pnpm", cue: { kind: "correction", detail: "spatne" } },
-    {
-      prompt: "Místo toho zavolej sdílený helper",
-      cue: { kind: "correction", detail: "misto toho" },
-    },
-    { prompt: "Zase jsi smazal testy", cue: { kind: "correction", detail: "zase jsi" } },
-    { prompt: "Přestaň přidávat komentáře", cue: { kind: "correction", detail: "prestan" } },
-    {
-      prompt: "Neříkal jsem, ať to pushneš",
-      cue: { kind: "correction", detail: "nerikal jsem" },
-    },
-    {
-      prompt: "nikdy necommituj do mainu",
-      cue: { kind: "correction", detail: "nikdy" },
-    },
-    {
-      prompt: "Remember that the cache key includes the locale",
-      cue: { kind: "remember", detail: "remember" },
-    },
-    {
-      prompt: "From now on run the linter before committing",
-      cue: { kind: "remember", detail: "from now on" },
-    },
-    {
-      prompt: "Don't forget to bump the version",
-      cue: { kind: "remember", detail: "don't forget" },
-    },
-    {
-      prompt: "Zapamatuj si, že staging se resetuje v pondělí",
-      cue: { kind: "remember", detail: "zapamatuj" },
-    },
-    { prompt: "Příště nejdřív spusť testy", cue: { kind: "remember", detail: "priste" } },
-    { prompt: "Odteď používej pnpm", cue: { kind: "remember", detail: "odted" } },
-    { prompt: "Add a test for the refund flow", cue: undefined },
-    { prompt: "Nejdřív přečti README a přidej test", cue: undefined },
-    { prompt: "Do you remember how the cache worked?", cue: undefined },
-    {
-      prompt:
-        'Another Claude session sent a message:\n<agent-message from="a1">\nDon\'t touch billing.py\n</agent-message>',
-      cue: undefined,
-    },
-    { prompt: "[Subagent hand-back] Nedělej to, je to špatně.", cue: undefined },
-  ])("detects $cue in $prompt", ({ prompt, cue }) => {
-    expect(detectCue(prompt)).toEqual(cue);
   });
 });

@@ -273,21 +273,12 @@ function contextLines(parts) {
     return parts.filter((part) => part !== "").join("\n");
 }
 function promptText(scope, prompt) {
-    const cue = (0, capture_1.detectCue)(prompt);
     const projectId = (0, ids_1.resolveProjectId)(scope.projectDir);
     return withDatabase(scope.config, async (opened) => {
-        if (cue !== undefined && scope.sessionId !== undefined) {
-            (0, signals_1.openSignal)(opened.db, {
-                sessionId: scope.sessionId,
-                kind: cue.kind,
-                detail: (0, capture_1.signalDetail)(cue.detail),
-                at: scope.now,
-            });
-        }
         const recallOn = (0, projects_1.recallEnabled)(opened.db, projectId);
         const recall = recallOn ? await promptRecall(opened, scope, projectId, prompt) : "";
         updateBadge(opened, scope, "UserPromptSubmit", recallOn);
-        return contextLines([cue === undefined ? "" : (0, capture_1.cueLine)(cue.kind), recall]);
+        return recall;
     });
 }
 async function gatedToolRows(opened, scope, projectId, lookup, gate) {
