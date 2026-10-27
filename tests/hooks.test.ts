@@ -966,7 +966,7 @@ describe("hooks session dedup", () => {
 });
 
 describe("hooks feedback receipt", () => {
-  it("records the session's first receipt silently and demotes what it left unused", async () => {
+  it("records the call's verdicts silently and demotes on the explicit evidence", async () => {
     const { env, config } = freshEnv();
     const memoryId = "01J8GZSQHOOKRECEIPT000AAAA";
     await seedMemories(config, [
@@ -984,18 +984,11 @@ describe("hooks feedback receipt", () => {
     ]);
     const opened = openDatabase(config);
     try {
-      const injected = opened.db.prepare(
-        "INSERT INTO injections (session_id, memory_id, event, at) VALUES (?, ?, 'SessionStart', ?)",
+      const judged = opened.db.prepare(
+        "INSERT INTO verdicts (session_id, memory_id, verdict, at) VALUES (?, ?, 'not_applicable', ?)",
       );
-      const receipted = opened.db.prepare(
-        "INSERT INTO receipt_sessions (session_id, first_at) VALUES (?, ?)",
-      );
-      for (let session = 1; session <= 5; session += 1) {
-        const at = `2026-10-14T10:0${session}:00.000Z`;
-        injected.run(`session-receipt-${session}`, memoryId, at);
-        if (session < 5) {
-          receipted.run(`session-receipt-${session}`, at);
-        }
+      for (let session = 1; session <= 4; session += 1) {
+        judged.run(`session-receipt-${session}`, memoryId, `2026-10-14T10:0${session}:00.000Z`);
       }
     } finally {
       opened.db.close();
@@ -1008,8 +1001,8 @@ describe("hooks feedback receipt", () => {
         cwd: CWD,
         session_id: "session-receipt-5",
         tool_name: FEEDBACK_TOOL_NAME,
-        tool_input: { used: ["01J8GZSQHOOKOTHER00000AAAA"] },
-        tool_response: { memories: [] },
+        tool_input: { not_applicable: [memoryId] },
+        tool_response: { memories: [{ id: memoryId, state: "active" }] },
       }),
     );
 

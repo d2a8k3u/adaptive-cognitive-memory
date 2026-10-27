@@ -33,7 +33,7 @@ function recordReceipt(store, sessionId, at) {
             .prepare("INSERT OR IGNORE INTO receipt_sessions (session_id, first_at) VALUES (?, ?)")
             .run(sessionId, at).changes === 1;
         if (firstReceipt) {
-            (0, lifecycle_1.settleReceiptEvidence)(store, [...sessionInjectedIds(db, sessionId)], at);
+            (0, lifecycle_1.refreshImportance)(db, [...sessionInjectedIds(db, sessionId)]);
         }
     }).immediate();
 }
@@ -53,6 +53,6 @@ function recordInjections(store, record) {
             const stamp = earlier.has(memoryId) ? stampReinjection : countFirstInjection;
             stamp.run(record.at, memoryId);
         }
-        (0, lifecycle_1.settleReceiptEvidence)(store, firstInSession, record.at);
+        (0, lifecycle_1.refreshImportance)(db, firstInSession);
     }).immediate();
 }

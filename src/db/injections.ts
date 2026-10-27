@@ -1,5 +1,5 @@
 import type { Db } from "./database";
-import { settleReceiptEvidence } from "./lifecycle";
+import { refreshImportance } from "./lifecycle";
 import type { StateStore } from "./transitions";
 
 export interface InjectionRecord {
@@ -42,7 +42,7 @@ export function recordReceipt(store: StateStore, sessionId: string, at: string):
         .prepare("INSERT OR IGNORE INTO receipt_sessions (session_id, first_at) VALUES (?, ?)")
         .run(sessionId, at).changes === 1;
     if (firstReceipt) {
-      settleReceiptEvidence(store, [...sessionInjectedIds(db, sessionId)], at);
+      refreshImportance(db, [...sessionInjectedIds(db, sessionId)]);
     }
   }).immediate();
 }
@@ -67,6 +67,6 @@ export function recordInjections(store: StateStore, record: InjectionRecord): vo
       const stamp = earlier.has(memoryId) ? stampReinjection : countFirstInjection;
       stamp.run(record.at, memoryId);
     }
-    settleReceiptEvidence(store, firstInSession, record.at);
+    refreshImportance(db, firstInSession);
   }).immediate();
 }

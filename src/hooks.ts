@@ -24,6 +24,7 @@ import {
   recordCommandFailure,
   resolveCommand,
 } from "./db/signals";
+import { recordVerdicts } from "./db/verdicts";
 import { failureLookup, failureSignature } from "./failure";
 import {
   type RecalledMemory,
@@ -35,6 +36,7 @@ import {
 import { collectLocationFacts, type LocationFacts, projectIdentity, resolveProjectId } from "./ids";
 import { type Injection, renderInjection } from "./inject";
 import { commandHead, type ToolLookup, toolLookup } from "./keys";
+import { parseFeedbackVerdicts } from "./lifecycle";
 import { sessionNotice, storageOutage } from "./outage";
 import { admitPrompt } from "./prompt";
 import { daysBefore, RECALL_EVENTS_KEPT, SESSION_HISTORY_RETENTION_DAYS } from "./retention";
@@ -492,6 +494,15 @@ function toolText(scope: HookScope, lookup: ToolLookup | undefined): Promise<str
   });
 }
 
+function recordFeedbackCall(opened: OpenedDb, scope: SessionScope, toolInput: unknown): void {
+  const { sessionId, now } = scope;
+  recordReceipt(opened, sessionId, now);
+  const parsed = parseFeedbackVerdicts(toolInput);
+  if (parsed.outcome === "parsed") {
+    recordVerdicts(opened, { sessionId, verdicts: parsed.verdicts, at: now });
+  }
+}
+
 function silently(config: Config, work: (opened: OpenedDb) => void): Promise<string> {
   return withDatabase(config, async (opened) => {
     work(opened);
@@ -518,7 +529,7 @@ function postToolText(scope: SessionScope, input: HookInput): Promise<string> {
   const { config, sessionId, now } = scope;
   const toolName = stringField(input.tool_name) ?? "";
   if (toolName === FEEDBACK_TOOL) {
-    return silently(config, (opened) => recordReceipt(opened, sessionId, now));
+    return silently(config, (opened) => recordFeedbackCall(opened, scope, input.tool_input));
   }
   if (STORE_RECEIPT_TOOLS.has(toolName)) {
     return silently(config, ({ db }) => closeSessionSignals(db, sessionId, "receipt", now));

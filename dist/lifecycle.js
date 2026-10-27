@@ -1,11 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FRESH_COUNTERS = exports.DEMOTION_MIN_RECEIPTED_INJECTIONS = exports.FEEDBACK_IDS_MAX_ITEMS = exports.FEEDBACK_VERDICTS = void 0;
+exports.FRESH_COUNTERS = exports.DEMOTION_MIN_VERDICT_SESSIONS = exports.FEEDBACK_IDS_MAX_ITEMS = exports.FEEDBACK_VERDICTS = void 0;
 exports.parseFeedbackVerdicts = parseFeedbackVerdicts;
 exports.reactivation = reactivation;
 exports.feedbackTransition = feedbackTransition;
 exports.feedbackRejection = feedbackRejection;
-exports.receiptEvidenceTransition = receiptEvidenceTransition;
+exports.trialEvidenceTransition = trialEvidenceTransition;
 exports.derivedImportance = derivedImportance;
 const ids_1 = require("./ids");
 const session_1 = require("./session");
@@ -14,8 +14,8 @@ exports.FEEDBACK_IDS_MAX_ITEMS = 20;
 function isMemoryId(value) {
     return typeof value === "string" && value !== "" && value.length <= ids_1.ID_MAX_CHARS;
 }
-function parseIdList(input, verdict) {
-    const value = input[verdict];
+function parseIdList(fields, verdict) {
+    const value = fields.get(verdict);
     if (value === undefined) {
         return { outcome: "parsed", ids: [] };
     }
@@ -41,16 +41,22 @@ function idUnderTwoVerdicts(verdicts) {
     }
     return undefined;
 }
-function rawIdCount(input) {
+function rawIdCount(fields) {
     return exports.FEEDBACK_VERDICTS.reduce((sum, verdict) => {
-        const value = input[verdict];
+        const value = fields.get(verdict);
         return sum + (Array.isArray(value) ? value.length : 0);
     }, 0);
 }
+function inputFields(input) {
+    return typeof input === "object" && input !== null && !Array.isArray(input)
+        ? new Map(Object.entries(input))
+        : new Map();
+}
 function parseFeedbackVerdicts(input) {
+    const fields = inputFields(input);
     const lists = {};
     for (const verdict of exports.FEEDBACK_VERDICTS) {
-        const parsed = parseIdList(input, verdict);
+        const parsed = parseIdList(fields, verdict);
         if (parsed.outcome === "invalid") {
             return parsed;
         }
@@ -61,7 +67,7 @@ function parseFeedbackVerdicts(input) {
         wrong: lists.wrong ?? [],
         not_applicable: lists.not_applicable ?? [],
     };
-    const count = rawIdCount(input);
+    const count = rawIdCount(fields);
     if (count === 0 || count > exports.FEEDBACK_IDS_MAX_ITEMS) {
         return {
             outcome: "invalid",
@@ -95,22 +101,22 @@ function feedbackRejection(requested, found) {
     ];
     return `no feedback recorded: ${problems.join("; ")}. Give feedback only on ids of active or hypothesis memories, exactly as recall printed them`;
 }
-exports.DEMOTION_MIN_RECEIPTED_INJECTIONS = 5;
+exports.DEMOTION_MIN_VERDICT_SESSIONS = 5;
 const DEMOTION_MIN_USED_SHARE = 0.5;
-function receiptEvidenceTransition(snapshot) {
-    const { state, kind, usedCount, receiptedInjections } = snapshot;
+function trialEvidenceTransition(evidence) {
+    const { state, kind, verdictSessions, usedSessions } = evidence;
     if (state !== "active" ||
         session_1.PINNED_KINDS.includes(kind) ||
-        receiptedInjections < exports.DEMOTION_MIN_RECEIPTED_INJECTIONS) {
+        verdictSessions < exports.DEMOTION_MIN_VERDICT_SESSIONS) {
         return undefined;
     }
-    if (usedCount / receiptedInjections >= DEMOTION_MIN_USED_SHARE) {
+    if (usedSessions / verdictSessions >= DEMOTION_MIN_USED_SHARE) {
         return undefined;
     }
     return {
         toState: "hypothesis",
-        reason: "unused_after_receipts",
-        evidence: `used ${usedCount} of ${receiptedInjections} receipted injections`,
+        reason: "unused_after_verdicts",
+        evidence: `used in ${usedSessions} of ${verdictSessions} sessions with a verdict`,
     };
 }
 exports.FRESH_COUNTERS = {
