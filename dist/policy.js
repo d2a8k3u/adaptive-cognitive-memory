@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MEMORY_ORIGINS = exports.MEMORY_TYPES = exports.MEMORY_STATES = exports.MEMORY_SCOPES = exports.EPISTEMIC_STATES = exports.RESOLUTION_ACTIONS = exports.CARDINALITIES = exports.MEMORY_KINDS = void 0;
+exports.CONSULTABLE_STATES = exports.MEMORY_ORIGINS = exports.MEMORY_TYPES = exports.MEMORY_STATES = exports.MEMORY_SCOPES = exports.EPISTEMIC_STATES = exports.RESOLUTION_ACTIONS = exports.CARDINALITIES = exports.MEMORY_KINDS = void 0;
 exports.normalizeText = normalizeText;
 exports.contentHash = contentHash;
 exports.supersedeVerdict = supersedeVerdict;
@@ -18,6 +18,7 @@ exports.MEMORY_SCOPES = ["project", "user"];
 exports.MEMORY_STATES = ["active", "hypothesis", "revoked"];
 exports.MEMORY_TYPES = ["semantic", "episodic", "procedural", "pattern"];
 exports.MEMORY_ORIGINS = ["user", "claude", "tool"];
+exports.CONSULTABLE_STATES = ["active", "hypothesis"];
 function normalizeText(text) {
     return text.trim().replace(/\s+/g, " ").toLowerCase();
 }

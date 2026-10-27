@@ -16,6 +16,7 @@ const visibility_1 = require("./db/visibility");
 const embeddings_1 = require("./embeddings");
 const inject_1 = require("./inject");
 const keys_1 = require("./keys");
+const policy_1 = require("./policy");
 const prompt_1 = require("./prompt");
 const session_1 = require("./session");
 exports.DEFAULT_RECALL_LIMIT = 10;
@@ -26,9 +27,9 @@ const KNN_LIMIT = 10;
 const QUESTION_KNN_LIMIT = 40;
 const FTS_HYBRID_LIMIT = 10;
 const FTS_CANDIDATE_LIMIT = 20;
-const ACTIVE_STATE = "active";
-const RECALLABLE_ROW = "state = 'active' AND (invalid_at IS NULL OR invalid_at > ?)";
-const RECALLABLE_MEMORY = "m.state = 'active' AND (m.invalid_at IS NULL OR m.invalid_at > ?)";
+const RECALL_STATES = ["active"];
+const STILL_VALID_MEMORY = "(m.invalid_at IS NULL OR m.invalid_at > ?)";
+const RECALLABLE_MEMORY = `m.state = 'active' AND ${STILL_VALID_MEMORY}`;
 const KEY_COLUMNS_FILTER = "{conflict_key keywords}";
 const TICKET_COLUMNS_FILTER = "{keywords}";
 const MEMORY_FIELDS = `m.id, m.kind, m.epistemic, m.scope, m.abstract,
@@ -136,7 +137,7 @@ function ticketCandidates(db, request) {
         .all(request.now, request.projectId, request.ticket, `${TICKET_COLUMNS_FILTER} : ${ftsPhrase(request.ticket)}`, request.limit);
 }
 async function promptCandidates(source, request) {
-    const filter = { projectId: request.projectId };
+    const filter = { states: RECALL_STATES, projectId: request.projectId };
     const match = anyTermMatchExpression(request.tokens, FTS_QUERY_MAX_TERMS);
     const ranks = new Map(match === ""
         ? []
@@ -231,19 +232,20 @@ function keywordIds(db, request) {
     if (match === "") {
         return [];
     }
-    return ftsHits(db, `${KEY_COLUMNS_FILTER} : (${match})`, { projectId: request.projectId }, FTS_CANDIDATE_LIMIT, request.now).map((hit) => hit.id);
+    return ftsHits(db, `${KEY_COLUMNS_FILTER} : (${match})`, { states: RECALL_STATES, projectId: request.projectId }, FTS_CANDIDATE_LIMIT, request.now).map((hit) => hit.id);
 }
 function ownPartitionKnn(db, vector, projectId) {
     return [
-        ...knnHits(db, vector, { scope: "user" }),
-        ...knnHits(db, vector, { scope: "project", projectId }),
+        ...knnHits(db, vector, { states: RECALL_STATES, scope: "user" }),
+        ...knnHits(db, vector, { states: RECALL_STATES, scope: "project", projectId }),
     ];
 }
 function ownPartitionQuestionKnn(db, vector, projectId) {
     const nearest = (partition, params) => db
         .prepare(`SELECT memory_id AS id, distance FROM questions_vec
-         WHERE state = ? AND ${partition} AND embedding MATCH ? AND k = ?`)
-        .all(ACTIVE_STATE, ...params, JSON.stringify(Array.from(vector)), QUESTION_KNN_LIMIT);
+         WHERE ${inStates("state", RECALL_STATES)} AND ${partition}
+           AND embedding MATCH ? AND k = ?`)
+        .all(...RECALL_STATES, ...params, JSON.stringify(Array.from(vector)), QUESTION_KNN_LIMIT);
     return [
         ...nearest("scope = 'user'", []),
         ...nearest("scope = 'project' AND project_id = ?", [projectId]),
@@ -265,16 +267,25 @@ function ftsRecall(db, options, now) {
         return [];
     }
     const limit = options.limit ?? exports.DEFAULT_RECALL_LIMIT;
-    const ids = ftsHits(db, match, options, limit, now).map((hit) => hit.id);
+    const ids = ftsHits(db, match, searchFilter(options), limit, now).map((hit) => hit.id);
     return fetchRanked(db, topRanked(rrfFuse([ids]), limit), now);
+}
+function searchFilter(options) {
+    return {
+        states: policy_1.CONSULTABLE_STATES,
+        projectId: options.projectId,
+        scope: options.scope,
+        type: options.type,
+    };
 }
 function hybridRecall(db, options, vector, now) {
     const rankings = [];
     if (options.scope !== "project") {
-        rankings.push(knnHits(db, vector, { scope: "user", type: options.type }).map((hit) => hit.id));
+        rankings.push(knnHits(db, vector, { states: policy_1.CONSULTABLE_STATES, scope: "user", type: options.type }).map((hit) => hit.id));
     }
     if (options.scope !== "user") {
         rankings.push(knnHits(db, vector, {
+            states: policy_1.CONSULTABLE_STATES,
             scope: "project",
             projectId: options.projectId,
             type: options.type,
@@ -282,13 +293,16 @@ function hybridRecall(db, options, vector, now) {
     }
     const match = ftsMatchExpression(options.query);
     if (match !== "") {
-        rankings.push(ftsHits(db, match, options, FTS_HYBRID_LIMIT, now).map((hit) => hit.id));
+        rankings.push(ftsHits(db, match, searchFilter(options), FTS_HYBRID_LIMIT, now).map((hit) => hit.id));
     }
     return fetchRanked(db, topRanked(rrfFuse(rankings), options.limit ?? exports.DEFAULT_RECALL_LIMIT), now);
 }
+function inStates(column, states) {
+    return `${column} IN (${states.map(() => "?").join(", ")})`;
+}
 function knnHits(db, vector, filter) {
-    const clauses = ["state = ?"];
-    const params = [ACTIVE_STATE];
+    const clauses = [inStates("state", filter.states)];
+    const params = [...filter.states];
     if (filter.type !== undefined) {
         clauses.push("type = ?");
         params.push(filter.type);
@@ -306,8 +320,8 @@ function knnHits(db, vector, filter) {
         .all(...params);
 }
 function ftsHits(db, match, filter, limit, now) {
-    const clauses = ["memories_fts MATCH ?", RECALLABLE_MEMORY];
-    const params = [match, now];
+    const clauses = ["memories_fts MATCH ?", inStates("m.state", filter.states), STILL_VALID_MEMORY];
+    const params = [match, ...filter.states, now];
     if (filter.scope === "user") {
         clauses.push("m.scope = ?");
         params.push("user");
@@ -342,9 +356,10 @@ function fetchRanked(db, ranked, now) {
     }
     const placeholders = ranked.map(() => "?").join(", ");
     const found = db
-        .prepare(`SELECT id, scope, type, importance, abstract FROM memories
-       WHERE ${RECALLABLE_ROW} AND id IN (${placeholders})`)
-        .all(now, ...ranked.map(([id]) => id));
+        .prepare(`SELECT m.id, m.scope, m.type, m.importance, m.abstract, m.state FROM memories m
+       WHERE ${inStates("m.state", policy_1.CONSULTABLE_STATES)} AND ${STILL_VALID_MEMORY}
+         AND m.id IN (${placeholders})`)
+        .all(...policy_1.CONSULTABLE_STATES, now, ...ranked.map(([id]) => id));
     const byId = new Map(found.map((row) => [row.id, row]));
     return ranked.flatMap(([id, score]) => {
         const record = byId.get(id);
