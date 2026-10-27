@@ -1,3 +1,4 @@
+import { ID_MAX_CHARS } from "./ids";
 import type { MemoryKind, MemoryState } from "./policy";
 import { PINNED_KINDS } from "./session";
 
@@ -27,6 +28,88 @@ export interface Transition {
 export interface FeedbackTarget {
   readonly id: string;
   readonly state: MemoryState;
+}
+
+export type FeedbackVerdicts = Readonly<Record<FeedbackVerdict, readonly string[]>>;
+
+export type ParsedFeedback =
+  | { readonly outcome: "parsed"; readonly verdicts: FeedbackVerdicts }
+  | { readonly outcome: "invalid"; readonly field?: FeedbackVerdict; readonly message: string };
+
+export const FEEDBACK_IDS_MAX_ITEMS = 20;
+
+type ParsedIdList =
+  | { readonly outcome: "parsed"; readonly ids: readonly string[] }
+  | { readonly outcome: "invalid"; readonly field: FeedbackVerdict; readonly message: string };
+
+function isMemoryId(value: unknown): value is string {
+  return typeof value === "string" && value !== "" && value.length <= ID_MAX_CHARS;
+}
+
+function parseIdList(
+  input: Readonly<Record<string, unknown>>,
+  verdict: FeedbackVerdict,
+): ParsedIdList {
+  const value = input[verdict];
+  if (value === undefined) {
+    return { outcome: "parsed", ids: [] };
+  }
+  if (!Array.isArray(value) || !value.every(isMemoryId)) {
+    return {
+      outcome: "invalid",
+      field: verdict,
+      message: `${verdict} must be a list of memory ids of at most ${ID_MAX_CHARS} characters`,
+    };
+  }
+  return { outcome: "parsed", ids: [...new Set(value)] };
+}
+
+function idUnderTwoVerdicts(verdicts: FeedbackVerdicts): string | undefined {
+  const verdictOf = new Map<string, FeedbackVerdict>();
+  for (const verdict of FEEDBACK_VERDICTS) {
+    for (const id of verdicts[verdict]) {
+      const earlier = verdictOf.get(id);
+      if (earlier !== undefined) {
+        return `memory ${id} is under both ${earlier} and ${verdict}; give each id one verdict`;
+      }
+      verdictOf.set(id, verdict);
+    }
+  }
+  return undefined;
+}
+
+function rawIdCount(input: Readonly<Record<string, unknown>>): number {
+  return FEEDBACK_VERDICTS.reduce((sum, verdict) => {
+    const value = input[verdict];
+    return sum + (Array.isArray(value) ? value.length : 0);
+  }, 0);
+}
+
+export function parseFeedbackVerdicts(input: Readonly<Record<string, unknown>>): ParsedFeedback {
+  const lists: Partial<Record<FeedbackVerdict, readonly string[]>> = {};
+  for (const verdict of FEEDBACK_VERDICTS) {
+    const parsed = parseIdList(input, verdict);
+    if (parsed.outcome === "invalid") {
+      return parsed;
+    }
+    lists[verdict] = parsed.ids;
+  }
+  const verdicts: FeedbackVerdicts = {
+    used: lists.used ?? [],
+    wrong: lists.wrong ?? [],
+    not_applicable: lists.not_applicable ?? [],
+  };
+  const count = rawIdCount(input);
+  if (count === 0 || count > FEEDBACK_IDS_MAX_ITEMS) {
+    return {
+      outcome: "invalid",
+      message: `give 1 to ${FEEDBACK_IDS_MAX_ITEMS} memory ids in total under ${FEEDBACK_VERDICTS.join(", ")}`,
+    };
+  }
+  const conflict = idUnderTwoVerdicts(verdicts);
+  return conflict === undefined
+    ? { outcome: "parsed", verdicts }
+    : { outcome: "invalid", message: conflict };
 }
 
 export function reactivation(

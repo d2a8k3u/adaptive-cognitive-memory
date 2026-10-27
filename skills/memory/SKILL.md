@@ -33,7 +33,7 @@ The hooks never store anything and never flag a correction or a remember request
 
 ## Acting on recall
 
-Recalled constraints start with `Apply —`, procedures with `Follow —`. Apply or follow each one, or say why it does not apply. Then call `memory_feedback` once per turn with the ids: `used` when one informed the work, `wrong` when it was incorrect or outdated, `not_applicable` when it was irrelevant. A `wrong` memory leaves recall until a `used` receipt or a store of the same content brings it back; nothing is deleted.
+Recalled constraints start with `Apply —`, procedures with `Follow —`. Apply or follow each one, or say why it does not apply. Then call `memory_feedback` once per turn with a verdict on every injected id, each id in one list: `used` when it informed the work, `not_applicable` when it was irrelevant here, `wrong` when it was incorrect or outdated — for example `{used: [id1], not_applicable: [id2, id3]}`. An id you leave out counts as no evidence either way. A `wrong` memory leaves recall until a `used` verdict or a store of the same content brings it back; nothing is deleted.
 
 ## The slot every store names
 

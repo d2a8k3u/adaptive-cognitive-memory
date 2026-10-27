@@ -29,7 +29,6 @@ const policy_1 = require("./policy");
 const search_1 = require("./search");
 const status_2 = require("./status");
 const SEARCH_LIMIT_MAX = 100;
-const FEEDBACK_IDS_MAX_ITEMS = 20;
 const ALL_PROJECTS = "all";
 const IMMUTABLE_FIELDS = ["scope", "kind"];
 function isToolError(value) {
@@ -440,36 +439,22 @@ async function memoryRelate(deps, args) {
     }
     return rejectionsAsToolErrors(() => (0, relations_1.relate)(deps.env.db, visibleId(deps, sourceId), visibleId(deps, targetId), relationType));
 }
-function requiredIds(args) {
-    const value = args.ids;
-    const valid = Array.isArray(value) &&
-        value.length >= 1 &&
-        value.length <= FEEDBACK_IDS_MAX_ITEMS &&
-        value.every((id) => typeof id === "string" && id !== "" && id.length <= ids_1.ID_MAX_CHARS);
-    if (!valid) {
-        return fieldError("ids", `ids must be a list of 1 to ${FEEDBACK_IDS_MAX_ITEMS} memory ids of at most ${ids_1.ID_MAX_CHARS} characters`);
-    }
-    return value;
-}
 async function memoryFeedback(deps, args) {
-    const ids = requiredIds(args);
-    if (isToolError(ids)) {
-        return ids;
-    }
-    const verdict = requiredEnum(args, "verdict", lifecycle_1.FEEDBACK_VERDICTS);
-    if (isToolError(verdict)) {
-        return verdict;
+    const parsed = (0, lifecycle_1.parseFeedbackVerdicts)(args);
+    if (parsed.outcome === "invalid") {
+        return parsed.field === undefined
+            ? { error: { message: parsed.message } }
+            : fieldError(parsed.field, parsed.message);
     }
     return rejectionsAsToolErrors(() => {
         const outcome = (0, feedback_1.recordFeedback)(deps.env, {
             projectId: deps.projectId,
-            ids,
-            verdict,
+            verdicts: parsed.verdicts,
             at: new Date().toISOString(),
         });
         return outcome.outcome === "recorded"
             ? { memories: outcome.memories }
-            : fieldError("ids", outcome.reason);
+            : { error: { message: outcome.reason } };
     });
 }
 async function memoryDoctor(deps) {
@@ -610,19 +595,13 @@ exports.TOOL_DEFINITIONS = [
     },
     {
         name: "memory_feedback",
-        description: "After acting on injected memories, report what they were worth: used when a memory informed the work, wrong when it was incorrect or outdated, not_applicable when it was irrelevant. Pass the ids exactly as recall printed them; one call per turn is enough. A wrong memory leaves recall until a used receipt or a store of it brings it back; nothing is deleted. A call naming an unknown or revoked id records nothing.",
+        description: "Once per turn, judge every memory recall injected, ids as printed: used (it informed the work), not_applicable (irrelevant here) or wrong (incorrect or outdated); an id you leave out counts as no evidence. A wrong memory leaves recall until a used verdict or a store of it brings it back. A call naming an unknown or revoked id records nothing.",
         inputSchema: {
             type: "object",
-            properties: {
-                ids: {
-                    type: "array",
-                    items: ID_PROPERTY,
-                    minItems: 1,
-                    maxItems: FEEDBACK_IDS_MAX_ITEMS,
-                },
-                verdict: { type: "string", enum: [...lifecycle_1.FEEDBACK_VERDICTS] },
-            },
-            required: ["ids", "verdict"],
+            properties: Object.fromEntries(lifecycle_1.FEEDBACK_VERDICTS.map((verdict) => [
+                verdict,
+                { type: "array", items: ID_PROPERTY, maxItems: lifecycle_1.FEEDBACK_IDS_MAX_ITEMS },
+            ])),
         },
         run: memoryFeedback,
     },

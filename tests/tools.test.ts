@@ -916,7 +916,7 @@ describe("tools", () => {
       await storedId(deps, repeatedArgs);
     }
 
-    await memoryFeedback(deps, { ids: [receiptBacked], verdict: "used" });
+    await memoryFeedback(deps, { used: [receiptBacked] });
 
     const importanceOf = async (id: string) => {
       const record = await memoryGet(deps, { id });
@@ -926,20 +926,45 @@ describe("tools", () => {
     expect(await importanceOf(receiptBacked)).toBeCloseTo(2 / 3, 12);
   });
 
-  it("records feedback for up to twenty ids and names a domain rejection on the ids field", async () => {
+  it("records a different verdict for each id in one call", async () => {
+    const deps = openDeps();
+    const helpful = await storedId(deps, storeArgs());
+    const outdated = await storedId(
+      deps,
+      storeArgs({
+        title: "deploy hotfix",
+        content: "Ship hotfixes by hand.",
+        conflict_key: "deploy.hotfix",
+      }),
+    );
+
+    const recorded = await memoryFeedback(deps, { used: [helpful], wrong: [outdated] });
+
+    expect(recorded).toEqual({
+      memories: [
+        { id: helpful, state: "active" },
+        { id: outdated, state: "hypothesis" },
+      ],
+    });
+    const counts = deps.env.db.prepare("SELECT used_count, wrong_count FROM memories WHERE id = ?");
+    expect([counts.get(helpful), counts.get(outdated)]).toEqual([
+      { used_count: 1, wrong_count: 0 },
+      { used_count: 0, wrong_count: 1 },
+    ]);
+  });
+
+  it("records nothing for any verdict of a call that names an unknown memory", async () => {
     const deps = openDeps();
     const id = await storedId(deps, storeArgs());
 
-    const recorded = await memoryFeedback(deps, {
-      ids: Array.from({ length: 20 }, () => id),
-      verdict: "wrong",
-    });
-    const unknown = await memoryFeedback(deps, { ids: [id, "01UNKNOWN"], verdict: "used" });
+    const unknown = await memoryFeedback(deps, { wrong: [id], used: ["01UNKNOWN"] });
 
-    expect(recorded).toEqual({ memories: [{ id, state: "hypothesis" }] });
     expect(unknown).toEqual({
-      error: { field: "ids", message: expect.stringMatching(/unknown memory ids 01UNKNOWN/) },
+      error: { message: expect.stringMatching(/unknown memory ids 01UNKNOWN/) },
     });
+    expect(
+      deps.env.db.prepare("SELECT state, wrong_count FROM memories WHERE id = ?").get(id),
+    ).toEqual({ state: "active", wrong_count: 0 });
   });
 
   describe("another project's memories", () => {
@@ -977,13 +1002,10 @@ describe("tools", () => {
     it("feedback names a project-scoped one as unknown and records nothing", async () => {
       const { deps, foreignId } = await partitions();
 
-      const foreignFeedback = await memoryFeedback(deps, { ids: [foreignId], verdict: "used" });
+      const foreignFeedback = await memoryFeedback(deps, { used: [foreignId] });
 
       expect(foreignFeedback).toEqual({
-        error: {
-          field: "ids",
-          message: expect.stringMatching(`unknown memory ids ${foreignId}\\.`),
-        },
+        error: { message: expect.stringMatching(`unknown memory ids ${foreignId}\\.`) },
       });
       expect(
         deps.env.db.prepare("SELECT used_count FROM memories WHERE id = ?").pluck().get(foreignId),
@@ -1045,26 +1067,22 @@ describe("tools", () => {
   });
 
   it.each([
-    { name: "missing ids", args: { verdict: "used" }, field: "ids" },
-    { name: "no ids", args: { ids: [], verdict: "used" }, field: "ids" },
     {
-      name: "more than twenty ids",
-      args: { ids: Array.from({ length: 21 }, () => "01ID"), verdict: "used" },
-      field: "ids",
+      name: "a malformed list on that list's field",
+      args: { used: [42] },
+      expected: { field: "used", message: expect.any(String) },
     },
-    { name: "a non-string id", args: { ids: [42], verdict: "used" }, field: "ids" },
     {
-      name: "an id over the id length",
-      args: { ids: ["0".repeat(27)], verdict: "used" },
-      field: "ids",
+      name: "an id under two verdicts without a field",
+      args: { used: ["01ID"], wrong: ["01ID"] },
+      expected: { message: expect.stringMatching(/01ID is under both used and wrong/) },
     },
-    { name: "an unknown verdict", args: { ids: ["01ID"], verdict: "maybe" }, field: "verdict" },
-  ])("rejects feedback with $name", async ({ args, field }) => {
+  ])("rejects feedback with $name", async ({ args, expected }) => {
     const deps = openDeps();
 
     const outcome = await memoryFeedback(deps, args);
 
-    expect(outcome).toEqual({ error: { field, message: expect.any(String) } });
+    expect(outcome).toEqual({ error: expected });
   });
 
   it("reports this project's status: own and user counts, the newest-500 rate, receipts, open signals and injections", async () => {

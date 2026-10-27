@@ -334,7 +334,7 @@ export class WorldWriter {
   }
 
   feedback(cwd: string, ids: readonly string[], verdict: string): Promise<JsonRecord> {
-    return this.call(cwd, "memory_feedback", { ids: [...ids], verdict });
+    return this.call(cwd, "memory_feedback", { [verdict]: [...ids] });
   }
 
   async close(): Promise<void> {

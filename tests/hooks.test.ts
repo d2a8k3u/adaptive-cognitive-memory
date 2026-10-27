@@ -1008,7 +1008,7 @@ describe("hooks feedback receipt", () => {
         cwd: CWD,
         session_id: "session-receipt-5",
         tool_name: FEEDBACK_TOOL_NAME,
-        tool_input: { ids: ["01J8GZSQHOOKOTHER00000AAAA"], verdict: "used" },
+        tool_input: { used: ["01J8GZSQHOOKOTHER00000AAAA"] },
         tool_response: { memories: [] },
       }),
     );

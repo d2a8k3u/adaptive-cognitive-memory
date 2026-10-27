@@ -545,8 +545,7 @@ describe("reasserting a hypothesis memory", () => {
     const postgresId = idByTitle(env, POSTGRES.title);
     recordFeedback(env, {
       projectId: PROJECT_ALPHA,
-      ids: [postgresId],
-      verdict: "wrong",
+      verdicts: { used: [], wrong: [postgresId], not_applicable: [] },
       at: "2026-10-14T10:00:00.000Z",
     });
     return postgresId;

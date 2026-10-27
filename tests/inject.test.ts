@@ -4,7 +4,7 @@ import { estimateTokens, minLineTokens, renderInjection } from "../src/inject";
 import { FAKE_SECRETS } from "./fixtures/secrets";
 
 const HEADER =
-  "Recalled memory from earlier sessions; verify it against the current code. Apply or follow each line, or say why it does not apply, then send memory_feedback with the ids.";
+  "Recalled memory from earlier sessions; verify it against the current code. Apply or follow each line, or say why it does not apply, then send memory_feedback for every id.";
 const MODEL_WARNING = "memory degraded (model missing) — run /memory-doctor";
 const MODEL_VEC_WARNING = "memory degraded (model, vec missing) — run /memory-doctor";
 const SHORT_ID = "AAAAAAAAAAAAAAAA";
