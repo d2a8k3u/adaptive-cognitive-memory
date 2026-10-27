@@ -325,6 +325,7 @@ describe("two-phase write protocol", () => {
       valid_from: get(env, postgresId).valid_from,
       support_count: 0,
       scope: "project",
+      state: "active",
     });
   });
 
@@ -585,6 +586,28 @@ describe("reasserting a hypothesis memory", () => {
     ]);
     expect(rowCount(env)).toBe(1);
   });
+
+  it.each([
+    { name: "under the same key", conflictKey: POSTGRES.conflictKey },
+    { name: "under another key", conflictKey: "project.database_engine" },
+  ])(
+    "offers it as a candidate with its state when the lesson is stored again $name",
+    async ({ conflictKey }) => {
+      const { env } = openEnv();
+      const postgresId = await demotedPostgres(env);
+
+      const outcome = await store(
+        env,
+        { ...POSTGRES, conflictKey, content: "Every record lives in PostgreSQL 15." },
+        PROJECT_ALPHA,
+      );
+
+      expect(outcome.outcome === "needs_resolution" ? outcome.candidates : []).toEqual([
+        expect.objectContaining({ id: postgresId, state: "hypothesis" }),
+      ]);
+      expect(rowCount(env)).toBe(1);
+    },
+  );
 
   it("rejects bringing it back while another memory holds its single-valued key", async () => {
     const { env } = openEnv();

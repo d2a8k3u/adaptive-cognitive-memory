@@ -19,6 +19,7 @@ import {
 import {
   addVerdict,
   type Cardinality,
+  CONSULTABLE_STATES,
   contentHash,
   type MemoryKind,
   type MemoryScope,
@@ -93,7 +94,10 @@ export interface Candidate {
   valid_from: string | null;
   support_count: number;
   scope: MemoryScope;
+  state: MemoryState;
 }
+
+const CONSULTABLE_STATE_SQL = `state IN (${CONSULTABLE_STATES.map(() => "?").join(", ")})`;
 
 export type StoreOutcome =
   | { readonly outcome: "written"; readonly result: StoreResult }
@@ -833,10 +837,12 @@ function sameKeyIds(db: Db, row: PreparedRow): string[] {
   const rows = db
     .prepare(
       `SELECT id FROM memories
-       WHERE conflict_key = ? AND state = 'active' AND ${partition.sql}
+       WHERE conflict_key = ? AND ${CONSULTABLE_STATE_SQL} AND ${partition.sql}
        ORDER BY created_at LIMIT ?`,
     )
-    .all(row.conflictKey, ...partition.params, CANDIDATE_SOURCE_LIMIT) as { id: string }[];
+    .all(row.conflictKey, ...CONSULTABLE_STATES, ...partition.params, CANDIDATE_SOURCE_LIMIT) as {
+    id: string;
+  }[];
   return rows.map((hit) => hit.id);
 }
 
@@ -845,9 +851,14 @@ function neighbourIds(db: Db, row: PreparedRow, embedding: Float32Array): string
   const rows = db
     .prepare(
       `SELECT memory_id FROM memories_vec
-       WHERE state = 'active' AND ${partition.sql} AND embedding MATCH ? AND k = ?`,
+       WHERE ${CONSULTABLE_STATE_SQL} AND ${partition.sql} AND embedding MATCH ? AND k = ?`,
     )
-    .all(...partition.params, vecBlob(embedding), CANDIDATE_SOURCE_LIMIT) as {
+    .all(
+      ...CONSULTABLE_STATES,
+      ...partition.params,
+      vecBlob(embedding),
+      CANDIDATE_SOURCE_LIMIT,
+    ) as {
     memory_id: string;
   }[];
   return rows.map((hit) => hit.memory_id);
@@ -865,10 +876,12 @@ function keywordHitIds(db: Db, row: PreparedRow): string[] {
   const rows = db
     .prepare(
       `SELECT m.id AS id FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
-       WHERE memories_fts MATCH ? AND m.state = 'active' AND ${partition.sql}
+       WHERE memories_fts MATCH ? AND m.${CONSULTABLE_STATE_SQL} AND ${partition.sql}
        ORDER BY rank LIMIT ?`,
     )
-    .all(match, ...partition.params, CANDIDATE_SOURCE_LIMIT) as { id: string }[];
+    .all(match, ...CONSULTABLE_STATES, ...partition.params, CANDIDATE_SOURCE_LIMIT) as {
+    id: string;
+  }[];
   return rows.map((hit) => hit.id);
 }
 
@@ -879,7 +892,8 @@ function candidatesByIds(db: Db, ids: readonly string[]): Candidate[] {
   const placeholders = ids.map(() => "?").join(", ");
   const rows = db
     .prepare(
-      `SELECT id, title, kind, conflict_key, cardinality, value_text, valid_from, support_count, scope
+      `SELECT id, title, kind, conflict_key, cardinality, value_text, valid_from, support_count, scope,
+         state
        FROM memories WHERE id IN (${placeholders})`,
     )
     .all(...ids) as Candidate[];
