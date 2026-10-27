@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STATUS_LIST_LIMIT = exports.RECALL_RATE_WINDOW = void 0;
+exports.STATUS_LIST_LIMIT = exports.VERDICT_COVERAGE_WINDOW = exports.RECALL_RATE_WINDOW = void 0;
 exports.statusReport = statusReport;
 const events_1 = require("./db/events");
 const policy_1 = require("./policy");
 exports.RECALL_RATE_WINDOW = 500;
+exports.VERDICT_COVERAGE_WINDOW = 500;
 exports.STATUS_LIST_LIMIT = 10;
 const MS_PER_SECOND = 1000;
 function ratio(part, whole) {
@@ -49,6 +50,12 @@ function statusReport(facts, now) {
             memories_injected: receiptInjections.memories,
             never_used: receiptInjections.neverUsed,
             share: ratio(receiptInjections.neverUsed, receiptInjections.memories),
+        },
+        verdict_coverage: {
+            window: exports.VERDICT_COVERAGE_WINDOW,
+            injections: facts.verdictCoverage.injections,
+            judged: facts.verdictCoverage.judged,
+            share: ratio(facts.verdictCoverage.judged, facts.verdictCoverage.injections),
         },
         open_signals: facts.openSignals.map((signal) => ({
             session_id: signal.sessionId,

@@ -821,7 +821,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: "memory_feedback",
     description:
-      "Once per turn, judge every memory recall injected, ids as printed: used (it informed the work), not_applicable (irrelevant here) or wrong (incorrect or outdated); an id you leave out counts as no evidence. A wrong memory leaves recall until a used verdict or a store of it brings it back. A call naming an unknown or revoked id records nothing.",
+      "Once per turn, judge every memory recall injected, ids as printed: used (it informed the work), not_applicable (irrelevant here) or wrong (incorrect or outdated); an omitted id counts as no evidence. A wrong memory leaves recall until a used verdict or a store of it brings it back. A call naming an unknown or revoked id records nothing.",
     inputSchema: {
       type: "object",
       properties: Object.fromEntries(
@@ -843,7 +843,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: "memory_status",
     description:
-      "What the memory holds and does for this project: its id and recall switch, memory counts by state and kind for user scope and this project, transitions by reason, the share of the newest 500 recall events that injected anything, the share of unpinned memories injected in receipt-giving sessions without a used receipt, open capture signals and the last injections.",
+      "What the memory holds and does for this project: its id and recall switch, memory counts by state and kind for user scope and this project, transitions by reason, the share of the newest 500 recall events that injected anything, the share of unpinned memories injected in receipt-giving sessions without a used receipt, verdict coverage, open capture signals and the last injections.",
     inputSchema: { type: "object", properties: {} },
     run: (deps, _args) => memoryStatus(deps),
   },

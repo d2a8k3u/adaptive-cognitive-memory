@@ -33,6 +33,18 @@ function receiptInjections(db) {
          JOIN receipt_sessions r ON r.session_id = i.session_id)`)
         .get(...session_1.PINNED_KINDS);
 }
+function verdictCoverage(db) {
+    const pinnedKinds = session_1.PINNED_KINDS.map(() => "?").join(", ");
+    return db
+        .prepare(`SELECT count(*) AS injections,
+         coalesce(sum(EXISTS (SELECT 1 FROM verdicts v
+           WHERE v.session_id = pair.session_id AND v.memory_id = pair.memory_id)), 0) AS judged
+       FROM (SELECT i.session_id, i.memory_id, max(i.at) AS lastAt FROM injections i
+             JOIN memories m ON m.id = i.memory_id
+             WHERE m.kind NOT IN (${pinnedKinds})
+             GROUP BY i.session_id, i.memory_id ORDER BY lastAt DESC LIMIT ?) pair`)
+        .get(...session_1.PINNED_KINDS, status_1.VERDICT_COVERAGE_WINDOW);
+}
 function openSignalFacts(db) {
     return db
         .prepare(`SELECT session_id AS sessionId, kind, detail, opened_at AS openedAt FROM session_signals
@@ -53,6 +65,7 @@ function statusFacts(db, projectId) {
         transitionCounts: transitionCounts(db, projectId),
         recallEvents: recallEventCounts(db),
         receiptInjections: receiptInjections(db),
+        verdictCoverage: verdictCoverage(db),
         openSignals: openSignalFacts(db),
         recentInjections: recentInjections(db),
     };

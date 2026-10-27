@@ -18,6 +18,7 @@ const EMPTY_FACTS: StatusFacts = {
   transitionCounts: [],
   recallEvents: [],
   receiptInjections: { memories: 0, neverUsed: 0 },
+  verdictCoverage: { injections: 0, judged: 0 },
   openSignals: [],
   recentInjections: [],
 };
@@ -41,6 +42,7 @@ describe("statusReport", () => {
         { event: "UserPromptSubmit", events: 5, injecting: 1 },
       ],
       receiptInjections: { memories: 5, neverUsed: 2 },
+      verdictCoverage: { injections: 8, judged: 6 },
       openSignals: [
         {
           sessionId: "session-a",
@@ -87,6 +89,7 @@ describe("statusReport", () => {
         },
       },
       receipt_sessions: { memories_injected: 5, never_used: 2, share: 0.4 },
+      verdict_coverage: { window: 500, injections: 8, judged: 6, share: 0.75 },
       open_signals: [
         { session_id: "session-a", kind: "correction", detail: "don't", age_seconds: 90 },
       ],
@@ -106,6 +109,7 @@ describe("statusReport", () => {
 
     expect(report.recall_events.rate).toBeNull();
     expect(report.receipt_sessions.share).toBeNull();
+    expect(report.verdict_coverage.share).toBeNull();
     expect(report.project).toEqual({ id: "proj-a1b2c3", recall: "on" });
   });
 });
