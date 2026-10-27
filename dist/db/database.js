@@ -38,6 +38,7 @@ const migrationSteps = [
     { version: 6, apply: (db) => execAll(db, schema_1.schemaV6Ddl) },
     { version: 7, apply: (db) => execAll(db, schema_1.schemaV7Ddl) },
     { version: 8, apply: (db) => reactivatePinnedDemotions(db, new Date().toISOString()) },
+    { version: 9, apply: (db) => execAll(db, schema_1.schemaV9Ddl) },
 ];
 const PINNED_EXEMPTION_REASON = "pinned_exemption";
 const PINNED_EXEMPTION_EVIDENCE = "schema v8 migration";

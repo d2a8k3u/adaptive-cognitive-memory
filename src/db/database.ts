@@ -16,6 +16,7 @@ import {
   schemaV5Ddl,
   schemaV6Ddl,
   schemaV7Ddl,
+  schemaV9Ddl,
   vecTableDdl,
 } from "./schema";
 import { recordTransition } from "./transitions";
@@ -53,6 +54,7 @@ const migrationSteps: readonly MigrationStep[] = [
   { version: 6, apply: (db) => execAll(db, schemaV6Ddl) },
   { version: 7, apply: (db) => execAll(db, schemaV7Ddl) },
   { version: 8, apply: (db) => reactivatePinnedDemotions(db, new Date().toISOString()) },
+  { version: 9, apply: (db) => execAll(db, schemaV9Ddl) },
 ];
 
 const PINNED_EXEMPTION_REASON = "pinned_exemption";

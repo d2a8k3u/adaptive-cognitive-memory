@@ -1,9 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.vecTableDdl = exports.questionsVecTableDdl = exports.schemaV7Ddl = exports.schemaV6Ddl = exports.schemaV5Ddl = exports.schemaV4Ddl = exports.schemaV3Ddl = exports.schemaV2Ddl = exports.baselineDdl = exports.SchemaTooNewError = exports.SCHEMA_VERSION = void 0;
+exports.vecTableDdl = exports.questionsVecTableDdl = exports.schemaV9Ddl = exports.schemaV7Ddl = exports.schemaV6Ddl = exports.schemaV5Ddl = exports.schemaV4Ddl = exports.schemaV3Ddl = exports.schemaV2Ddl = exports.baselineDdl = exports.SchemaTooNewError = exports.SCHEMA_VERSION = void 0;
 const cfg_1 = require("../cfg");
 const events_1 = require("./events");
-exports.SCHEMA_VERSION = 8;
+exports.SCHEMA_VERSION = 9;
 class SchemaTooNewError extends Error {
 }
 exports.SchemaTooNewError = SchemaTooNewError;
@@ -198,6 +198,10 @@ exports.schemaV6Ddl = [
 ];
 exports.schemaV7Ddl = [
     "ALTER TABLE memories ADD COLUMN questions TEXT NOT NULL DEFAULT '[]'",
+];
+exports.schemaV9Ddl = [
+    "ALTER TABLE memories ADD COLUMN trial_started_at TEXT",
+    "ALTER TABLE memories ADD COLUMN trial_used_base INTEGER NOT NULL DEFAULT 0",
 ];
 exports.questionsVecTableDdl = `CREATE VIRTUAL TABLE questions_vec USING vec0(
   question_id TEXT PRIMARY KEY,
