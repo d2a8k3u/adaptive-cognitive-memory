@@ -15,6 +15,7 @@ export type Cardinality = (typeof CARDINALITIES)[number];
 export type ResolutionAction = (typeof RESOLUTION_ACTIONS)[number];
 export type MemoryScope = (typeof MEMORY_SCOPES)[number];
 export type MemoryState = (typeof MEMORY_STATES)[number];
+export const CONSULTABLE_STATES: readonly MemoryState[] = ["active", "hypothesis"];
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 
 export interface Slot {

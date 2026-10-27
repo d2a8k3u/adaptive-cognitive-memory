@@ -5,7 +5,14 @@ import { DeadlineExceededError, embedQuery, modelCached, withDeadline } from "./
 import type { PromptCandidate, RecalledMemory, ToolCandidate } from "./gate";
 import { minLineTokens } from "./inject";
 import { anchorHit, keyHit, type MemoryKeys, parseStoredList, type ToolLookup } from "./keys";
-import type { Epistemic, MemoryKind, MemoryScope, MemoryType } from "./policy";
+import {
+  CONSULTABLE_STATES,
+  type Epistemic,
+  type MemoryKind,
+  type MemoryScope,
+  type MemoryState,
+  type MemoryType,
+} from "./policy";
 import { distinctWords } from "./prompt";
 import { PINNED_KINDS, type PinnedCandidate } from "./session";
 
@@ -15,6 +22,7 @@ export interface RecallRow {
   type: MemoryType;
   importance: number;
   abstract: string;
+  state: MemoryState;
   score: number;
 }
 
@@ -98,9 +106,9 @@ const KNN_LIMIT = 10;
 const QUESTION_KNN_LIMIT = 40;
 const FTS_HYBRID_LIMIT = 10;
 const FTS_CANDIDATE_LIMIT = 20;
-const ACTIVE_STATE = "active";
-const RECALLABLE_ROW = "state = 'active' AND (invalid_at IS NULL OR invalid_at > ?)";
-const RECALLABLE_MEMORY = "m.state = 'active' AND (m.invalid_at IS NULL OR m.invalid_at > ?)";
+const RECALL_STATES: readonly MemoryState[] = ["active"];
+const STILL_VALID_MEMORY = "(m.invalid_at IS NULL OR m.invalid_at > ?)";
+const RECALLABLE_MEMORY = `m.state = 'active' AND ${STILL_VALID_MEMORY}`;
 const KEY_COLUMNS_FILTER = "{conflict_key keywords}";
 const TICKET_COLUMNS_FILTER = "{keywords}";
 const MEMORY_FIELDS = `m.id, m.kind, m.epistemic, m.scope, m.abstract,
@@ -113,6 +121,7 @@ interface MemoryRecord {
   type: MemoryType;
   importance: number;
   abstract: string;
+  state: MemoryState;
 }
 
 interface StoredMemory {
@@ -128,6 +137,7 @@ interface StoredMemory {
 }
 
 interface KnnFilter {
+  states: readonly MemoryState[];
   scope: MemoryScope;
   projectId?: string;
   type?: MemoryType;
@@ -144,6 +154,7 @@ interface FtsHit {
 }
 
 interface FtsFilter {
+  readonly states: readonly MemoryState[];
   readonly projectId: string;
   readonly scope?: MemoryScope;
   readonly type?: MemoryType;
@@ -289,7 +300,7 @@ export async function promptCandidates(
   source: RecallSource,
   request: PromptRequest,
 ): Promise<PromptCandidates> {
-  const filter: FtsFilter = { projectId: request.projectId };
+  const filter: FtsFilter = { states: RECALL_STATES, projectId: request.projectId };
   const match = anyTermMatchExpression(request.tokens, FTS_QUERY_MAX_TERMS);
   const ranks = new Map(
     match === ""
@@ -407,7 +418,7 @@ function keywordIds(db: Db, request: ToolRequest): string[] {
   return ftsHits(
     db,
     `${KEY_COLUMNS_FILTER} : (${match})`,
-    { projectId: request.projectId },
+    { states: RECALL_STATES, projectId: request.projectId },
     FTS_CANDIDATE_LIMIT,
     request.now,
   ).map((hit) => hit.id);
@@ -415,8 +426,8 @@ function keywordIds(db: Db, request: ToolRequest): string[] {
 
 function ownPartitionKnn(db: Db, vector: Float32Array, projectId: string): KnnHit[] {
   return [
-    ...knnHits(db, vector, { scope: "user" }),
-    ...knnHits(db, vector, { scope: "project", projectId }),
+    ...knnHits(db, vector, { states: RECALL_STATES, scope: "user" }),
+    ...knnHits(db, vector, { states: RECALL_STATES, scope: "project", projectId }),
   ];
 }
 
@@ -425,10 +436,11 @@ function ownPartitionQuestionKnn(db: Db, vector: Float32Array, projectId: string
     db
       .prepare(
         `SELECT memory_id AS id, distance FROM questions_vec
-         WHERE state = ? AND ${partition} AND embedding MATCH ? AND k = ?`,
+         WHERE ${inStates("state", RECALL_STATES)} AND ${partition}
+           AND embedding MATCH ? AND k = ?`,
       )
       .all(
-        ACTIVE_STATE,
+        ...RECALL_STATES,
         ...params,
         JSON.stringify(Array.from(vector)),
         QUESTION_KNN_LIMIT,
@@ -456,8 +468,17 @@ function ftsRecall(db: Db, options: RecallOptions, now: string): RecallRow[] {
     return [];
   }
   const limit = options.limit ?? DEFAULT_RECALL_LIMIT;
-  const ids = ftsHits(db, match, options, limit, now).map((hit) => hit.id);
+  const ids = ftsHits(db, match, searchFilter(options), limit, now).map((hit) => hit.id);
   return fetchRanked(db, topRanked(rrfFuse([ids]), limit), now);
+}
+
+function searchFilter(options: RecallOptions): FtsFilter {
+  return {
+    states: CONSULTABLE_STATES,
+    projectId: options.projectId,
+    scope: options.scope,
+    type: options.type,
+  };
 }
 
 function hybridRecall(
@@ -468,11 +489,16 @@ function hybridRecall(
 ): RecallRow[] {
   const rankings: string[][] = [];
   if (options.scope !== "project") {
-    rankings.push(knnHits(db, vector, { scope: "user", type: options.type }).map((hit) => hit.id));
+    rankings.push(
+      knnHits(db, vector, { states: CONSULTABLE_STATES, scope: "user", type: options.type }).map(
+        (hit) => hit.id,
+      ),
+    );
   }
   if (options.scope !== "user") {
     rankings.push(
       knnHits(db, vector, {
+        states: CONSULTABLE_STATES,
         scope: "project",
         projectId: options.projectId,
         type: options.type,
@@ -481,14 +507,20 @@ function hybridRecall(
   }
   const match = ftsMatchExpression(options.query);
   if (match !== "") {
-    rankings.push(ftsHits(db, match, options, FTS_HYBRID_LIMIT, now).map((hit) => hit.id));
+    rankings.push(
+      ftsHits(db, match, searchFilter(options), FTS_HYBRID_LIMIT, now).map((hit) => hit.id),
+    );
   }
   return fetchRanked(db, topRanked(rrfFuse(rankings), options.limit ?? DEFAULT_RECALL_LIMIT), now);
 }
 
+function inStates(column: string, states: readonly MemoryState[]): string {
+  return `${column} IN (${states.map(() => "?").join(", ")})`;
+}
+
 function knnHits(db: Db, vector: Float32Array, filter: KnnFilter): KnnHit[] {
-  const clauses: string[] = ["state = ?"];
-  const params: unknown[] = [ACTIVE_STATE];
+  const clauses: string[] = [inStates("state", filter.states)];
+  const params: unknown[] = [...filter.states];
   if (filter.type !== undefined) {
     clauses.push("type = ?");
     params.push(filter.type);
@@ -507,8 +539,8 @@ function knnHits(db: Db, vector: Float32Array, filter: KnnFilter): KnnHit[] {
 }
 
 function ftsHits(db: Db, match: string, filter: FtsFilter, limit: number, now: string): FtsHit[] {
-  const clauses = ["memories_fts MATCH ?", RECALLABLE_MEMORY];
-  const params: unknown[] = [match, now];
+  const clauses = ["memories_fts MATCH ?", inStates("m.state", filter.states), STILL_VALID_MEMORY];
+  const params: unknown[] = [match, ...filter.states, now];
   if (filter.scope === "user") {
     clauses.push("m.scope = ?");
     params.push("user");
@@ -550,10 +582,11 @@ function fetchRanked(
   const placeholders = ranked.map(() => "?").join(", ");
   const found = db
     .prepare(
-      `SELECT id, scope, type, importance, abstract FROM memories
-       WHERE ${RECALLABLE_ROW} AND id IN (${placeholders})`,
+      `SELECT m.id, m.scope, m.type, m.importance, m.abstract, m.state FROM memories m
+       WHERE ${inStates("m.state", CONSULTABLE_STATES)} AND ${STILL_VALID_MEMORY}
+         AND m.id IN (${placeholders})`,
     )
-    .all(now, ...ranked.map(([id]) => id)) as MemoryRecord[];
+    .all(...CONSULTABLE_STATES, now, ...ranked.map(([id]) => id)) as MemoryRecord[];
   const byId = new Map(found.map((row) => [row.id, row]));
   return ranked.flatMap(([id, score]) => {
     const record = byId.get(id);

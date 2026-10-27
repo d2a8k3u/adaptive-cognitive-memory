@@ -404,7 +404,7 @@ describe("recall hybrid mode", () => {
     }
   });
 
-  it("recalls only active, still-valid rows on the knn, fts and session paths, filtering knn inside the query", async () => {
+  it("searches active and hypothesis rows with their state while session recall stays active, never revoked or expired, filtering knn inside the query", async () => {
     const closeMatch = (id: string, state: SeedMemory["state"], invalidAt?: string) => ({
       id,
       projectId: PROJECT_B,
@@ -437,11 +437,17 @@ describe("recall hybrid mode", () => {
     ]);
     try {
       const query = "database deployment zero downtime";
-      const hybrid = await recall(opened, hybridOptions({ query }));
-      expect(hybrid.rows.map((row) => row.id)).toEqual(["live"]);
+      const searched = (result: RecallResult) =>
+        result.rows.map((row) => [row.id, row.state]).sort();
+      const searchable = [
+        ["doubt", "hypothesis"],
+        ["live", "active"],
+      ];
 
-      const ftsOnly = await recall(opened, hybridOptions({ query, ftsOnly: true }));
-      expect(ftsOnly.rows.map((row) => row.id)).toEqual(["live"]);
+      expect(searched(await recall(opened, hybridOptions({ query })))).toEqual(searchable);
+      expect(searched(await recall(opened, hybridOptions({ query, ftsOnly: true })))).toEqual(
+        searchable,
+      );
 
       const session = pinnedCandidates(opened.db, { projectId: PROJECT_B, now: NOW });
       expect(session.map((row) => row.id)).toEqual(["live"]);
