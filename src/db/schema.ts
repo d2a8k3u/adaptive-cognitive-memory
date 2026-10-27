@@ -10,7 +10,7 @@ import {
 } from "../cfg";
 import { RECALL_EVENT_NAMES } from "./events";
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export class SchemaTooNewError extends Error {}
 
