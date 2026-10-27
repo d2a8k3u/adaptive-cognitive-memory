@@ -6,7 +6,7 @@ exports.refreshImportance = refreshImportance;
 exports.settleReceiptEvidence = settleReceiptEvidence;
 const lifecycle_1 = require("../lifecycle");
 const transitions_1 = require("./transitions");
-const SNAPSHOT_COLUMNS = `m.id, m.state, m.importance,
+const SNAPSHOT_COLUMNS = `m.id, m.state, m.kind, m.importance,
   m.used_count AS usedCount, m.wrong_count AS wrongCount,
   (SELECT count(DISTINCT i.session_id) FROM injections i
      JOIN receipt_sessions r ON r.session_id = i.session_id

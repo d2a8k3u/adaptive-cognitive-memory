@@ -7,6 +7,7 @@ import { type OpenedDb, openDatabase } from "../src/db/database";
 import { type FeedbackOutcome, recordFeedback } from "../src/db/feedback";
 import { recordInjections, recordReceipt } from "../src/db/injections";
 import { DEMOTION_MIN_RECEIPTED_INJECTIONS, type FeedbackVerdict } from "../src/lifecycle";
+import type { MemoryKind } from "../src/policy";
 
 const PROJECT = "proj-receipts";
 const CREATED_AT = "2026-10-01T00:00:00.000Z";
@@ -20,14 +21,14 @@ function openStore(): OpenedDb {
   return opened;
 }
 
-function seedMemory(opened: OpenedDb, id: string): void {
+function seedMemory(opened: OpenedDb, id: string, kind: MemoryKind = "fact"): void {
   opened.db
     .prepare(
       `INSERT INTO memories (id, type, kind, scope, project_id, title, abstract, content,
          created_at, updated_at)
-       VALUES (?, 'semantic', 'constraint', 'project', ?, ?, 'abstract', 'content', ?, ?)`,
+       VALUES (?, 'semantic', ?, 'project', ?, ?, 'abstract', 'content', ?, ?)`,
     )
-    .run(id, PROJECT, `title ${id}`, CREATED_AT, CREATED_AT);
+    .run(id, kind, PROJECT, `title ${id}`, CREATED_AT, CREATED_AT);
 }
 
 function counters(opened: OpenedDb, id: string): Record<string, unknown> {
@@ -163,6 +164,18 @@ describe("receipt evidence", () => {
       ]);
     },
   );
+
+  it("keeps a pinned constraint active when receipt-giving sessions leave it unused", () => {
+    const opened = openStore();
+    seedMemory(opened, "mem-pinned", "constraint");
+    for (let session = 1; session <= DEMOTION_MIN_RECEIPTED_INJECTIONS; session += 1) {
+      injectInSession(opened, session, ["mem-pinned"]);
+      recordReceipt(opened, `session-${session}`, at(session));
+    }
+
+    expect(counters(opened, "mem-pinned").state).toBe("active");
+    expect(transitions(opened, "mem-pinned")).toEqual([]);
+  });
 
   it("never demotes a memory injected only in sessions that gave no receipt", () => {
     const opened = openStore();
