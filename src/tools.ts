@@ -867,7 +867,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: "memory_status",
     description:
-      "What the memory holds and does for this project: its id and recall switch, memory counts by state and kind for user scope and this project, transitions by reason, the share of the newest 500 recall events that injected anything, the share of memories injected in receipt-giving sessions that never got a used receipt, open capture signals and the last injections.",
+      "What the memory holds and does for this project: its id and recall switch, memory counts by state and kind for user scope and this project, transitions by reason, the share of the newest 500 recall events that injected anything, the share of unpinned memories injected in receipt-giving sessions without a used receipt, open capture signals and the last injections.",
     inputSchema: { type: "object", properties: {} },
     run: (deps, _args) => memoryStatus(deps),
   },
