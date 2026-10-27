@@ -8,6 +8,7 @@ import {
   type RecallEventCount,
   STATUS_LIST_LIMIT,
   type StatusFacts,
+  VERDICT_COVERAGE_WINDOW,
 } from "../status";
 import type { Db } from "./database";
 import { recallEnabled } from "./projects";
@@ -53,6 +54,21 @@ function receiptInjections(db: Db): StatusFacts["receiptInjections"] {
     .get(...PINNED_KINDS) as StatusFacts["receiptInjections"];
 }
 
+function verdictCoverage(db: Db): StatusFacts["verdictCoverage"] {
+  const pinnedKinds = PINNED_KINDS.map(() => "?").join(", ");
+  return db
+    .prepare(
+      `SELECT count(*) AS injections,
+         coalesce(sum(EXISTS (SELECT 1 FROM verdicts v
+           WHERE v.session_id = pair.session_id AND v.memory_id = pair.memory_id)), 0) AS judged
+       FROM (SELECT i.session_id, i.memory_id, max(i.at) AS lastAt FROM injections i
+             JOIN memories m ON m.id = i.memory_id
+             WHERE m.kind NOT IN (${pinnedKinds})
+             GROUP BY i.session_id, i.memory_id ORDER BY lastAt DESC LIMIT ?) pair`,
+    )
+    .get(...PINNED_KINDS, VERDICT_COVERAGE_WINDOW) as StatusFacts["verdictCoverage"];
+}
+
 function openSignalFacts(db: Db): OpenSignalFact[] {
   return db
     .prepare(
@@ -79,6 +95,7 @@ export function statusFacts(db: Db, projectId: string): StatusFacts {
     transitionCounts: transitionCounts(db, projectId),
     recallEvents: recallEventCounts(db),
     receiptInjections: receiptInjections(db),
+    verdictCoverage: verdictCoverage(db),
     openSignals: openSignalFacts(db),
     recentInjections: recentInjections(db),
   };

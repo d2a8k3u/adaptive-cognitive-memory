@@ -1085,6 +1085,50 @@ describe("tools", () => {
     expect(outcome).toEqual({ error: expected });
   });
 
+  it("reports verdict coverage: unpinned injections that got a verdict in the same session", async () => {
+    const deps = openDeps();
+    const { db } = deps.env;
+    const judgedFact = await storedId(deps, storeArgs());
+    const silentFact = await storedId(
+      deps,
+      storeArgs({
+        title: "deploy hotfix",
+        content: "Ship hotfixes from the release branch.",
+        conflict_key: "deploy.hotfix",
+      }),
+    );
+    const pinned = await storedId(
+      deps,
+      storeArgs({
+        title: "editor theme",
+        content: "Prefers the dark editor theme in every tool.",
+        type: "pattern",
+        kind: "preference",
+        conflict_key: "tool.editor_theme",
+      }),
+    );
+    const injection = db.prepare(
+      "INSERT INTO injections (session_id, memory_id, event, at) VALUES (?, ?, 'UserPromptSubmit', ?)",
+    );
+    injection.run("session-1", judgedFact, "2026-10-14T09:00:00.000Z");
+    injection.run("session-1", judgedFact, "2026-10-14T09:05:00.000Z");
+    injection.run("session-1", silentFact, "2026-10-14T09:00:00.000Z");
+    injection.run("session-1", pinned, "2026-10-14T09:00:00.000Z");
+    injection.run("session-2", judgedFact, "2026-10-14T10:00:00.000Z");
+    db.prepare(
+      "INSERT INTO verdicts (session_id, memory_id, verdict, at) VALUES (?, ?, 'used', '2026-10-14T09:10:00.000Z')",
+    ).run("session-1", judgedFact);
+
+    const report = await memoryStatus(deps);
+
+    expect(report.verdict_coverage).toEqual({
+      window: 500,
+      injections: 3,
+      judged: 1,
+      share: 1 / 3,
+    });
+  });
+
   it("reports this project's status: own and user counts, the newest-500 rate, receipts, open signals and injections", async () => {
     const deps = openDeps();
     const { db } = deps.env;

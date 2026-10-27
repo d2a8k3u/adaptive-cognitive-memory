@@ -10,6 +10,7 @@ import {
 } from "./policy";
 
 export const RECALL_RATE_WINDOW = 500;
+export const VERDICT_COVERAGE_WINDOW = 500;
 export const STATUS_LIST_LIMIT = 10;
 
 const MS_PER_SECOND = 1000;
@@ -58,6 +59,7 @@ export interface StatusFacts {
   readonly transitionCounts: readonly ReasonCount[];
   readonly recallEvents: readonly RecallEventCount[];
   readonly receiptInjections: { readonly memories: number; readonly neverUsed: number };
+  readonly verdictCoverage: { readonly injections: number; readonly judged: number };
   readonly openSignals: readonly OpenSignalFact[];
   readonly recentInjections: readonly InjectionFact[];
 }
@@ -79,6 +81,12 @@ export interface StatusReport {
   readonly receipt_sessions: {
     readonly memories_injected: number;
     readonly never_used: number;
+    readonly share: number | null;
+  };
+  readonly verdict_coverage: {
+    readonly window: number;
+    readonly injections: number;
+    readonly judged: number;
     readonly share: number | null;
   };
   readonly open_signals: readonly {
@@ -155,6 +163,12 @@ export function statusReport(facts: StatusFacts, now: string): StatusReport {
       memories_injected: receiptInjections.memories,
       never_used: receiptInjections.neverUsed,
       share: ratio(receiptInjections.neverUsed, receiptInjections.memories),
+    },
+    verdict_coverage: {
+      window: VERDICT_COVERAGE_WINDOW,
+      injections: facts.verdictCoverage.injections,
+      judged: facts.verdictCoverage.judged,
+      share: ratio(facts.verdictCoverage.judged, facts.verdictCoverage.injections),
     },
     open_signals: facts.openSignals.map((signal) => ({
       session_id: signal.sessionId,
