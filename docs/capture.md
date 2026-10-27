@@ -4,7 +4,7 @@ Nothing is auto-saved. Claude stores durable knowledge with the `memory_*` MCP t
 
 ## Two-phase store
 
-Every memory names its slot (`kind`, `conflict_key`, `cardinality`, `value_text`). A store that finds related memories in its project (same key, nearest vectors, keyword hits) writes nothing and returns them as `needs_resolution`; Claude repeats the call with `SUPERSEDE`, `UPDATE`, `NOOP` or `ADD`, and the server rejects resolutions that would break a single-valued key or cross a project. Superseded memories are revoked: they stay readable but never reach recall. A procedure, constraint or preference with the same key and value in two projects is copied to `user` scope; facts never are.
+Every memory names its slot (`kind`, `conflict_key`, `cardinality`, `value_text`). A store that finds related active or hypothesis memories in its project (same key, nearest vectors, keyword hits) writes nothing and returns them, each with its `state`, as `needs_resolution`; Claude repeats the call with `SUPERSEDE`, `UPDATE`, `NOOP` or `ADD`, and the server rejects resolutions that would break a single-valued key or cross a project. Superseded memories are revoked: they stay readable but never reach recall. A procedure, constraint or preference with the same key and value in two projects is copied to `user` scope; facts never are.
 
 ## Capture moments and the Stop checkpoint
 

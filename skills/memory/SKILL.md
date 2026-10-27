@@ -54,18 +54,19 @@ The server rejects an anchor or key that no recall path can hit and names the fi
 
 ## When the answer is needs_resolution
 
-The server wrote nothing and lists the candidates it found. Repeat the same call with `resolution`:
+The server wrote nothing and lists the candidates it found, active ones and hypotheses alike; each names its `state`. Repeat the same call with `resolution`:
 
 - `SUPERSEDE` + `target` — a single-valued fact changed; the old memory is revoked.
 - `UPDATE` + `target` — refine the same fact in place.
 - `NOOP` + `target` — it is already known; only its support count changes.
 - `ADD` — a genuinely different memory.
 
-A rejection message names the resolution to use instead. An exact duplicate of an active or hypothesis memory is recorded as `noop` automatically, and a hypothesis comes back to active.
+A rejection message names the resolution to use instead. An exact duplicate of an active or hypothesis memory is recorded as `noop` automatically, and a hypothesis comes back to active. When a candidate in `hypothesis` holds the lesson you are storing, `NOOP` or `UPDATE` it instead of `ADD`: that brings it back to active rather than leaving a copy beside it; `SUPERSEDE` targets active memories only.
 
 ## Reading and curating
 
 - Recall shows abstracts with the full id; read the body with `memory_get`.
+- Hook recall injects active memories only; `memory_search` also finds memories in `hypothesis` and names each result's `state`.
 - `memory_list` browses memories newest first, without content, filtered by state, kind, type or scope; pass its `next_cursor` as `before` for the next page. `project: "all"` shows every project's memories, read-only.
 - `memory_update` edits title, abstract, content, keywords or anchors, and questions in place; keywords, anchors and questions replace the stored value whole. Revoked memories are immutable, and scope or kind cannot change: store the memory again, then delete the old one. Importance is derived from feedback, never typed.
 - For a full review with the user, use the `memory-curate` skill.

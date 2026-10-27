@@ -31,6 +31,7 @@ const UPDATE_ATTEMPTS = 3;
 class MemoryRejection extends Error {
 }
 exports.MemoryRejection = MemoryRejection;
+const CONSULTABLE_STATE_SQL = `state IN (${policy_1.CONSULTABLE_STATES.map(() => "?").join(", ")})`;
 const UPDATE_BASIS_COLUMNS = [
     "title",
     "abstract",
@@ -438,17 +439,17 @@ function sameKeyIds(db, row) {
     const partition = partitionFilter(row);
     const rows = db
         .prepare(`SELECT id FROM memories
-       WHERE conflict_key = ? AND state = 'active' AND ${partition.sql}
+       WHERE conflict_key = ? AND ${CONSULTABLE_STATE_SQL} AND ${partition.sql}
        ORDER BY created_at LIMIT ?`)
-        .all(row.conflictKey, ...partition.params, CANDIDATE_SOURCE_LIMIT);
+        .all(row.conflictKey, ...policy_1.CONSULTABLE_STATES, ...partition.params, CANDIDATE_SOURCE_LIMIT);
     return rows.map((hit) => hit.id);
 }
 function neighbourIds(db, row, embedding) {
     const partition = partitionFilter(row);
     const rows = db
         .prepare(`SELECT memory_id FROM memories_vec
-       WHERE state = 'active' AND ${partition.sql} AND embedding MATCH ? AND k = ?`)
-        .all(...partition.params, vecBlob(embedding), CANDIDATE_SOURCE_LIMIT);
+       WHERE ${CONSULTABLE_STATE_SQL} AND ${partition.sql} AND embedding MATCH ? AND k = ?`)
+        .all(...policy_1.CONSULTABLE_STATES, ...partition.params, vecBlob(embedding), CANDIDATE_SOURCE_LIMIT);
     return rows.map((hit) => hit.memory_id);
 }
 function keywordHitIds(db, row) {
@@ -459,9 +460,9 @@ function keywordHitIds(db, row) {
     const partition = partitionFilter(row, "m.");
     const rows = db
         .prepare(`SELECT m.id AS id FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
-       WHERE memories_fts MATCH ? AND m.state = 'active' AND ${partition.sql}
+       WHERE memories_fts MATCH ? AND m.${CONSULTABLE_STATE_SQL} AND ${partition.sql}
        ORDER BY rank LIMIT ?`)
-        .all(match, ...partition.params, CANDIDATE_SOURCE_LIMIT);
+        .all(match, ...policy_1.CONSULTABLE_STATES, ...partition.params, CANDIDATE_SOURCE_LIMIT);
     return rows.map((hit) => hit.id);
 }
 function candidatesByIds(db, ids) {
@@ -470,7 +471,8 @@ function candidatesByIds(db, ids) {
     }
     const placeholders = ids.map(() => "?").join(", ");
     const rows = db
-        .prepare(`SELECT id, title, kind, conflict_key, cardinality, value_text, valid_from, support_count, scope
+        .prepare(`SELECT id, title, kind, conflict_key, cardinality, value_text, valid_from, support_count, scope,
+         state
        FROM memories WHERE id IN (${placeholders})`)
         .all(...ids);
     const byId = new Map(rows.map((candidate) => [candidate.id, candidate]));
