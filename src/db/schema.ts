@@ -8,9 +8,10 @@ import {
   SIGNAL_DETAIL_MAX_CHARS,
   TITLE_MAX_CHARS,
 } from "../cfg";
+import { FEEDBACK_VERDICTS } from "../lifecycle";
 import { RECALL_EVENT_NAMES } from "./events";
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export class SchemaTooNewError extends Error {}
 
@@ -215,6 +216,19 @@ export const schemaV6Ddl: readonly string[] = [
 
 export const schemaV7Ddl: readonly string[] = [
   "ALTER TABLE memories ADD COLUMN questions TEXT NOT NULL DEFAULT '[]'",
+];
+
+const FEEDBACK_VERDICT_CHECK_LIST = FEEDBACK_VERDICTS.map((verdict) => `'${verdict}'`).join(", ");
+
+export const schemaV9Ddl: readonly string[] = [
+  `CREATE TABLE verdicts (
+    session_id TEXT NOT NULL,
+    memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    verdict TEXT NOT NULL CHECK (verdict IN (${FEEDBACK_VERDICT_CHECK_LIST})),
+    at TEXT NOT NULL
+  )`,
+  "CREATE INDEX verdicts_memory_at ON verdicts (memory_id, at)",
+  "ALTER TABLE memories ADD COLUMN trial_started_at TEXT",
 ];
 
 export const questionsVecTableDdl = `CREATE VIRTUAL TABLE questions_vec USING vec0(

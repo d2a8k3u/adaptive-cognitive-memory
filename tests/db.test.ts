@@ -803,7 +803,7 @@ describe("schema v8 migration", () => {
     }
   }
 
-  it("brings back pinned memories demoted for unused receipts unless wrong or their slot is taken", () => {
+  it("brings back pinned memories demoted for unused receipts unless wrong or their slot is taken, before v9 lifts the rest", () => {
     const config = tempConfig();
     createV7Database(config.dbPath);
 
@@ -812,7 +812,7 @@ describe("schema v8 migration", () => {
       expect(metaValue(opened.db, "schema_version")).toBe(String(SCHEMA_VERSION));
       expect(opened.db.prepare("SELECT id, state FROM memories ORDER BY id").all()).toEqual([
         { id: "mem-constraint-unused", state: "active" },
-        { id: "mem-fact-unused", state: "hypothesis" },
+        { id: "mem-fact-unused", state: "active" },
         { id: "mem-preference-wrong", state: "hypothesis" },
         { id: "mem-slot-demoted", state: "hypothesis" },
         { id: "mem-slot-holder", state: "active" },
@@ -831,6 +831,88 @@ describe("schema v8 migration", () => {
           to_state: "active",
           reason: "pinned_exemption",
         },
+        {
+          memory_id: "mem-fact-unused",
+          from_state: "hypothesis",
+          to_state: "active",
+          reason: "silence_not_evidence",
+        },
+      ]);
+    } finally {
+      opened.db.close();
+    }
+  });
+});
+
+describe("schema v9 migration", () => {
+  const DEMOTED_AT = "2026-10-26T04:11:53.472Z";
+
+  function createV8Database(dbPath: string): void {
+    const raw = new Database(dbPath);
+    try {
+      for (const statement of [
+        ...baselineDdl,
+        ...schemaV2Ddl,
+        ...schemaV3Ddl,
+        ...schemaV4Ddl,
+        ...schemaV5Ddl,
+        ...schemaV6Ddl,
+        ...schemaV7Ddl,
+      ]) {
+        raw.exec(statement);
+      }
+      raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '8')").run();
+      const memory = raw.prepare(
+        `INSERT INTO memories (id, type, kind, scope, project_id, title, abstract, content,
+           conflict_key, cardinality, state, created_at, updated_at)
+         VALUES (?, 'semantic', 'fact', 'project', 'proj-a', ?, 'abstract', 'content', ?, ?, ?, ?, ?)`,
+      );
+      const transition = raw.prepare(
+        `INSERT INTO transitions (memory_id, from_state, to_state, reason, evidence, at)
+         VALUES (?, 'active', 'hypothesis', ?, 'evidence', ?)`,
+      );
+      for (const [id, conflictKey, cardinality, state, reason] of [
+        ["mem-silence-demoted", "", "multi", "hypothesis", "unused_after_receipts"],
+        ["mem-wrong-demoted", "", "multi", "hypothesis", "feedback_wrong"],
+        ["mem-slot-demoted", "db.engine", "single", "hypothesis", "unused_after_receipts"],
+        ["mem-slot-holder", "db.engine", "single", "active", undefined],
+      ]) {
+        memory.run(id, `title ${id}`, conflictKey, cardinality, state, DEMOTED_AT, DEMOTED_AT);
+        if (reason !== undefined) {
+          transition.run(id, reason, DEMOTED_AT);
+        }
+      }
+    } finally {
+      raw.close();
+    }
+  }
+
+  it("brings back memories demoted on silence with a fresh trial, unless wrong or their slot is taken", () => {
+    const config = tempConfig();
+    createV8Database(config.dbPath);
+
+    const opened = openDatabase(config);
+    try {
+      expect(metaValue(opened.db, "schema_version")).toBe(String(SCHEMA_VERSION));
+      expect(
+        opened.db
+          .prepare(
+            `SELECT id, state, trial_started_at IS NOT NULL AS trialStarted FROM memories
+             ORDER BY id`,
+          )
+          .all(),
+      ).toEqual([
+        { id: "mem-silence-demoted", state: "active", trialStarted: 1 },
+        { id: "mem-slot-demoted", state: "hypothesis", trialStarted: 0 },
+        { id: "mem-slot-holder", state: "active", trialStarted: 0 },
+        { id: "mem-wrong-demoted", state: "hypothesis", trialStarted: 0 },
+      ]);
+      expect(
+        opened.db
+          .prepare("SELECT memory_id, to_state, reason FROM transitions WHERE at > ?")
+          .all(DEMOTED_AT),
+      ).toEqual([
+        { memory_id: "mem-silence-demoted", to_state: "active", reason: "silence_not_evidence" },
       ]);
     } finally {
       opened.db.close();

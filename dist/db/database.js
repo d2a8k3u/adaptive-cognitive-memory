@@ -37,10 +37,22 @@ const migrationSteps = [
     { version: 5, apply: (db) => execAll(db, schema_1.schemaV5Ddl) },
     { version: 6, apply: (db) => execAll(db, schema_1.schemaV6Ddl) },
     { version: 7, apply: (db) => execAll(db, schema_1.schemaV7Ddl) },
-    { version: 8, apply: (db) => reactivatePinnedDemotions(db, new Date().toISOString()) },
+    { version: 8, apply: (db) => reactivateUnusedDemotions(db, PINNED_EXEMPTION, nowIso()) },
+    { version: 9, apply: migrateToV9 },
 ];
-const PINNED_EXEMPTION_REASON = "pinned_exemption";
-const PINNED_EXEMPTION_EVIDENCE = "schema v8 migration";
+const PINNED_EXEMPTION = {
+    kinds: session_1.PINNED_KINDS,
+    reason: "pinned_exemption",
+    evidence: "schema v8 migration",
+};
+const SILENCE_NOT_EVIDENCE = {
+    kinds: policy_1.MEMORY_KINDS,
+    reason: "silence_not_evidence",
+    evidence: "schema v9 migration",
+};
+function nowIso() {
+    return new Date().toISOString();
+}
 function execAll(db, statements) {
     for (const statement of statements) {
         db.exec(statement);
@@ -64,35 +76,46 @@ function migrateToV3(db) {
         setImportance.run((0, lifecycle_1.derivedImportance)({ ...row, receiptedInjections: 0 }), row.id);
     }
 }
-function reactivatePinnedDemotions(db, at) {
-    const pinnedKinds = session_1.PINNED_KINDS.map(() => "?").join(", ");
+function migrateToV9(db) {
+    execAll(db, schema_1.schemaV9Ddl);
+    const at = nowIso();
+    const startTrial = db.prepare("UPDATE memories SET trial_started_at = ? WHERE id = ?");
+    for (const id of reactivateUnusedDemotions(db, SILENCE_NOT_EVIDENCE, at)) {
+        startTrial.run(at, id);
+    }
+}
+function reactivateUnusedDemotions(db, repair, at) {
+    const kinds = repair.kinds.map(() => "?").join(", ");
     const demoted = db
         .prepare(`SELECT m.id FROM memories m
-       WHERE m.state = 'hypothesis' AND m.kind IN (${pinnedKinds})
+       WHERE m.state = 'hypothesis' AND m.kind IN (${kinds})
          AND (SELECT t.reason FROM transitions t WHERE t.memory_id = m.id
               ORDER BY t.at DESC, t.rowid DESC LIMIT 1) = 'unused_after_receipts'
        ORDER BY m.updated_at DESC, m.id`)
         .pluck()
-        .all(...session_1.PINNED_KINDS);
+        .all(...repair.kinds);
     const reactivateUnlessSlotHeld = db.prepare(`UPDATE memories SET state = 'active', updated_at = ?
      WHERE id = ? AND NOT (cardinality = 'single' AND conflict_key <> '' AND EXISTS (
        SELECT 1 FROM memories holder
        WHERE holder.state = 'active' AND holder.cardinality = 'single'
          AND holder.conflict_key = memories.conflict_key AND holder.scope = memories.scope
          AND (memories.scope = 'user' OR holder.project_id = memories.project_id)))`);
+    const reactivated = [];
     for (const id of demoted) {
         if (reactivateUnlessSlotHeld.run(at, id).changes === 1) {
             (0, transitions_1.recordTransition)(db, {
                 memoryId: id,
                 fromState: "hypothesis",
                 toState: "active",
-                reason: PINNED_EXEMPTION_REASON,
-                evidence: PINNED_EXEMPTION_EVIDENCE,
+                reason: repair.reason,
+                evidence: repair.evidence,
                 relatedId: null,
                 at,
             });
+            reactivated.push(id);
         }
     }
+    return reactivated;
 }
 function probeNativeModule() {
     new better_sqlite3_1.default(":memory:").close();

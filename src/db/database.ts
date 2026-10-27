@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { getLoadablePath } from "sqlite-vec";
 import { type Config, EMBED_DIM, MODEL_ID } from "../cfg";
 import { derivedImportance } from "../lifecycle";
-import { contentHash } from "../policy";
+import { contentHash, MEMORY_KINDS, type MemoryKind } from "../policy";
 import { PINNED_KINDS } from "../session";
 import { PLUGIN_NAME, PLUGIN_VERSION } from "../version";
 import {
@@ -16,6 +16,7 @@ import {
   schemaV5Ddl,
   schemaV6Ddl,
   schemaV7Ddl,
+  schemaV9Ddl,
   vecTableDdl,
 } from "./schema";
 import { recordTransition } from "./transitions";
@@ -52,11 +53,31 @@ const migrationSteps: readonly MigrationStep[] = [
   { version: 5, apply: (db) => execAll(db, schemaV5Ddl) },
   { version: 6, apply: (db) => execAll(db, schemaV6Ddl) },
   { version: 7, apply: (db) => execAll(db, schemaV7Ddl) },
-  { version: 8, apply: (db) => reactivatePinnedDemotions(db, new Date().toISOString()) },
+  { version: 8, apply: (db) => reactivateUnusedDemotions(db, PINNED_EXEMPTION, nowIso()) },
+  { version: 9, apply: migrateToV9 },
 ];
 
-const PINNED_EXEMPTION_REASON = "pinned_exemption";
-const PINNED_EXEMPTION_EVIDENCE = "schema v8 migration";
+interface DemotionRepair {
+  readonly kinds: readonly MemoryKind[];
+  readonly reason: string;
+  readonly evidence: string;
+}
+
+const PINNED_EXEMPTION: DemotionRepair = {
+  kinds: PINNED_KINDS,
+  reason: "pinned_exemption",
+  evidence: "schema v8 migration",
+};
+
+const SILENCE_NOT_EVIDENCE: DemotionRepair = {
+  kinds: MEMORY_KINDS,
+  reason: "silence_not_evidence",
+  evidence: "schema v9 migration",
+};
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
 
 function execAll(db: Db, statements: readonly string[]): void {
   for (const statement of statements) {
@@ -87,18 +108,27 @@ function migrateToV3(db: Db): void {
   }
 }
 
-function reactivatePinnedDemotions(db: Db, at: string): void {
-  const pinnedKinds = PINNED_KINDS.map(() => "?").join(", ");
+function migrateToV9(db: Db): void {
+  execAll(db, schemaV9Ddl);
+  const at = nowIso();
+  const startTrial = db.prepare("UPDATE memories SET trial_started_at = ? WHERE id = ?");
+  for (const id of reactivateUnusedDemotions(db, SILENCE_NOT_EVIDENCE, at)) {
+    startTrial.run(at, id);
+  }
+}
+
+function reactivateUnusedDemotions(db: Db, repair: DemotionRepair, at: string): string[] {
+  const kinds = repair.kinds.map(() => "?").join(", ");
   const demoted = db
     .prepare(
       `SELECT m.id FROM memories m
-       WHERE m.state = 'hypothesis' AND m.kind IN (${pinnedKinds})
+       WHERE m.state = 'hypothesis' AND m.kind IN (${kinds})
          AND (SELECT t.reason FROM transitions t WHERE t.memory_id = m.id
               ORDER BY t.at DESC, t.rowid DESC LIMIT 1) = 'unused_after_receipts'
        ORDER BY m.updated_at DESC, m.id`,
     )
     .pluck()
-    .all(...PINNED_KINDS) as string[];
+    .all(...repair.kinds) as string[];
   const reactivateUnlessSlotHeld = db.prepare(
     `UPDATE memories SET state = 'active', updated_at = ?
      WHERE id = ? AND NOT (cardinality = 'single' AND conflict_key <> '' AND EXISTS (
@@ -107,19 +137,22 @@ function reactivatePinnedDemotions(db: Db, at: string): void {
          AND holder.conflict_key = memories.conflict_key AND holder.scope = memories.scope
          AND (memories.scope = 'user' OR holder.project_id = memories.project_id)))`,
   );
+  const reactivated: string[] = [];
   for (const id of demoted) {
     if (reactivateUnlessSlotHeld.run(at, id).changes === 1) {
       recordTransition(db, {
         memoryId: id,
         fromState: "hypothesis",
         toState: "active",
-        reason: PINNED_EXEMPTION_REASON,
-        evidence: PINNED_EXEMPTION_EVIDENCE,
+        reason: repair.reason,
+        evidence: repair.evidence,
         relatedId: null,
         at,
       });
+      reactivated.push(id);
     }
   }
+  return reactivated;
 }
 
 export function probeNativeModule(): void {
