@@ -6,6 +6,7 @@ exports.feedbackTransition = feedbackTransition;
 exports.feedbackRejection = feedbackRejection;
 exports.receiptEvidenceTransition = receiptEvidenceTransition;
 exports.derivedImportance = derivedImportance;
+const session_1 = require("./session");
 exports.FEEDBACK_VERDICTS = ["used", "wrong", "not_applicable"];
 function reactivation(state, reason, evidence) {
     return state === "hypothesis" ? { toState: "active", reason, evidence } : undefined;
@@ -32,8 +33,10 @@ function feedbackRejection(requested, found) {
 exports.DEMOTION_MIN_RECEIPTED_INJECTIONS = 5;
 const DEMOTION_MIN_USED_SHARE = 0.5;
 function receiptEvidenceTransition(snapshot) {
-    const { state, usedCount, receiptedInjections } = snapshot;
-    if (state !== "active" || receiptedInjections < exports.DEMOTION_MIN_RECEIPTED_INJECTIONS) {
+    const { state, kind, usedCount, receiptedInjections } = snapshot;
+    if (state !== "active" ||
+        session_1.PINNED_KINDS.includes(kind) ||
+        receiptedInjections < exports.DEMOTION_MIN_RECEIPTED_INJECTIONS) {
         return undefined;
     }
     if (usedCount / receiptedInjections >= DEMOTION_MIN_USED_SHARE) {

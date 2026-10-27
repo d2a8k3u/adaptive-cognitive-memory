@@ -1,4 +1,5 @@
-import type { MemoryState } from "./policy";
+import type { MemoryKind, MemoryState } from "./policy";
+import { PINNED_KINDS } from "./session";
 
 export interface ReceiptCounters {
   readonly usedCount: number;
@@ -8,6 +9,7 @@ export interface ReceiptCounters {
 
 export interface LifecycleSnapshot extends ReceiptCounters {
   readonly state: MemoryState;
+  readonly kind: MemoryKind;
 }
 
 export const FEEDBACK_VERDICTS = ["used", "wrong", "not_applicable"] as const;
@@ -66,8 +68,12 @@ export const DEMOTION_MIN_RECEIPTED_INJECTIONS = 5;
 const DEMOTION_MIN_USED_SHARE = 0.5;
 
 export function receiptEvidenceTransition(snapshot: LifecycleSnapshot): Transition | undefined {
-  const { state, usedCount, receiptedInjections } = snapshot;
-  if (state !== "active" || receiptedInjections < DEMOTION_MIN_RECEIPTED_INJECTIONS) {
+  const { state, kind, usedCount, receiptedInjections } = snapshot;
+  if (
+    state !== "active" ||
+    PINNED_KINDS.includes(kind) ||
+    receiptedInjections < DEMOTION_MIN_RECEIPTED_INJECTIONS
+  ) {
     return undefined;
   }
   if (usedCount / receiptedInjections >= DEMOTION_MIN_USED_SHARE) {

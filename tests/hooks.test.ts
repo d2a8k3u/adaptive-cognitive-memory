@@ -975,7 +975,7 @@ describe("hooks feedback receipt", () => {
         projectId: PROJECT_ID,
         scope: "project",
         type: "pattern",
-        kind: "constraint",
+        kind: "fact",
         title: "release freeze",
         abstract: "no deploys on fridays",
         content: "BODY-MARKER-1c40 body",

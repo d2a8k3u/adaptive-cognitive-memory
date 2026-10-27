@@ -14,7 +14,7 @@ function counters(overrides: Partial<ReceiptCounters>): ReceiptCounters {
 }
 
 function snapshot(overrides: Partial<LifecycleSnapshot>): LifecycleSnapshot {
-  return { ...FRESH_COUNTERS, state: "active", ...overrides };
+  return { ...FRESH_COUNTERS, state: "active", kind: "fact", ...overrides };
 }
 
 describe("feedbackTransition", () => {
@@ -79,6 +79,14 @@ describe("receiptEvidenceTransition", () => {
     {
       name: "a hypothesis row already out of recall",
       row: { state: "hypothesis", receiptedInjections: 9 } as const,
+    },
+    {
+      name: "a pinned constraint injected at every session start",
+      row: { kind: "constraint", receiptedInjections: 9 } as const,
+    },
+    {
+      name: "a pinned preference injected at every session start",
+      row: { kind: "preference", receiptedInjections: 9 } as const,
     },
   ])("keeps the row for $name", ({ row }) => {
     expect(receiptEvidenceTransition(snapshot(row))).toBeUndefined();
