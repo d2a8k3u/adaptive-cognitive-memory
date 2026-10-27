@@ -177,6 +177,36 @@ describe("receipt evidence", () => {
     expect(transitions(opened, "mem-pinned")).toEqual([]);
   });
 
+  it("gives a reactivated memory a fresh trial instead of demoting it on its next injection", () => {
+    const opened = openStore();
+    seedMemory(opened, "mem-revived");
+    const receiptedSession = (session: number) => {
+      injectInSession(opened, session, ["mem-revived"]);
+      recordReceipt(opened, `session-${session}`, at(session));
+    };
+    for (let session = 1; session <= DEMOTION_MIN_RECEIPTED_INJECTIONS; session += 1) {
+      receiptedSession(session);
+    }
+    feedback(opened, ["mem-revived"], "used", at(20));
+    const trialStart = 21;
+    const trialEnd = trialStart + DEMOTION_MIN_RECEIPTED_INJECTIONS - 1;
+
+    receiptedSession(trialStart);
+    const afterFirstTrialSession = counters(opened, "mem-revived").state;
+    for (let session = trialStart + 1; session <= trialEnd; session += 1) {
+      receiptedSession(session);
+    }
+
+    expect(afterFirstTrialSession).toBe("active");
+    expect(counters(opened, "mem-revived").state).toBe("hypothesis");
+    expect(transitions(opened, "mem-revived").at(-1)).toEqual({
+      from_state: "active",
+      to_state: "hypothesis",
+      reason: "unused_after_receipts",
+      evidence: "used 0 of 5 receipted injections",
+    });
+  });
+
   it("never demotes a memory injected only in sessions that gave no receipt", () => {
     const opened = openStore();
     seedMemory(opened, "mem-silent");

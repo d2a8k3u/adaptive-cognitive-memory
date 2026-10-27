@@ -10,7 +10,7 @@ Every memory names its slot (`kind`, `conflict_key`, `cardinality`, `value_text`
 
 - A Bash command that failed and later passed in the same session opens a resolution moment.
 - When a turn ends with such a moment still open (no `memory_store` or `memory_update` since), the Stop hook returns one memory checkpoint: store the durable lesson, or say there is none, then finish. It never fires while a stop hook is already continuing the turn.
-- `memory_feedback` receipts drive the lifecycle: only in sessions that give receipts does an injection without a `used` receipt count against a memory; at 5 or more receipted injections with a used share below 0.5 it becomes a `hypothesis` and leaves recall. Constraints and preferences are pinned into every session start whatever the task, so their used share says nothing about their worth: they leave recall only on a `wrong` receipt. Nothing is deleted.
+- `memory_feedback` receipts drive the lifecycle: only in sessions that give receipts does an injection without a `used` receipt count against a memory; at 5 or more receipted injections with a used share below 0.5 it becomes a `hypothesis` and leaves recall. Constraints and preferences are pinned into every session start whatever the task, so their used share says nothing about their worth: they leave recall only on a `wrong` receipt. A memory that comes back to active starts a fresh trial: only the receipted injections and `used` receipts after its return count toward the next demotion. Nothing is deleted.
 
 ## Hook output
 

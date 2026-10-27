@@ -2,7 +2,7 @@
 
 One SQLite database (WAL, `busy_timeout` 5000 ms, short immediate transactions) holds:
 
-- `memories` — ulid id, type, kind, scope, `project_id`, title, abstract, content, slot, state, counters, derived importance ((1 + used) / (2 + used + failures) with failures = 2 × wrong + receipted injections without use), validity timestamps. `project_id` is the first 16 hex chars of the sha256 of the project's git common dir, so every subdirectory and worktree of one repository shares it; outside git it hashes the directory's real path.
+- `memories` — ulid id, type, kind, scope, `project_id`, title, abstract, content, slot, state, counters, derived importance ((1 + used) / (2 + used + failures) with failures = 2 × wrong + receipted injections without use), the current trial (when the memory last became active and its used count then), validity timestamps. `project_id` is the first 16 hex chars of the sha256 of the project's git common dir, so every subdirectory and worktree of one repository shares it; outside git it hashes the directory's real path.
 - `relations` (explicit, capped at 20 per source), `memories_vec` (sqlite-vec, float[384] cosine over title, content and keywords, with a `state` column so KNN filters to active rows), `questions_vec` (one vector per recall question, with the memory's scope, project and state so KNN filters inside the query), `memories_fts` (FTS5 over title, abstract, conflict key, keywords and value).
 - `transitions` — every supersession, promotion, demotion and reactivation with its evidence.
 - `injections`, `receipt_sessions`, `recall_events` — what each session was shown, which sessions gave receipts, and one row per recall hook run with the number of rows it injected (kept to the newest 10,000 at each session start).
