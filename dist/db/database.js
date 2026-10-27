@@ -14,8 +14,10 @@ const sqlite_vec_1 = require("sqlite-vec");
 const cfg_1 = require("../cfg");
 const lifecycle_1 = require("../lifecycle");
 const policy_1 = require("../policy");
+const session_1 = require("../session");
 const version_1 = require("../version");
 const schema_1 = require("./schema");
+const transitions_1 = require("./transitions");
 const BUSY_TIMEOUT_MS = 5000;
 const WRITER_VERSION_KEY = "writer_version";
 const WAL_RETRY_INTERVAL_MS = 20;
@@ -35,7 +37,10 @@ const migrationSteps = [
     { version: 5, apply: (db) => execAll(db, schema_1.schemaV5Ddl) },
     { version: 6, apply: (db) => execAll(db, schema_1.schemaV6Ddl) },
     { version: 7, apply: (db) => execAll(db, schema_1.schemaV7Ddl) },
+    { version: 8, apply: (db) => reactivatePinnedDemotions(db, new Date().toISOString()) },
 ];
+const PINNED_EXEMPTION_REASON = "pinned_exemption";
+const PINNED_EXEMPTION_EVIDENCE = "schema v8 migration";
 function execAll(db, statements) {
     for (const statement of statements) {
         db.exec(statement);
@@ -57,6 +62,36 @@ function migrateToV3(db) {
     const setImportance = db.prepare("UPDATE memories SET importance = ? WHERE id = ?");
     for (const row of rows) {
         setImportance.run((0, lifecycle_1.derivedImportance)({ ...row, receiptedInjections: 0 }), row.id);
+    }
+}
+function reactivatePinnedDemotions(db, at) {
+    const pinnedKinds = session_1.PINNED_KINDS.map(() => "?").join(", ");
+    const demoted = db
+        .prepare(`SELECT m.id FROM memories m
+       WHERE m.state = 'hypothesis' AND m.kind IN (${pinnedKinds})
+         AND (SELECT t.reason FROM transitions t WHERE t.memory_id = m.id
+              ORDER BY t.at DESC, t.rowid DESC LIMIT 1) = 'unused_after_receipts'
+       ORDER BY m.updated_at DESC, m.id`)
+        .pluck()
+        .all(...session_1.PINNED_KINDS);
+    const reactivateUnlessSlotHeld = db.prepare(`UPDATE memories SET state = 'active', updated_at = ?
+     WHERE id = ? AND NOT (cardinality = 'single' AND conflict_key <> '' AND EXISTS (
+       SELECT 1 FROM memories holder
+       WHERE holder.state = 'active' AND holder.cardinality = 'single'
+         AND holder.conflict_key = memories.conflict_key AND holder.scope = memories.scope
+         AND (memories.scope = 'user' OR holder.project_id = memories.project_id)))`);
+    for (const id of demoted) {
+        if (reactivateUnlessSlotHeld.run(at, id).changes === 1) {
+            (0, transitions_1.recordTransition)(db, {
+                memoryId: id,
+                fromState: "hypothesis",
+                toState: "active",
+                reason: PINNED_EXEMPTION_REASON,
+                evidence: PINNED_EXEMPTION_EVIDENCE,
+                relatedId: null,
+                at,
+            });
+        }
     }
 }
 function probeNativeModule() {

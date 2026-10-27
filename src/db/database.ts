@@ -3,6 +3,7 @@ import { getLoadablePath } from "sqlite-vec";
 import { type Config, EMBED_DIM, MODEL_ID } from "../cfg";
 import { derivedImportance } from "../lifecycle";
 import { contentHash } from "../policy";
+import { PINNED_KINDS } from "../session";
 import { PLUGIN_NAME, PLUGIN_VERSION } from "../version";
 import {
   baselineDdl,
@@ -17,6 +18,7 @@ import {
   schemaV7Ddl,
   vecTableDdl,
 } from "./schema";
+import { recordTransition } from "./transitions";
 
 export type Db = InstanceType<typeof Database>;
 
@@ -50,7 +52,11 @@ const migrationSteps: readonly MigrationStep[] = [
   { version: 5, apply: (db) => execAll(db, schemaV5Ddl) },
   { version: 6, apply: (db) => execAll(db, schemaV6Ddl) },
   { version: 7, apply: (db) => execAll(db, schemaV7Ddl) },
+  { version: 8, apply: (db) => reactivatePinnedDemotions(db, new Date().toISOString()) },
 ];
+
+const PINNED_EXEMPTION_REASON = "pinned_exemption";
+const PINNED_EXEMPTION_EVIDENCE = "schema v8 migration";
 
 function execAll(db: Db, statements: readonly string[]): void {
   for (const statement of statements) {
@@ -78,6 +84,41 @@ function migrateToV3(db: Db): void {
   const setImportance = db.prepare("UPDATE memories SET importance = ? WHERE id = ?");
   for (const row of rows) {
     setImportance.run(derivedImportance({ ...row, receiptedInjections: 0 }), row.id);
+  }
+}
+
+function reactivatePinnedDemotions(db: Db, at: string): void {
+  const pinnedKinds = PINNED_KINDS.map(() => "?").join(", ");
+  const demoted = db
+    .prepare(
+      `SELECT m.id FROM memories m
+       WHERE m.state = 'hypothesis' AND m.kind IN (${pinnedKinds})
+         AND (SELECT t.reason FROM transitions t WHERE t.memory_id = m.id
+              ORDER BY t.at DESC, t.rowid DESC LIMIT 1) = 'unused_after_receipts'
+       ORDER BY m.updated_at DESC, m.id`,
+    )
+    .pluck()
+    .all(...PINNED_KINDS) as string[];
+  const reactivateUnlessSlotHeld = db.prepare(
+    `UPDATE memories SET state = 'active', updated_at = ?
+     WHERE id = ? AND NOT (cardinality = 'single' AND conflict_key <> '' AND EXISTS (
+       SELECT 1 FROM memories holder
+       WHERE holder.state = 'active' AND holder.cardinality = 'single'
+         AND holder.conflict_key = memories.conflict_key AND holder.scope = memories.scope
+         AND (memories.scope = 'user' OR holder.project_id = memories.project_id)))`,
+  );
+  for (const id of demoted) {
+    if (reactivateUnlessSlotHeld.run(at, id).changes === 1) {
+      recordTransition(db, {
+        memoryId: id,
+        fromState: "hypothesis",
+        toState: "active",
+        reason: PINNED_EXEMPTION_REASON,
+        evidence: PINNED_EXEMPTION_EVIDENCE,
+        relatedId: null,
+        at,
+      });
+    }
   }
 }
 

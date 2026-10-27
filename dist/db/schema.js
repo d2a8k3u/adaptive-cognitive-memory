@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.vecTableDdl = exports.questionsVecTableDdl = exports.schemaV7Ddl = exports.schemaV6Ddl = exports.schemaV5Ddl = exports.schemaV4Ddl = exports.schemaV3Ddl = exports.schemaV2Ddl = exports.baselineDdl = exports.SchemaTooNewError = exports.SCHEMA_VERSION = void 0;
 const cfg_1 = require("../cfg");
 const events_1 = require("./events");
-exports.SCHEMA_VERSION = 7;
+exports.SCHEMA_VERSION = 8;
 class SchemaTooNewError extends Error {
 }
 exports.SchemaTooNewError = SchemaTooNewError;

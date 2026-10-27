@@ -24,6 +24,8 @@ import {
   schemaV3Ddl,
   schemaV4Ddl,
   schemaV5Ddl,
+  schemaV6Ddl,
+  schemaV7Ddl,
   vecTableDdl,
 } from "../src/db/schema";
 import { PLUGIN_VERSION } from "../src/version";
@@ -727,6 +729,109 @@ describe("schema v6 migration", () => {
       claim.run("x".repeat(200));
       expect(() => claim.run("x".repeat(201))).toThrow(/CHECK constraint failed/);
       expect(() => claim.run("x".repeat(200))).toThrow(/UNIQUE constraint failed/);
+    } finally {
+      opened.db.close();
+    }
+  });
+});
+
+describe("schema v8 migration", () => {
+  const DEMOTED_AT = "2026-10-26T04:11:53.472Z";
+
+  function createV7Database(dbPath: string): void {
+    const raw = new Database(dbPath);
+    try {
+      for (const statement of [
+        ...baselineDdl,
+        ...schemaV2Ddl,
+        ...schemaV3Ddl,
+        ...schemaV4Ddl,
+        ...schemaV5Ddl,
+        ...schemaV6Ddl,
+        ...schemaV7Ddl,
+      ]) {
+        raw.exec(statement);
+      }
+      raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '7')").run();
+      const memory = raw.prepare(
+        `INSERT INTO memories (id, type, kind, scope, project_id, title, abstract, content,
+           conflict_key, cardinality, state, created_at, updated_at)
+         VALUES (?, 'pattern', ?, 'user', 'proj-a', ?, 'abstract', 'content', ?, ?, ?, ?, ?)`,
+      );
+      const transition = raw.prepare(
+        `INSERT INTO transitions (memory_id, from_state, to_state, reason, evidence, at)
+         VALUES (?, ?, ?, ?, 'evidence', ?)`,
+      );
+      for (const [id, kind, conflictKey, cardinality, state] of [
+        ["mem-constraint-unused", "constraint", "", "multi", "hypothesis"],
+        ["mem-preference-wrong", "preference", "", "multi", "hypothesis"],
+        ["mem-fact-unused", "fact", "", "multi", "hypothesis"],
+        ["mem-slot-demoted", "constraint", "git.sync", "single", "hypothesis"],
+        ["mem-slot-holder", "constraint", "git.sync", "single", "active"],
+      ]) {
+        memory.run(
+          id,
+          kind,
+          `title ${id}`,
+          conflictKey,
+          cardinality,
+          state,
+          DEMOTED_AT,
+          DEMOTED_AT,
+        );
+      }
+      for (const id of ["mem-constraint-unused", "mem-fact-unused", "mem-slot-demoted"]) {
+        transition.run(id, "active", "hypothesis", "unused_after_receipts", DEMOTED_AT);
+      }
+      transition.run(
+        "mem-preference-wrong",
+        "active",
+        "hypothesis",
+        "unused_after_receipts",
+        "2026-10-25T00:00:00.000Z",
+      );
+      transition.run(
+        "mem-preference-wrong",
+        "hypothesis",
+        "active",
+        "feedback_used",
+        "2026-10-25T01:00:00.000Z",
+      );
+      transition.run("mem-preference-wrong", "active", "hypothesis", "feedback_wrong", DEMOTED_AT);
+    } finally {
+      raw.close();
+    }
+  }
+
+  it("brings back pinned memories demoted for unused receipts unless wrong or their slot is taken", () => {
+    const config = tempConfig();
+    createV7Database(config.dbPath);
+
+    const opened = openDatabase(config);
+    try {
+      expect(metaValue(opened.db, "schema_version")).toBe(String(SCHEMA_VERSION));
+      expect(opened.db.prepare("SELECT id, state FROM memories ORDER BY id").all()).toEqual([
+        { id: "mem-constraint-unused", state: "active" },
+        { id: "mem-fact-unused", state: "hypothesis" },
+        { id: "mem-preference-wrong", state: "hypothesis" },
+        { id: "mem-slot-demoted", state: "hypothesis" },
+        { id: "mem-slot-holder", state: "active" },
+      ]);
+      expect(
+        opened.db
+          .prepare(
+            `SELECT memory_id, from_state, to_state, reason FROM transitions
+             WHERE at > ? ORDER BY rowid`,
+          )
+          .all(DEMOTED_AT),
+      ).toEqual([
+        {
+          memory_id: "mem-constraint-unused",
+          from_state: "hypothesis",
+          to_state: "active",
+          reason: "pinned_exemption",
+        },
+      ]);
     } finally {
       opened.db.close();
     }
