@@ -77,7 +77,11 @@ function feedback(
   verdict: FeedbackVerdict,
   when: string,
 ): FeedbackOutcome {
-  return recordFeedback(opened, { projectId: PROJECT, ids, verdict, at: when });
+  return recordFeedback(opened, {
+    projectId: PROJECT,
+    verdicts: { used: [], wrong: [], not_applicable: [], [verdict]: ids },
+    at: when,
+  });
 }
 
 afterEach(() => {
@@ -263,7 +267,7 @@ describe("recordFeedback", () => {
       .prepare("UPDATE memories_vec SET state = ? WHERE memory_id = ?")
       .run(from, "mem-feedback");
 
-    const outcome = feedback(opened, ["mem-feedback", "mem-feedback"], verdict, at(5));
+    const outcome = feedback(opened, ["mem-feedback"], verdict, at(5));
 
     expect(outcome).toEqual({
       outcome: "recorded",

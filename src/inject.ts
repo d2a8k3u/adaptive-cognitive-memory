@@ -9,7 +9,7 @@ const BLOCK_OPEN = "<memory>";
 const BLOCK_CLOSE = "</memory>";
 const MAX_RENDERED_CHARS = 9_500;
 const HEADER =
-  "Recalled memory from earlier sessions; verify it against the current code. Apply or follow each line, or say why it does not apply, then send memory_feedback with the ids.";
+  "Recalled memory from earlier sessions; verify it against the current code. Apply or follow each line, or say why it does not apply, then send memory_feedback for every id.";
 const ACTION_PREFIX_OF_KIND: Readonly<Partial<Record<MemoryKind, string>>> = {
   constraint: "Apply — ",
   procedure: "Follow — ",

@@ -10,7 +10,7 @@ Injection shape (abstracts only, never content; token estimate = chars/4; never 
 Native auto memory is also on: store durable lessons with memory_store, not in the auto-memory MEMORY.md.
 memory degraded (model missing) — run /memory-doctor
 <memory>
-Recalled memory from earlier sessions; verify it against the current code. Apply or follow each line, or say why it does not apply, then send memory_feedback with the ids.
+Recalled memory from earlier sessions; verify it against the current code. Apply or follow each line, or say why it does not apply, then send memory_feedback for every id.
 Constraints:
 - Apply — release only from the main branch (valid from 2026-10-13 · project · 01K7Q3M5X8R2C9V4N6B1T0ZJHD)
 Preferences:

@@ -5,6 +5,7 @@ import {
   feedbackRejection,
   feedbackTransition,
   type LifecycleSnapshot,
+  parseFeedbackVerdicts,
   type ReceiptCounters,
   receiptEvidenceTransition,
 } from "../src/lifecycle";
@@ -38,6 +39,51 @@ describe("feedbackTransition", () => {
       expect(feedbackTransition(state, verdict)).toEqual(expected);
     },
   );
+});
+
+describe("parseFeedbackVerdicts", () => {
+  it("reads one id list per verdict, dropping repeats within a list", () => {
+    expect(
+      parseFeedbackVerdicts({ used: ["01A", "01A"], wrong: ["01B"], not_applicable: [] }),
+    ).toEqual({
+      outcome: "parsed",
+      verdicts: { used: ["01A"], wrong: ["01B"], not_applicable: [] },
+    });
+  });
+
+  it.each([
+    { name: "no list at all", input: {}, field: undefined },
+    {
+      name: "the old ids and verdict shape",
+      input: { ids: ["01A"], verdict: "used" },
+      field: undefined,
+    },
+    { name: "only empty lists", input: { used: [], wrong: [] }, field: undefined },
+    {
+      name: "more than twenty ids across the lists",
+      input: {
+        used: Array.from({ length: 11 }, (_, index) => `01U${index}`),
+        not_applicable: Array.from({ length: 10 }, (_, index) => `01N${index}`),
+      },
+      field: undefined,
+    },
+    { name: "a list that is not an array", input: { used: "01A" }, field: "used" },
+    { name: "a non-string id", input: { not_applicable: [42] }, field: "not_applicable" },
+    { name: "an empty id", input: { wrong: [""] }, field: "wrong" },
+    { name: "an id over the id length", input: { used: ["0".repeat(27)] }, field: "used" },
+  ])("rejects $name", ({ input, field }) => {
+    const parsed = parseFeedbackVerdicts(input);
+
+    expect(parsed.outcome).toBe("invalid");
+    expect(parsed.outcome === "invalid" ? parsed.field : "parsed").toBe(field);
+  });
+
+  it("names the id given under two verdicts", () => {
+    expect(parseFeedbackVerdicts({ used: ["01A", "01B"], wrong: ["01B"] })).toEqual({
+      outcome: "invalid",
+      message: "memory 01B is under both used and wrong; give each id one verdict",
+    });
+  });
 });
 
 describe("feedbackRejection", () => {

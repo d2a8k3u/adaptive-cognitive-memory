@@ -1580,7 +1580,7 @@ describe("memory evaluation at the host boundary", () => {
           projectDir: root,
           fields: {
             tool_name: FEEDBACK_TOOL_NAME,
-            tool_input: { ids: [...ids], verdict },
+            tool_input: { [verdict]: [...ids] },
             tool_response: {},
           },
           sessionId,
