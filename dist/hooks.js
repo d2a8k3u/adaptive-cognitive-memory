@@ -12,11 +12,13 @@ const failures_1 = require("./db/failures");
 const injections_1 = require("./db/injections");
 const projects_1 = require("./db/projects");
 const signals_1 = require("./db/signals");
+const verdicts_1 = require("./db/verdicts");
 const failure_1 = require("./failure");
 const gate_1 = require("./gate");
 const ids_1 = require("./ids");
 const inject_1 = require("./inject");
 const keys_1 = require("./keys");
+const lifecycle_1 = require("./lifecycle");
 const outage_1 = require("./outage");
 const prompt_1 = require("./prompt");
 const retention_1 = require("./retention");
@@ -311,6 +313,14 @@ function toolText(scope, lookup) {
         return recall;
     });
 }
+function recordFeedbackCall(opened, scope, toolInput) {
+    const { sessionId, now } = scope;
+    (0, injections_1.recordReceipt)(opened, sessionId, now);
+    const parsed = (0, lifecycle_1.parseFeedbackVerdicts)(toolInput);
+    if (parsed.outcome === "parsed") {
+        (0, verdicts_1.recordVerdicts)(opened, { sessionId, verdicts: parsed.verdicts, at: now });
+    }
+}
 function silently(config, work) {
     return withDatabase(config, async (opened) => {
         work(opened);
@@ -331,7 +341,7 @@ function postToolText(scope, input) {
     const { config, sessionId, now } = scope;
     const toolName = stringField(input.tool_name) ?? "";
     if (toolName === FEEDBACK_TOOL) {
-        return silently(config, (opened) => (0, injections_1.recordReceipt)(opened, sessionId, now));
+        return silently(config, (opened) => recordFeedbackCall(opened, scope, input.tool_input));
     }
     if (STORE_RECEIPT_TOOLS.has(toolName)) {
         return silently(config, ({ db }) => (0, signals_1.closeSessionSignals)(db, sessionId, "receipt", now));

@@ -4,18 +4,18 @@ import {
   FRESH_COUNTERS,
   feedbackRejection,
   feedbackTransition,
-  type LifecycleSnapshot,
   parseFeedbackVerdicts,
   type ReceiptCounters,
-  receiptEvidenceTransition,
+  type TrialEvidence,
+  trialEvidenceTransition,
 } from "../src/lifecycle";
 
 function counters(overrides: Partial<ReceiptCounters>): ReceiptCounters {
   return { ...FRESH_COUNTERS, ...overrides };
 }
 
-function snapshot(overrides: Partial<LifecycleSnapshot>): LifecycleSnapshot {
-  return { ...FRESH_COUNTERS, state: "active", kind: "fact", ...overrides };
+function trial(overrides: Partial<TrialEvidence>): TrialEvidence {
+  return { state: "active", kind: "fact", verdictSessions: 0, usedSessions: 0, ...overrides };
 }
 
 describe("feedbackTransition", () => {
@@ -115,34 +115,34 @@ describe("feedbackRejection", () => {
   });
 });
 
-describe("receiptEvidenceTransition", () => {
+describe("trialEvidenceTransition", () => {
   it.each([
-    { name: "four receipted injections without use", row: { receiptedInjections: 4 } },
+    { name: "four sessions with a verdict and no use", row: { verdictSessions: 4 } },
     {
       name: "a used share of exactly one half",
-      row: { receiptedInjections: 6, usedCount: 3 },
+      row: { verdictSessions: 6, usedSessions: 3 },
     },
     {
       name: "a hypothesis row already out of recall",
-      row: { state: "hypothesis", receiptedInjections: 9 } as const,
+      row: { state: "hypothesis", verdictSessions: 9 } as const,
     },
     {
       name: "a pinned constraint injected at every session start",
-      row: { kind: "constraint", receiptedInjections: 9 } as const,
+      row: { kind: "constraint", verdictSessions: 9 } as const,
     },
     {
       name: "a pinned preference injected at every session start",
-      row: { kind: "preference", receiptedInjections: 9 } as const,
+      row: { kind: "preference", verdictSessions: 9 } as const,
     },
   ])("keeps the row for $name", ({ row }) => {
-    expect(receiptEvidenceTransition(snapshot(row))).toBeUndefined();
+    expect(trialEvidenceTransition(trial(row))).toBeUndefined();
   });
 
-  it("demotes an active row used in fewer than half of at least five receipted injections", () => {
-    expect(receiptEvidenceTransition(snapshot({ receiptedInjections: 5, usedCount: 2 }))).toEqual({
+  it("demotes an active row used in fewer than half of at least five sessions with a verdict", () => {
+    expect(trialEvidenceTransition(trial({ verdictSessions: 5, usedSessions: 2 }))).toEqual({
       toState: "hypothesis",
-      reason: "unused_after_receipts",
-      evidence: "used 2 of 5 receipted injections",
+      reason: "unused_after_verdicts",
+      evidence: "used in 2 of 5 sessions with a verdict",
     });
   });
 });

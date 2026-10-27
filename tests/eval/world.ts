@@ -337,6 +337,17 @@ export class WorldWriter {
     return this.call(cwd, "memory_feedback", { [verdict]: [...ids] });
   }
 
+  async searchStates(cwd: string, query: string): Promise<Map<string, string>> {
+    const payload = await this.call(cwd, "memory_search", { query });
+    return new Map(
+      requireArray(payload.results, "memory_search.results").map((value, index) => {
+        const path = `memory_search.results[${index}]`;
+        const result = requireRecord(value, path);
+        return [requireString(result, "id", path), requireString(result, "state", path)];
+      }),
+    );
+  }
+
   async close(): Promise<void> {
     const clients = await Promise.all(this.clients.values());
     await Promise.all(clients.map((client) => client.close()));

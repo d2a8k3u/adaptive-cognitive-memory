@@ -5,7 +5,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DB_FILENAME } from "../../src/cfg";
-import { DEMOTION_MIN_RECEIPTED_INJECTIONS } from "../../src/lifecycle";
+import { DEMOTION_MIN_VERDICT_SESSIONS } from "../../src/lifecycle";
 import { redact } from "../../src/redact";
 import { testModelCacheDir } from "../../vitest.config";
 import { buildCorpusWorld, ownersOf, projectKeys, type StoredWorld, storeAll } from "./corpus";
@@ -125,10 +125,11 @@ const LIFECYCLE_SILENT_PROJECT = "silent";
 const FEEDBACK_TOOL_NAME = "mcp__plugin_adaptive-cognitive-memory_memory__memory_feedback";
 const LIFECYCLE_UNUSED: StoreArguments = {
   title: "Release tagging",
-  content: "Tag every release from the main branch with an annotated tag before announcing it.",
-  type: "pattern",
+  content:
+    "Releases are tagged from the main branch with an annotated tag before they are announced.",
+  type: "semantic",
   scope: "project",
-  kind: "constraint",
+  kind: "fact",
   conflict_key: "git.release_tagging",
   cardinality: "single",
   value_text: "annotated tag on main",
@@ -1541,7 +1542,7 @@ describe("memory evaluation at the host boundary", () => {
     expect(degraded.secondReadBack.id).toBe(degraded.second.id);
   });
 
-  it("lifecycle: receipts demote unused memories, verdicts move them, nothing is deleted", async () => {
+  it("lifecycle: explicit verdicts demote and revive, silence never does, nothing is deleted", async () => {
     const world = await newWorld(
       state,
       [LIFECYCLE_RECEIPT_PROJECT, LIFECYCLE_SILENT_PROJECT],
@@ -1591,18 +1592,19 @@ describe("memory evaluation at the host boundary", () => {
 
       const receiptSessions: Observation[] = [];
       const silentSessions: Observation[] = [];
-      for (let session = 1; session <= DEMOTION_MIN_RECEIPTED_INJECTIONS; session += 1) {
+      for (let session = 1; session <= DEMOTION_MIN_VERDICT_SESSIONS; session += 1) {
         const sessionId = randomUUID();
         receiptSessions.push(await sessionStart(receiptRoot, sessionId));
         receiptSessions.push(await feedback(receiptRoot, sessionId, [receipted], "used"));
+        receiptSessions.push(await feedback(receiptRoot, sessionId, [unused], "not_applicable"));
         silentSessions.push(await sessionStart(silentRoot));
       }
-      const afterReceipts = {
+      const afterVerdicts = {
         unused: await stateOf(receiptRoot, unused),
         receipted: await stateOf(receiptRoot, receipted),
         silent: await stateOf(silentRoot, silent),
       };
-      const probeAfterDemotion = await sessionStart(receiptRoot);
+      const searchAfterDemotion = await writer.searchStates(receiptRoot, "release tagging");
       rowCounts.push(memoryRowCount(world));
 
       await feedback(silentRoot, randomUUID(), [silent], "wrong");
@@ -1610,30 +1612,28 @@ describe("memory evaluation at the host boundary", () => {
       const probeAfterWrong = await sessionStart(silentRoot);
       rowCounts.push(memoryRowCount(world));
 
+      await feedback(silentRoot, randomUUID(), [silent], "used");
+      const silentAfterUsed = await stateOf(silentRoot, silent);
+      const probeAfterReactivation = await sessionStart(silentRoot);
       await feedback(receiptRoot, randomUUID(), [unused], "used");
       const unusedAfterUsed = await stateOf(receiptRoot, unused);
-      const probeAfterReactivation = await sessionStart(receiptRoot);
       rowCounts.push(memoryRowCount(world));
 
-      const unusedInjections = receiptSessions.filter((observed) =>
-        observed.injected.includes("unused"),
-      ).length;
       const receiptsPrintedNothing = receiptSessions
         .filter((observed) => observed.event === "PostToolUse")
         .every((observed) => observed.run.registered && observed.run.stdout === "");
       const outcomes = {
-        unused_injected_in_receipt_sessions: unusedInjections === DEMOTION_MIN_RECEIPTED_INJECTIONS,
         receipt_hook_registered_and_silent: receiptsPrintedNothing,
-        unused_demoted_after_receipts: afterReceipts.unused === "hypothesis",
-        unused_left_recall: !probeAfterDemotion.injected.includes("unused"),
-        receipt_backed_stays_active: afterReceipts.receipted === "active",
-        unreceipted_stays_active:
-          afterReceipts.silent === "active" &&
+        not_applicable_verdicts_demote: afterVerdicts.unused === "hypothesis",
+        demoted_found_by_search_with_state: searchAfterDemotion.get(unused) === "hypothesis",
+        pinned_used_stays_active: afterVerdicts.receipted === "active",
+        injected_without_verdict_stays_active:
+          afterVerdicts.silent === "active" &&
           silentSessions.every((observed) => observed.injected.includes("silent")),
         wrong_demotes_immediately: silentAfterWrong === "hypothesis",
         wrong_left_recall: !probeAfterWrong.injected.includes("silent"),
-        used_reactivates: unusedAfterUsed === "active",
-        reactivated_recalled_again: probeAfterReactivation.injected.includes("unused"),
+        used_reactivates: silentAfterUsed === "active" && unusedAfterUsed === "active",
+        reactivated_recalled_again: probeAfterReactivation.injected.includes("silent"),
         rows_constant: rowCounts.every((count) => count === owners.size),
       };
       appendRecords([
@@ -1641,12 +1641,13 @@ describe("memory evaluation at the host boundary", () => {
           ...recordBase(state),
           kind: "case",
           suite: "lifecycle",
-          case_id: "receipts-wrong-used",
+          case_id: "verdicts-wrong-used",
           event: null,
-          after_receipts: afterReceipts,
+          after_verdicts: afterVerdicts,
           silent_after_wrong: silentAfterWrong,
+          silent_after_used: silentAfterUsed,
           unused_after_used: unusedAfterUsed,
-          probe_after_demotion: probeAfterDemotion.injected,
+          search_after_demotion: Object.fromEntries(searchAfterDemotion),
           probe_after_wrong: probeAfterWrong.injected,
           probe_after_reactivation: probeAfterReactivation.injected,
           row_counts: rowCounts,

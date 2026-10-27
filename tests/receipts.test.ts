@@ -6,7 +6,8 @@ import { EMBED_DIM, loadConfig } from "../src/cfg";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import { type FeedbackOutcome, recordFeedback } from "../src/db/feedback";
 import { recordInjections, recordReceipt } from "../src/db/injections";
-import { DEMOTION_MIN_RECEIPTED_INJECTIONS, type FeedbackVerdict } from "../src/lifecycle";
+import { recordVerdicts } from "../src/db/verdicts";
+import { DEMOTION_MIN_VERDICT_SESSIONS, type FeedbackVerdict } from "../src/lifecycle";
 import type { MemoryKind } from "../src/policy";
 
 const PROJECT = "proj-receipts";
@@ -124,73 +125,117 @@ describe("recordInjections", () => {
   });
 });
 
-describe("receipt evidence", () => {
-  function injectInSession(opened: OpenedDb, session: number, memoryIds: readonly string[]): void {
-    recordInjections(opened, {
-      sessionId: `session-${session}`,
-      event: "SessionStart",
-      at: at(session),
-      memoryIds,
-    });
+function judge(
+  opened: OpenedDb,
+  session: number,
+  verdict: FeedbackVerdict,
+  memoryIds: readonly string[],
+): void {
+  recordVerdicts(opened, {
+    sessionId: `session-${session}`,
+    verdicts: { used: [], wrong: [], not_applicable: [], [verdict]: memoryIds },
+    at: at(session),
+  });
+}
+
+function judgeSessions(
+  opened: OpenedDb,
+  sessions: readonly number[],
+  verdict: FeedbackVerdict,
+  memoryIds: readonly string[],
+): void {
+  for (const session of sessions) {
+    judge(opened, session, verdict, memoryIds);
   }
+}
 
-  it.each([
-    { order: "after the injection", receiptFirst: false },
-    { order: "before the injection", receiptFirst: true },
-  ])(
-    "demotes a memory injected in five receipt-giving sessions without a used receipt when the receipt comes $order",
-    ({ receiptFirst }) => {
-      const opened = openStore();
-      seedMemory(opened, "mem-unused");
-      seedVector(opened, "mem-unused");
-      for (let session = 1; session <= DEMOTION_MIN_RECEIPTED_INJECTIONS; session += 1) {
-        if (receiptFirst) {
-          recordReceipt(opened, `session-${session}`, at(session));
-        }
-        injectInSession(opened, session, ["mem-unused"]);
-        if (!receiptFirst) {
-          recordReceipt(opened, `session-${session}`, at(session));
-        }
-      }
+function sessionRange(first: number, count: number): number[] {
+  return Array.from({ length: count }, (_, index) => first + index);
+}
 
-      expect(counters(opened, "mem-unused")).toMatchObject({
-        state: "hypothesis",
-        importance: 1 / 7,
-      });
-      expect(vecState(opened, "mem-unused")).toBe("hypothesis");
-      expect(transitions(opened, "mem-unused")).toEqual([
-        {
-          from_state: "active",
-          to_state: "hypothesis",
-          reason: "unused_after_receipts",
-          evidence: "used 0 of 5 receipted injections",
-        },
-      ]);
-    },
-  );
-
-  it("keeps a pinned constraint active when receipt-giving sessions leave it unused", () => {
+describe("verdict evidence", () => {
+  it("demotes a memory used in fewer than half of five sessions that gave it a verdict", () => {
     const opened = openStore();
-    seedMemory(opened, "mem-pinned", "constraint");
-    for (let session = 1; session <= DEMOTION_MIN_RECEIPTED_INJECTIONS; session += 1) {
-      injectInSession(opened, session, ["mem-pinned"]);
+    seedMemory(opened, "mem-judged");
+    seedVector(opened, "mem-judged");
+
+    judgeSessions(opened, [1, 2], "used", ["mem-judged"]);
+    judgeSessions(opened, [3, 4, 5], "not_applicable", ["mem-judged"]);
+
+    expect(counters(opened, "mem-judged").state).toBe("hypothesis");
+    expect(vecState(opened, "mem-judged")).toBe("hypothesis");
+    expect(transitions(opened, "mem-judged")).toEqual([
+      {
+        from_state: "active",
+        to_state: "hypothesis",
+        reason: "unused_after_verdicts",
+        evidence: "used in 2 of 5 sessions with a verdict",
+      },
+    ]);
+  });
+
+  it("counts a session once however many verdicts it gave the memory", () => {
+    const opened = openStore();
+    seedMemory(opened, "mem-rejudged");
+
+    for (const session of sessionRange(1, DEMOTION_MIN_VERDICT_SESSIONS - 1)) {
+      judge(opened, session, "not_applicable", ["mem-rejudged"]);
+      judge(opened, session, "not_applicable", ["mem-rejudged"]);
+    }
+
+    expect(counters(opened, "mem-rejudged").state).toBe("active");
+  });
+
+  it("never demotes a memory left without a verdict, however many receipt-giving sessions injected it", () => {
+    const opened = openStore();
+    seedMemory(opened, "mem-unjudged");
+    seedMemory(opened, "mem-other");
+
+    for (const session of sessionRange(1, DEMOTION_MIN_VERDICT_SESSIONS + 1)) {
+      recordInjections(opened, {
+        sessionId: `session-${session}`,
+        event: "SessionStart",
+        at: at(session),
+        memoryIds: ["mem-unjudged", "mem-other"],
+      });
+      judge(opened, session, "used", ["mem-other"]);
       recordReceipt(opened, `session-${session}`, at(session));
     }
 
-    expect(counters(opened, "mem-pinned").state).toBe("active");
-    expect(transitions(opened, "mem-pinned")).toEqual([]);
+    expect(counters(opened, "mem-unjudged").state).toBe("active");
+    expect(transitions(opened, "mem-unjudged")).toEqual([]);
   });
 
-  it("never demotes a memory injected only in sessions that gave no receipt", () => {
+  it("keeps a pinned constraint active however many sessions judge it not applicable", () => {
     const opened = openStore();
-    seedMemory(opened, "mem-silent");
-    for (let session = 1; session <= DEMOTION_MIN_RECEIPTED_INJECTIONS + 1; session += 1) {
-      injectInSession(opened, session, ["mem-silent"]);
-    }
-    recordReceipt(opened, "session-without-the-memory", at(30));
+    seedMemory(opened, "mem-pinned", "constraint");
 
-    expect(counters(opened, "mem-silent")).toMatchObject({ state: "active", importance: 1 / 2 });
-    expect(transitions(opened, "mem-silent")).toEqual([]);
+    judgeSessions(opened, sessionRange(1, DEMOTION_MIN_VERDICT_SESSIONS), "not_applicable", [
+      "mem-pinned",
+    ]);
+
+    expect(counters(opened, "mem-pinned").state).toBe("active");
+  });
+
+  it("judges a memory back in active only on verdicts given after its return", () => {
+    const opened = openStore();
+    seedMemory(opened, "mem-revived");
+    judgeSessions(opened, sessionRange(1, DEMOTION_MIN_VERDICT_SESSIONS), "not_applicable", [
+      "mem-revived",
+    ]);
+    feedback(opened, ["mem-revived"], "used", at(20));
+
+    judge(opened, 21, "not_applicable", ["mem-revived"]);
+    const afterFirstTrialSession = counters(opened, "mem-revived").state;
+    judgeSessions(opened, sessionRange(22, DEMOTION_MIN_VERDICT_SESSIONS - 1), "not_applicable", [
+      "mem-revived",
+    ]);
+
+    expect(afterFirstTrialSession).toBe("active");
+    expect(counters(opened, "mem-revived").state).toBe("hypothesis");
+    expect(transitions(opened, "mem-revived").at(-1)).toMatchObject({
+      evidence: "used in 0 of 5 sessions with a verdict",
+    });
   });
 });
 
@@ -204,15 +249,9 @@ describe("lifecycle without deletion", () => {
     const observed: [number, unknown][] = [];
     const observe = () => observed.push([rowCount(), counters(opened, "mem-cycled").state]);
 
-    for (let session = 1; session <= DEMOTION_MIN_RECEIPTED_INJECTIONS; session += 1) {
-      recordInjections(opened, {
-        sessionId: `session-${session}`,
-        event: "SessionStart",
-        at: at(session),
-        memoryIds: ["mem-cycled", "mem-receipted"],
-      });
-      feedback(opened, ["mem-receipted"], "used", at(session));
-      recordReceipt(opened, `session-${session}`, at(session));
+    for (const session of sessionRange(1, DEMOTION_MIN_VERDICT_SESSIONS)) {
+      judge(opened, session, "not_applicable", ["mem-cycled"]);
+      judge(opened, session, "used", ["mem-receipted"]);
     }
     observe();
     feedback(opened, ["mem-cycled"], "used", at(10));
@@ -229,7 +268,7 @@ describe("lifecycle without deletion", () => {
       [2, "active"],
     ]);
     expect(transitions(opened, "mem-cycled").map((row) => row.reason)).toEqual([
-      "unused_after_receipts",
+      "unused_after_verdicts",
       "feedback_used",
       "feedback_wrong",
       "feedback_used",
