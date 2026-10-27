@@ -1,9 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.vecTableDdl = exports.questionsVecTableDdl = exports.schemaV7Ddl = exports.schemaV6Ddl = exports.schemaV5Ddl = exports.schemaV4Ddl = exports.schemaV3Ddl = exports.schemaV2Ddl = exports.baselineDdl = exports.SchemaTooNewError = exports.SCHEMA_VERSION = void 0;
+exports.vecTableDdl = exports.questionsVecTableDdl = exports.schemaV9Ddl = exports.schemaV7Ddl = exports.schemaV6Ddl = exports.schemaV5Ddl = exports.schemaV4Ddl = exports.schemaV3Ddl = exports.schemaV2Ddl = exports.baselineDdl = exports.SchemaTooNewError = exports.SCHEMA_VERSION = void 0;
 const cfg_1 = require("../cfg");
+const lifecycle_1 = require("../lifecycle");
 const events_1 = require("./events");
-exports.SCHEMA_VERSION = 8;
+exports.SCHEMA_VERSION = 9;
 class SchemaTooNewError extends Error {
 }
 exports.SchemaTooNewError = SchemaTooNewError;
@@ -198,6 +199,17 @@ exports.schemaV6Ddl = [
 ];
 exports.schemaV7Ddl = [
     "ALTER TABLE memories ADD COLUMN questions TEXT NOT NULL DEFAULT '[]'",
+];
+const FEEDBACK_VERDICT_CHECK_LIST = lifecycle_1.FEEDBACK_VERDICTS.map((verdict) => `'${verdict}'`).join(", ");
+exports.schemaV9Ddl = [
+    `CREATE TABLE verdicts (
+    session_id TEXT NOT NULL,
+    memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    verdict TEXT NOT NULL CHECK (verdict IN (${FEEDBACK_VERDICT_CHECK_LIST})),
+    at TEXT NOT NULL
+  )`,
+    "CREATE INDEX verdicts_memory_at ON verdicts (memory_id, at)",
+    "ALTER TABLE memories ADD COLUMN trial_started_at TEXT",
 ];
 exports.questionsVecTableDdl = `CREATE VIRTUAL TABLE questions_vec USING vec0(
   question_id TEXT PRIMARY KEY,
