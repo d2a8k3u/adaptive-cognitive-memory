@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.statusFacts = statusFacts;
+const session_1 = require("../session");
 const status_1 = require("../status");
 const projects_1 = require("./projects");
 const visibility_1 = require("./visibility");
@@ -24,12 +25,13 @@ function recallEventCounts(db) {
         .all(status_1.RECALL_RATE_WINDOW);
 }
 function receiptInjections(db) {
+    const pinnedKinds = session_1.PINNED_KINDS.map(() => "?").join(", ");
     return db
         .prepare(`SELECT count(*) AS memories, coalesce(sum(m.used_count = 0), 0) AS neverUsed
-       FROM memories m WHERE m.id IN (
+       FROM memories m WHERE m.kind NOT IN (${pinnedKinds}) AND m.id IN (
          SELECT i.memory_id FROM injections i
          JOIN receipt_sessions r ON r.session_id = i.session_id)`)
-        .get();
+        .get(...session_1.PINNED_KINDS);
 }
 function openSignalFacts(db) {
     return db

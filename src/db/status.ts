@@ -1,3 +1,4 @@
+import { PINNED_KINDS } from "../session";
 import {
   type InjectionFact,
   type MemoryCount,
@@ -41,14 +42,15 @@ function recallEventCounts(db: Db): RecallEventCount[] {
 }
 
 function receiptInjections(db: Db): StatusFacts["receiptInjections"] {
+  const pinnedKinds = PINNED_KINDS.map(() => "?").join(", ");
   return db
     .prepare(
       `SELECT count(*) AS memories, coalesce(sum(m.used_count = 0), 0) AS neverUsed
-       FROM memories m WHERE m.id IN (
+       FROM memories m WHERE m.kind NOT IN (${pinnedKinds}) AND m.id IN (
          SELECT i.memory_id FROM injections i
          JOIN receipt_sessions r ON r.session_id = i.session_id)`,
     )
-    .get() as StatusFacts["receiptInjections"];
+    .get(...PINNED_KINDS) as StatusFacts["receiptInjections"];
 }
 
 function openSignalFacts(db: Db): OpenSignalFact[] {

@@ -1157,7 +1157,7 @@ describe("tools", () => {
         PostToolUseFailure: { events: 0, injecting: 0 },
       },
     });
-    expect(report.receipt_sessions).toEqual({ memories_injected: 2, never_used: 1, share: 0.5 });
+    expect(report.receipt_sessions).toEqual({ memories_injected: 1, never_used: 0, share: 0 });
     expect(report.open_signals.map((open) => [open.session_id, open.detail])).toEqual([
       ["session-b", "newer open"],
       ["session-a", "older open"],
