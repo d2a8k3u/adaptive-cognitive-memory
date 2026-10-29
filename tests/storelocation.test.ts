@@ -737,6 +737,26 @@ describe("MCP server by store location", () => {
   );
 
   it(
+    "serves the shared store on Codex, ignoring the CLAUDE_PLUGIN_DATA store Codex passes to plugins",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-server-codex-")));
+      const legacyDir = join(root, "legacy");
+      const dataDir = join(root, "shared");
+      seededStore(legacyDir, LEGACY_ONLY_ABSTRACT);
+      const client = await spawnedServer({ ...claudeEnv(legacyDir, dataDir), ACM_HOST: "codex" });
+
+      const status = toolValue(
+        (await client.callTool({ name: "memory_status", arguments: {} })) as ToolCallResult,
+      );
+
+      expect(client.getInstructions()).toBeUndefined();
+      expect(status).not.toHaveProperty("store_move");
+      expect(existsSync(join(dataDir, DB_FILENAME))).toBe(true);
+    },
+    SPAWNED_TIMEOUT_MS,
+  );
+
+  it(
     "turns memory off with the move notice when the marker names a missing store, and creates nothing",
     async () => {
       const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-server-gone-")));
@@ -866,6 +886,25 @@ describe("CLI by store location", () => {
       ),
     ).toEqual([{ projectId: PROJECT_ID, recallEnabled: 1 }]);
     expect(existsSync(dataDir)).toBe(false);
+  });
+
+  it("switches recall in the shared store on Codex, ignoring the CLAUDE_PLUGIN_DATA store Codex passes to plugins", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-cli-codex-")));
+    const legacyDir = join(root, "legacy");
+    const dataDir = join(root, "shared");
+    const recallSettings = "SELECT project_id AS projectId FROM project_settings";
+    seededStore(legacyDir, PINNED_ABSTRACT);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const code = await runCli(
+      ["node", "cli.js", "recall", "on"],
+      { ...claudeEnv(legacyDir, dataDir), ACM_HOST: "codex" },
+      PROJECT_DIR,
+    );
+
+    expect(code).toBe(0);
+    expect(storeRows(legacyDir, recallSettings)).toEqual([]);
+    expect(storeRows(dataDir, recallSettings)).toEqual([{ projectId: PROJECT_ID }]);
   });
 
   it("refuses a store command with the notice when the marker names a missing store, and creates nothing", async () => {
