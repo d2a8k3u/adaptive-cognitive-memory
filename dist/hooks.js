@@ -15,6 +15,7 @@ const signals_1 = require("./db/signals");
 const verdicts_1 = require("./db/verdicts");
 const failure_1 = require("./failure");
 const gate_1 = require("./gate");
+const host_1 = require("./host");
 const ids_1 = require("./ids");
 const inject_1 = require("./inject");
 const keys_1 = require("./keys");
@@ -38,6 +39,7 @@ const HOOK_EVENTS = [
 const SESSION_EVENTS = ["PostToolUse", "Stop"];
 const CLI_ENTRY = (0, node_path_1.join)(version_1.PLUGIN_ROOT, "dist", "cli.js");
 const BASH_TOOL = "Bash";
+const CLAUDE_PROFILE = (0, host_1.hostProfile)("claude");
 const STORE_TOOL = (0, toolnames_1.hostToolName)("claude", "memory_store");
 const FEEDBACK_TOOL = (0, toolnames_1.hostToolName)("claude", "memory_feedback");
 const STORE_RECEIPT_TOOLS = new Set([
@@ -119,7 +121,7 @@ function recordRecall(opened, scope, event, injectedIds) {
     });
 }
 function injectAndRecord(opened, scope, selection) {
-    const injection = (0, inject_1.renderInjection)(selection.rows, selection.budgetTokens, selection.degraded);
+    const injection = (0, inject_1.renderInjection)(selection.rows, selection.budgetTokens, CLAUDE_PROFILE.doctorInstruction, selection.degraded);
     recordRecall(opened, scope, selection.event, injection.injectedIds);
     return injection.text;
 }
@@ -233,7 +235,7 @@ async function setUpModel(scope) {
     if (setup === "start-download") {
         startModelDownload(scope.env);
     }
-    return modelNotice(setup, readDownloadFailure(scope.config.dataDir));
+    return modelNotice(setup, readDownloadFailure(scope.config.dataDir), CLAUDE_PROFILE.doctorInstruction);
 }
 async function sessionStartReply(scope, source) {
     const notice = await setUpModel(scope);
@@ -372,7 +374,7 @@ async function failureRecall(opened, scope, failure) {
         return recordAbstention(opened, scope, "PostToolUseFailure");
     }
     const rows = await gatedToolRows(opened, scope, failure.projectId, lookup, calibration_1.FAILURE_GATE);
-    const injection = (0, inject_1.renderInjection)(rows, scope.config.pretoolBudgetTokens);
+    const injection = (0, inject_1.renderInjection)(rows, scope.config.pretoolBudgetTokens, CLAUDE_PROFILE.doctorInstruction);
     if (injection.injectedIds.length === 0) {
         return recordAbstention(opened, scope, "PostToolUseFailure");
     }
@@ -461,7 +463,7 @@ async function runHook() {
         }
     }
     catch (error) {
-        const outage = (0, outage_1.storageOutage)(error);
+        const outage = (0, outage_1.storageOutage)(error, CLAUDE_PROFILE.dependencyFix);
         if (outage === undefined) {
             reportFailure(event, error);
         }

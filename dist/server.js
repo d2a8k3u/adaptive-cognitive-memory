@@ -13,6 +13,7 @@ const memories_1 = require("./db/memories");
 const transitions_1 = require("./db/transitions");
 const doctor_1 = require("./doctor");
 const embeddings_1 = require("./embeddings");
+const host_1 = require("./host");
 const ids_1 = require("./ids");
 const outage_1 = require("./outage");
 const tools_1 = require("./tools");
@@ -58,7 +59,7 @@ function openStorage(config) {
         return { opened: (0, database_1.openDatabase)(config) };
     }
     catch (error) {
-        const outage = (0, outage_1.storageOutage)(error);
+        const outage = (0, outage_1.storageOutage)(error, (0, host_1.hostProfile)("claude").dependencyFix);
         if (outage === undefined) {
             throw error;
         }

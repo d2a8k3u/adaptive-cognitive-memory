@@ -33,6 +33,7 @@ import {
   type ToolCandidate,
   type ToolGate,
 } from "./gate";
+import { hostProfile } from "./host";
 import { collectLocationFacts, type LocationFacts, projectIdentity, resolveProjectId } from "./ids";
 import { type Injection, renderInjection } from "./inject";
 import { commandHead, type ToolLookup, toolLookup } from "./keys";
@@ -75,6 +76,7 @@ type SessionEvent = (typeof SESSION_EVENTS)[number];
 const CLI_ENTRY = join(PLUGIN_ROOT, "dist", "cli.js");
 
 const BASH_TOOL = "Bash";
+const CLAUDE_PROFILE = hostProfile("claude");
 const STORE_TOOL = hostToolName("claude", "memory_store");
 const FEEDBACK_TOOL = hostToolName("claude", "memory_feedback");
 const STORE_RECEIPT_TOOLS: ReadonlySet<string> = new Set([
@@ -230,7 +232,12 @@ function recordRecall(
 }
 
 function injectAndRecord(opened: OpenedDb, scope: HookScope, selection: Selection): string {
-  const injection = renderInjection(selection.rows, selection.budgetTokens, selection.degraded);
+  const injection = renderInjection(
+    selection.rows,
+    selection.budgetTokens,
+    CLAUDE_PROFILE.doctorInstruction,
+    selection.degraded,
+  );
   recordRecall(opened, scope, selection.event, injection.injectedIds);
   return injection.text;
 }
@@ -384,7 +391,11 @@ async function setUpModel(scope: HookScope): Promise<string | undefined> {
   if (setup === "start-download") {
     startModelDownload(scope.env);
   }
-  return modelNotice(setup, readDownloadFailure(scope.config.dataDir));
+  return modelNotice(
+    setup,
+    readDownloadFailure(scope.config.dataDir),
+    CLAUDE_PROFILE.doctorInstruction,
+  );
 }
 
 async function sessionStartReply(scope: HookScope, source: string | undefined): Promise<HookReply> {
@@ -572,7 +583,11 @@ async function failureRecall(
     return recordAbstention(opened, scope, "PostToolUseFailure");
   }
   const rows = await gatedToolRows(opened, scope, failure.projectId, lookup, FAILURE_GATE);
-  const injection = renderInjection(rows, scope.config.pretoolBudgetTokens);
+  const injection = renderInjection(
+    rows,
+    scope.config.pretoolBudgetTokens,
+    CLAUDE_PROFILE.doctorInstruction,
+  );
   if (injection.injectedIds.length === 0) {
     return recordAbstention(opened, scope, "PostToolUseFailure");
   }
@@ -677,7 +692,7 @@ async function runHook(): Promise<void> {
       console.log(output);
     }
   } catch (error) {
-    const outage = storageOutage(error);
+    const outage = storageOutage(error, CLAUDE_PROFILE.dependencyFix);
     if (outage === undefined) {
       reportFailure(event, error);
     } else if (event === "SessionStart") {

@@ -15,6 +15,7 @@ import { embedMissing, type MemoryEnv } from "./db/memories";
 import { reconcileVecStates } from "./db/transitions";
 import { errorMessage, runDoctor } from "./doctor";
 import { modelCached } from "./embeddings";
+import { hostProfile } from "./host";
 import { collectLocationFacts, projectIdentity } from "./ids";
 import { type StorageOutage, storageOutage, unavailableMessage } from "./outage";
 import { isToolError, TOOL_DEFINITIONS, type ToolDefinition, type ToolDeps } from "./tools";
@@ -80,7 +81,7 @@ function openStorage(config: Config): { opened: OpenedDb } | { outage: StorageOu
   try {
     return { opened: openDatabase(config) };
   } catch (error) {
-    const outage = storageOutage(error);
+    const outage = storageOutage(error, hostProfile("claude").dependencyFix);
     if (outage === undefined) {
       throw error;
     }

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { RecalledMemory } from "../src/gate";
+import { hostProfile } from "../src/host";
 import { estimateTokens, minLineTokens, renderInjection } from "../src/inject";
 import { FAKE_SECRETS } from "./fixtures/secrets";
 
+const CLAUDE_DOCTOR = hostProfile("claude").doctorInstruction;
 const HEADER =
   "Recalled memory from earlier sessions; verify it against the current code. Apply or follow each line, or say why it does not apply, then send memory_feedback for every id.";
 const MODEL_WARNING = "memory degraded (model missing) — run /memory-doctor";
@@ -71,7 +73,7 @@ describe("renderInjection", () => {
       }),
     ];
 
-    expect(renderInjection(rows, 1200)).toEqual({
+    expect(renderInjection(rows, 1200, CLAUDE_DOCTOR)).toEqual({
       text: [
         "<memory>",
         HEADER,
@@ -94,7 +96,7 @@ describe("renderInjection", () => {
         "01ARZ3NDEKTSV4RRFFQ69G5FAE",
       ],
     });
-    expect(renderInjection([memory({ kind: "procedure" })], 1200).text).not.toMatch(
+    expect(renderInjection([memory({ kind: "procedure" })], 1200, CLAUDE_DOCTOR).text).not.toMatch(
       /Constraints:|Preferences:|Project facts:/,
     );
   });
@@ -106,11 +108,11 @@ describe("renderInjection", () => {
       memory({ id: "CCCCCCCCCCCCCCCC", abstract: "t" }),
     ];
 
-    const below = renderInjection(rows, 104);
+    const below = renderInjection(rows, 104, CLAUDE_DOCTOR);
     expect(below.injectedIds).toEqual([SHORT_ID]);
     expect(estimateTokens(below.text)).toBeLessThanOrEqual(104);
 
-    const atBoundary = renderInjection(rows, 105);
+    const atBoundary = renderInjection(rows, 105, CLAUDE_DOCTOR);
     expect(atBoundary.injectedIds).toEqual([SHORT_ID, "BBBBBBBBBBBBBBBB"]);
     expect(estimateTokens(atBoundary.text)).toBeLessThanOrEqual(105);
   });
@@ -122,11 +124,13 @@ describe("renderInjection", () => {
     );
     const overflow = memory({ id: "O".repeat(26), abstract: "o" });
 
-    const kept = renderInjection(atCap, unboundedBudgetTokens);
+    const kept = renderInjection(atCap, unboundedBudgetTokens, CLAUDE_DOCTOR);
     expect(kept.text.length).toBe(9_500);
     expect(kept.injectedIds).toHaveLength(36);
 
-    expect(renderInjection([...atCap, overflow], unboundedBudgetTokens)).toEqual(kept);
+    expect(renderInjection([...atCap, overflow], unboundedBudgetTokens, CLAUDE_DOCTOR)).toEqual(
+      kept,
+    );
   });
 
   it("masks a secret in a recalled abstract before it reaches the injection", () => {
@@ -134,19 +138,20 @@ describe("renderInjection", () => {
     const { text } = renderInjection(
       [memory({ abstract: `deploy bot token ${secret} posts releases` })],
       1200,
+      CLAUDE_DOCTOR,
     );
     expect(text).not.toContain(secret);
     expect(text).toContain("deploy bot token [REDACTED] posts releases");
   });
 
   it("renders nothing for no memories unless degraded, then only the warning", () => {
-    expect(renderInjection([], 1200)).toEqual({ text: "", injectedIds: [] });
-    expect(renderInjection([], 1200, {})).toEqual({ text: "", injectedIds: [] });
-    expect(renderInjection([], 1200, { model: true })).toEqual({
+    expect(renderInjection([], 1200, CLAUDE_DOCTOR)).toEqual({ text: "", injectedIds: [] });
+    expect(renderInjection([], 1200, CLAUDE_DOCTOR, {})).toEqual({ text: "", injectedIds: [] });
+    expect(renderInjection([], 1200, CLAUDE_DOCTOR, { model: true })).toEqual({
       text: MODEL_WARNING,
       injectedIds: [],
     });
-    expect(renderInjection([], 1200, { embedding_timeout: true })).toEqual({
+    expect(renderInjection([], 1200, CLAUDE_DOCTOR, { embedding_timeout: true })).toEqual({
       text: "memory degraded (embedding timeout) — run /memory-doctor",
       injectedIds: [],
     });
@@ -155,11 +160,11 @@ describe("renderInjection", () => {
   it("prepends the degraded warning and counts it against the budget", () => {
     const oneRow = [memory({ id: SHORT_ID, abstract: "a".repeat(40) })];
 
-    const withWarning = renderInjection(oneRow, 90, { model: true, vec: true });
+    const withWarning = renderInjection(oneRow, 90, CLAUDE_DOCTOR, { model: true, vec: true });
     expect(withWarning.text.startsWith(`${MODEL_VEC_WARNING}\n<memory>`)).toBe(true);
     expect(withWarning.injectedIds).toEqual([SHORT_ID]);
 
-    expect(renderInjection(oneRow, 89, { model: true, vec: true })).toEqual({
+    expect(renderInjection(oneRow, 89, CLAUDE_DOCTOR, { model: true, vec: true })).toEqual({
       text: MODEL_VEC_WARNING,
       injectedIds: [],
     });

@@ -47,13 +47,13 @@ function downloadingNotice(lastFailure) {
         ? `${version_1.PLUGIN_NAME} is downloading its embedding model ${progress}; prompt recall starts when it finishes.`
         : `${version_1.PLUGIN_NAME}'s last embedding model download failed (${shortReason(lastFailure.error)}); retrying in the background ${progress}, prompt recall starts when it finishes.`;
 }
-function downloadOffNotice(lastFailure) {
+function downloadOffNotice(lastFailure, doctorInstruction) {
     const state = lastFailure === undefined
         ? "has no embedding model yet and its automatic download is off"
         : `has no embedding model: the last download failed (${shortReason(lastFailure.error)}) and automatic download is off`;
-    return `${version_1.PLUGIN_NAME} ${state}, so prompt recall stays off: run /memory-doctor for the one-time model-init step.`;
+    return `${version_1.PLUGIN_NAME} ${state}, so prompt recall stays off: run ${doctorInstruction} for the one-time model-init step.`;
 }
-function modelNotice(setup, lastFailure) {
+function modelNotice(setup, lastFailure, doctorInstruction) {
     switch (setup) {
         case "ready":
             return undefined;
@@ -61,7 +61,7 @@ function modelNotice(setup, lastFailure) {
         case "downloading":
             return downloadingNotice(lastFailure);
         case "download-off":
-            return downloadOffNotice(lastFailure);
+            return downloadOffNotice(lastFailure, doctorInstruction);
     }
 }
 function isDownloadLock(value) {

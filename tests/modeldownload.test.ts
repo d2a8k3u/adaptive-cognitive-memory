@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MODEL_ID } from "../src/cfg";
 import { MODEL_FILES, modelCached, modelCachePath } from "../src/embeddings";
+import { hostProfile } from "../src/host";
 import {
   acquireDownloadLock,
   DOWNLOAD_LOCK_STALE_MS,
@@ -31,6 +32,7 @@ const NOW_MS = Date.parse("2026-10-14T12:00:00.000Z");
 const NOW = new Date(NOW_MS);
 const CONFIG_FILE = MODEL_FILES[0]!;
 const MODEL_ORG_DIR = MODEL_ID.split("/")[0]!;
+const CLAUDE_DOCTOR = hostProfile("claude").doctorInstruction;
 
 function lockAged(ageMs: number): DownloadLock {
   return { pid: 4242, startedAt: new Date(NOW_MS - ageMs).toISOString() };
@@ -145,7 +147,7 @@ describe("modelNotice", () => {
       notice: offAfterFailure,
     },
   ] as const)("tells the session about $name", ({ setup, failure, notice }) => {
-    expect(modelNotice(setup, failure)).toBe(notice);
+    expect(modelNotice(setup, failure, CLAUDE_DOCTOR)).toBe(notice);
   });
 
   it.each([
@@ -161,7 +163,11 @@ describe("modelNotice", () => {
     },
     { name: "a multi-line reason", error: "first line\n    at stack frame", reason: "first line" },
   ])("names $name in short", ({ error, reason }) => {
-    const notice = modelNotice("start-download", { failedAt: refused.failedAt, error });
+    const notice = modelNotice(
+      "start-download",
+      { failedAt: refused.failedAt, error },
+      CLAUDE_DOCTOR,
+    );
 
     expect(notice).toContain(`download failed (${reason}); retrying`);
   });
