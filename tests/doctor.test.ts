@@ -1,19 +1,33 @@
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CALIBRATED_EMBEDDING, CALIBRATION_RUN } from "../src/calibration";
-import { EMBED_DIM, loadConfig } from "../src/cfg";
+import { DB_FILENAME, EMBED_DIM, loadConfig } from "../src/cfg";
 import { runCli } from "../src/cli";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import { recordEmbeddingTimeout } from "../src/db/health";
 import { SCHEMA_VERSION } from "../src/db/schema";
-import { type DoctorCheck, type DoctorReport, dataRetentionCheck, runDoctor } from "../src/doctor";
+import {
+  type CheckStatus,
+  type DoctorCheck,
+  type DoctorReport,
+  dataRetentionCheck,
+  runDoctor,
+} from "../src/doctor";
 import { modelCachePath } from "../src/embeddings";
 import { resolveProjectId } from "../src/ids";
 import { acquireDownloadLock, recordDownloadFailure } from "../src/modeldownload";
+import { MOVED_MARKER_FILE, storeNotice, writeMovedMarker } from "../src/storelocation";
 import { PLUGIN_VERSION } from "../src/version";
 import { testModelCacheDir } from "../vitest.config";
 
@@ -203,8 +217,9 @@ describe("runDoctor", () => {
     const after = checkByName(runDoctor(env, PROJECT_DIR), "data_retention");
 
     expect(before.status).toBe("warn");
-    expect(before.fix).toContain("--keep-data");
-    expect(before.fix).toContain("export");
+    expect(before.fix).toBe(
+      `back up with node "${join(process.cwd(), "dist", "cli.js")}" export <file>, and move the database out of the plugin data directory: run the store move that plugin_data names, or set ACM_DATA_DIR to a directory outside it`,
+    );
     expect(after).toMatchObject({ status: "ok", fix: "" });
   });
 
@@ -398,6 +413,149 @@ describe("runDoctor", () => {
   });
 });
 
+const DIGEST = "digest-of-the-moved-store";
+const MOVED_AT = "2026-10-30T00:00:00.000Z";
+
+interface ClaudeStores {
+  readonly legacyDir: string;
+  readonly dataDir: string;
+  readonly movedTo: string;
+  readonly env: NodeJS.ProcessEnv;
+}
+
+function claudeStores(): ClaudeStores {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-doctor-location-")));
+  const configDir = join(root, "claude");
+  const legacyDir = join(configDir, "plugins", "data", "adaptive-cognitive-memory-inline");
+  const dataDir = join(root, "shared");
+  mkdirSync(legacyDir, { recursive: true });
+  mkdirSync(dataDir);
+  openDatabase(loadConfig({ ACM_DATA_DIR: legacyDir })).db.close();
+  return {
+    legacyDir,
+    dataDir,
+    movedTo: join(root, "moved"),
+    env: {
+      CLAUDE_CONFIG_DIR: configDir,
+      CLAUDE_PLUGIN_DATA: legacyDir,
+      ACM_DATA_DIR: dataDir,
+      ACM_MODEL_CACHE_DIR: testModelCacheDir,
+    },
+  };
+}
+
+describe("runDoctor by host and store location", () => {
+  it("passes plugin_data, auto_memory and data_retention for a fresh store outside any Claude install", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-doctor-codex-")));
+    const dataDir = join(root, "share", "adaptive-cognitive-memory");
+    const env = {
+      ACM_HOST: "codex",
+      ACM_DATA_DIR: dataDir,
+      CLAUDE_CONFIG_DIR: join(root, "claude"),
+      ACM_MODEL_CACHE_DIR: testModelCacheDir,
+    };
+
+    const report = runDoctor(env, PROJECT_DIR);
+
+    expect(checkByName(report, "plugin_data")).toMatchObject({
+      status: "ok",
+      detail: `${dataDir} writable`,
+    });
+    expect(checkByName(report, "auto_memory")).toMatchObject({
+      status: "ok",
+      detail: "native auto memory is not applicable on codex",
+    });
+    expect(checkByName(report, "data_retention").status).toBe("ok");
+  });
+
+  it("fails plugin_data with a fix naming ACM_DATA_DIR, and names CLAUDE_PLUGIN_DATA nowhere, when the data dir does not resolve", () => {
+    const env = {
+      ACM_DATA_DIR: "relative/memory",
+      CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-doctor-claude-")),
+    };
+
+    const report = runDoctor(env, PROJECT_DIR);
+
+    expect(checkByName(report, "plugin_data")).toEqual({
+      name: "plugin_data",
+      status: "fail",
+      ok: false,
+      detail: "ACM_DATA_DIR must be an absolute path, got: relative/memory",
+      fix: "set ACM_DATA_DIR to an absolute path of a writable directory",
+    });
+    expect(JSON.stringify(report)).not.toContain("CLAUDE_PLUGIN_DATA");
+  });
+
+  it.each<{
+    name: string;
+    prepare: (stores: ClaudeStores) => void;
+    pluginData: (stores: ClaudeStores) => { detail: string; fix: string | undefined };
+    retention: CheckStatus;
+    dataDirDb: boolean;
+  }>([
+    {
+      name: "an unmoved legacy store",
+      prepare: () => {},
+      pluginData: ({ legacyDir, dataDir }) => ({
+        detail: `${legacyDir} writable`,
+        fix: storeNotice({ kind: "legacy", legacyDir }, dataDir),
+      }),
+      retention: "warn",
+      dataDirDb: false,
+    },
+    {
+      name: "a store moved elsewhere",
+      prepare: ({ legacyDir, movedTo }) => {
+        mkdirSync(movedTo);
+        writeMovedMarker(legacyDir, movedTo, DIGEST, MOVED_AT);
+      },
+      pluginData: ({ movedTo, dataDir }) => ({
+        detail: `${movedTo} writable`,
+        fix: storeNotice({ kind: "moved-elsewhere", movedTo, targetExists: true }, dataDir),
+      }),
+      retention: "ok",
+      dataDirDb: false,
+    },
+    {
+      name: "a store moved to a missing dir",
+      prepare: ({ legacyDir, movedTo }) => writeMovedMarker(legacyDir, movedTo, DIGEST, MOVED_AT),
+      pluginData: ({ movedTo, dataDir }) => ({
+        detail: `${movedTo} does not exist`,
+        fix: storeNotice({ kind: "moved-elsewhere", movedTo, targetExists: false }, dataDir),
+      }),
+      retention: "fail",
+      dataDirDb: false,
+    },
+    {
+      name: "an unreadable marker",
+      prepare: ({ legacyDir }) => writeFileSync(join(legacyDir, MOVED_MARKER_FILE), "{not json"),
+      pluginData: ({ legacyDir, dataDir }) => ({
+        detail: `${dataDir} writable; ${join(legacyDir, MOVED_MARKER_FILE)} is unreadable`,
+        fix: "set ACM_DATA_DIR to the directory that holds the moved store",
+      }),
+      retention: "ok",
+      dataDirDb: true,
+    },
+  ])(
+    "warns in plugin_data about $name and examines the store in use",
+    ({ prepare, pluginData, retention, dataDirDb }) => {
+      const stores = claudeStores();
+      prepare(stores);
+
+      const report = runDoctor(stores.env, PROJECT_DIR);
+
+      expect(checkByName(report, "plugin_data")).toEqual({
+        name: "plugin_data",
+        status: "warn",
+        ok: true,
+        ...pluginData(stores),
+      });
+      expect(checkByName(report, "data_retention").status).toBe(retention);
+      expect(existsSync(join(stores.dataDir, DB_FILENAME))).toBe(dataDirDb);
+    },
+  );
+});
+
 describe("dataRetentionCheck", () => {
   const pluginDataRoot = "/home/u/.claude/plugins/data";
   const inPluginData = `${pluginDataRoot}/adaptive-cognitive-memory/memory.sqlite`;
@@ -553,6 +711,12 @@ describe("runCli", () => {
       env: {},
       code: 1,
       stderr: /ACM_DATA_DIR/,
+    },
+    {
+      argv: ["node", "dist/cli.js", "doctor"],
+      env: { ...healthyEnv(), ACM_HOST: "vim" },
+      code: 1,
+      stderr: /^ACM_HOST must be one of claude, codex, opencode, got: "vim"$/,
     },
     {
       argv: ["node", "dist/cli.js", "reembed"],

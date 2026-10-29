@@ -1,5 +1,9 @@
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { checkpoint, type OpenSignal } from "../src/capture";
+import { runDoctor } from "../src/doctor";
 import type { RecalledMemory } from "../src/gate";
 import { type HostId, hostProfile } from "../src/host";
 import { renderInjection } from "../src/inject";
@@ -21,6 +25,7 @@ interface HostTexts {
   readonly routing: string;
   readonly modelDownload: string;
   readonly outage: string;
+  readonly doctor: string;
 }
 
 const HOSTS: readonly HostId[] = ["claude", "codex", "opencode"];
@@ -68,6 +73,24 @@ function toolMentions(text: string): ToolMention[] {
   });
 }
 
+function doctorTexts(host: HostId): string {
+  const root = mkdtempSync(join(tmpdir(), "acm-hosttext-doctor-"));
+  const configDir = join(root, "claude");
+  const dataDirInPluginData = join(configDir, "plugins", "data", "adaptive-cognitive-memory");
+  const emptyModelCache = join(root, "models");
+  mkdirSync(dataDirInPluginData, { recursive: true });
+  const report = runDoctor(
+    {
+      ACM_HOST: host,
+      ACM_DATA_DIR: dataDirInPluginData,
+      ACM_MODEL_CACHE_DIR: emptyModelCache,
+      CLAUDE_CONFIG_DIR: configDir,
+    },
+    root,
+  );
+  return report.checks.flatMap(({ detail, fix }) => [detail, fix]).join("\n");
+}
+
 function emittedTexts(host: HostId): HostTexts {
   const profile = hostProfile(host);
   return {
@@ -78,6 +101,7 @@ function emittedTexts(host: HostId): HostTexts {
     routing: routingLine(profile.nativeAutoMemory),
     modelDownload: modelNotice("download-off", undefined, profile.doctorInstruction)!,
     outage: sessionNotice(storageOutage(MISSING_DEPENDENCY, profile.dependencyFix)!),
+    doctor: doctorTexts(host),
   };
 }
 
@@ -105,6 +129,7 @@ describe("host-facing texts", () => {
       expect(texts.sessionStart).toContain(`run ${doctorCommand}`);
       expect(texts.modelDownload).toContain(`run ${doctorCommand} for the one-time model-init`);
       expect(texts.outage).toContain(`Fix: npm ci --ignore-scripts --omit=dev in ${PLUGIN_ROOT}.`);
+      expect(texts.doctor).toContain("export <file>, and move the database out of");
     },
   );
 });

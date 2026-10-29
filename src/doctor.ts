@@ -2,7 +2,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { type AutoMemory, claudeConfigDir, readAutoMemory } from "./automemory";
 import { CALIBRATED_EMBEDDING, CALIBRATION_RUN } from "./calibration";
-import { type Config, loadConfig } from "./cfg";
+import { type Config, DATA_DIR_ENV, loadConfig } from "./cfg";
 import { type Db, type OpenedDb, openDatabase, probeNativeModule } from "./db/database";
 import { lastBackfillFailure, lastEmbeddingTimeout } from "./db/health";
 import { unembeddedActiveCount } from "./db/memories";
@@ -10,6 +10,7 @@ import { SCHEMA_VERSION } from "./db/schema";
 import { lastExportAt } from "./db/transfer";
 import { driftedVecStateCount } from "./db/transitions";
 import { modelCached, modelCachePath } from "./embeddings";
+import { CLI_ENTRY, type HostProfile, hostProfile, resolveHost } from "./host";
 import { collectLocationFacts, type LocationFacts, projectIdentity } from "./ids";
 import {
   DOWNLOAD_LOCK_STALE_MS,
@@ -19,7 +20,18 @@ import {
 } from "./modeldownload";
 import { NATIVE_MODULE_FIX } from "./outage";
 import { daysBefore } from "./retention";
-import { PLUGIN_NAME, PLUGIN_ROOT } from "./version";
+import {
+  ensureDataDir,
+  type LegacyFacts,
+  legacyFacts,
+  MOVED_MARKER_FILE,
+  MOVED_STORE_FIX,
+  type StoreState,
+  storeConfig,
+  storeMissing,
+  storeNotice,
+  storeState,
+} from "./storelocation";
 
 export type CheckStatus = "ok" | "warn" | "fail";
 
@@ -48,9 +60,22 @@ interface Verdict {
   readonly detail: string;
 }
 
+interface DoctorStore {
+  readonly dataDir: string;
+  readonly state: StoreState;
+  readonly config: Config;
+  readonly unreadableMarker: string | undefined;
+}
+
+interface StoreOpening {
+  readonly opened: OpenedDb | undefined;
+  readonly detail: string;
+}
+
 const NODE_MIN_MAJOR = 22;
 const EXPORT_STALE_AFTER_DAYS = 30;
-const PLUGIN_DATA_FIX = "set CLAUDE_PLUGIN_DATA to a writable directory";
+const PLUGIN_DATA = "plugin_data";
+const PLUGIN_DATA_FIX = `set ${DATA_DIR_ENV} to an absolute path of a writable directory`;
 const DB_FIX =
   "make the plugin data directory writable, or restore a backup / delete the database file to start fresh; a newer schema needs a plugin update";
 const VEC_FIX =
@@ -68,7 +93,7 @@ const PROJECT_IDENTITY_FIX =
   "make the project directory readable and git answer git rev-parse --git-common-dir within 2 s there";
 const AUTO_MEMORY_FIX =
   'to make this plugin the only durable memory, set "autoMemoryEnabled": false in .claude/settings.json (this project) or ~/.claude/settings.json (every project)';
-const RETENTION_FIX = `back up with node "${PLUGIN_ROOT}/dist/cli.js" export <file>, and uninstall with claude plugin uninstall ${PLUGIN_NAME} --keep-data so the database survives`;
+const RETENTION_FIX = `back up with node "${CLI_ENTRY}" export <file>, and move the database out of the plugin data directory: run the store move that ${PLUGIN_DATA} names, or set ${DATA_DIR_ENV} to a directory outside it`;
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -119,16 +144,83 @@ function checkNativeModule(): DoctorCheck {
   });
 }
 
-function checkPluginData(config: Config): DoctorCheck {
-  const probePath = join(config.dataDir, ".acm-doctor-probe");
+function unreadableMarkerPath(legacy: LegacyFacts | undefined): string | undefined {
+  return legacy?.markerPresent === true && legacy.movedTo === undefined
+    ? join(legacy.dir, MOVED_MARKER_FILE)
+    : undefined;
+}
+
+function doctorStore(profile: HostProfile, env: NodeJS.ProcessEnv): DoctorStore {
+  const config = loadConfig(env);
+  const legacy = legacyFacts(profile, env, config.dataDir);
+  const state = storeState(config.dataDir, legacy);
+  return {
+    dataDir: config.dataDir,
+    state,
+    config: storeConfig(config, state, env),
+    unreadableMarker: unreadableMarkerPath(legacy),
+  };
+}
+
+function missingStoreDetail(movedTo: string): string {
+  return `${movedTo} does not exist`;
+}
+
+function writabilityFailure(store: DoctorStore): string | undefined {
+  const { dataDir } = store.config;
+  const probePath = join(dataDir, ".acm-doctor-probe");
   try {
+    if (store.state.kind === "shared") {
+      ensureDataDir(store.config);
+    }
     writeFileSync(probePath, "probe");
+    return undefined;
   } catch (error) {
-    return failed("plugin_data", `${config.dataDir}: ${errorMessage(error)}`, PLUGIN_DATA_FIX);
+    return `${dataDir}: ${errorMessage(error)}`;
   } finally {
     rmSync(probePath, { force: true });
   }
-  return rated("plugin_data", passOrFail(true, `${config.dataDir} writable`), PLUGIN_DATA_FIX);
+}
+
+function checkPluginData(store: DoctorStore): DoctorCheck {
+  const notice = storeNotice(store.state, store.dataDir);
+  if (notice !== undefined && storeMissing(store.state)) {
+    return rated(
+      PLUGIN_DATA,
+      { status: "warn", detail: missingStoreDetail(store.state.movedTo) },
+      notice,
+    );
+  }
+  const failure = writabilityFailure(store);
+  if (failure !== undefined) {
+    return failed(PLUGIN_DATA, failure, PLUGIN_DATA_FIX);
+  }
+  const writable = `${store.config.dataDir} writable`;
+  if (notice !== undefined) {
+    return rated(PLUGIN_DATA, { status: "warn", detail: writable }, notice);
+  }
+  if (store.unreadableMarker !== undefined) {
+    return rated(
+      PLUGIN_DATA,
+      { status: "warn", detail: `${writable}; ${store.unreadableMarker} is unreadable` },
+      MOVED_STORE_FIX,
+    );
+  }
+  return rated(PLUGIN_DATA, passOrFail(true, writable), PLUGIN_DATA_FIX);
+}
+
+function openStore(store: DoctorStore | undefined): StoreOpening {
+  if (store === undefined) {
+    return { opened: undefined, detail: "skipped: database not open" };
+  }
+  if (storeMissing(store.state)) {
+    return { opened: undefined, detail: `skipped: ${missingStoreDetail(store.state.movedTo)}` };
+  }
+  try {
+    return { opened: openDatabase(store.config), detail: "" };
+  } catch (error) {
+    return { opened: undefined, detail: `${store.config.dbPath}: ${errorMessage(error)}` };
+  }
 }
 
 function checkDatabase(
@@ -190,7 +282,7 @@ function missingModelCheck(dataDir: string, path: string): DoctorCheck {
 
 function checkModel(config: Config | undefined, opened: OpenedDb | undefined): DoctorCheck {
   if (!config) {
-    return failed("model", "skipped: CLAUDE_PLUGIN_DATA not resolved", MODEL_FIX);
+    return failed("model", `skipped: ${DATA_DIR_ENV} not resolved`, MODEL_FIX);
   }
   const path = modelCachePath(config.modelCacheDir);
   if (!modelCached(config.modelCacheDir)) {
@@ -321,7 +413,18 @@ function checkProjectIdentity(projectDir: string): DoctorCheck {
   }
 }
 
-function checkAutoMemory(env: NodeJS.ProcessEnv, projectDir: string): DoctorCheck {
+function checkAutoMemory(
+  profile: HostProfile,
+  env: NodeJS.ProcessEnv,
+  projectDir: string,
+): DoctorCheck {
+  if (!profile.nativeAutoMemory) {
+    return rated(
+      "auto_memory",
+      passOrFail(true, `native auto memory is not applicable on ${profile.id}`),
+      "",
+    );
+  }
   try {
     return autoMemoryCheck(readAutoMemory(env, projectDir, collectLocationFacts(projectDir)));
   } catch (error) {
@@ -380,25 +483,19 @@ function checkDataRetention(
 }
 
 export function runDoctor(env: NodeJS.ProcessEnv, projectDir: string): DoctorReport {
+  const profile = hostProfile(resolveHost(env));
   const checks: DoctorCheck[] = [checkNode(), checkNativeModule()];
-  let config: Config | undefined;
+  let store: DoctorStore | undefined;
   try {
-    config = loadConfig(env);
+    store = doctorStore(profile, env);
   } catch (error) {
-    checks.push(failed("plugin_data", errorMessage(error), PLUGIN_DATA_FIX));
+    checks.push(failed(PLUGIN_DATA, errorMessage(error), PLUGIN_DATA_FIX));
   }
-  if (config) {
-    checks.push(checkPluginData(config));
+  if (store) {
+    checks.push(checkPluginData(store));
   }
-  let opened: OpenedDb | undefined;
-  let openDetail = "skipped: database not open";
-  if (config) {
-    try {
-      opened = openDatabase(config);
-    } catch (error) {
-      openDetail = `${config.dbPath}: ${errorMessage(error)}`;
-    }
-  }
+  const config = store?.config;
+  const { opened, detail: openDetail } = openStore(store);
   try {
     checks.push(
       checkDatabase(opened, openDetail, config?.dbPath ?? "unset"),
@@ -409,7 +506,7 @@ export function runDoctor(env: NodeJS.ProcessEnv, projectDir: string): DoctorRep
       checkFts(opened, openDetail),
       checkCalibration(),
       checkProjectIdentity(projectDir),
-      checkAutoMemory(env, projectDir),
+      checkAutoMemory(profile, env, projectDir),
       checkDataRetention(env, config, opened, openDetail),
     );
   } finally {
