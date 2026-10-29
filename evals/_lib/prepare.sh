@@ -4,7 +4,7 @@ set -euo pipefail
 lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_root="$(cd "$lib/../.." && pwd)"
 config_dir="$(cd "$HOME/.." && pwd)/config"
-data="$config_dir/plugins/data/adaptive-cognitive-memory-inline"
+data="$HOME/.local/share/adaptive-cognitive-memory"
 models="$plugin_root/node_modules/.cache/adaptive-cognitive-memory/models/onnx-community"
 
 if [ ! -d "$config_dir" ]; then

@@ -552,7 +552,7 @@ describe("runCli", () => {
       argv: ["node", "dist/cli.js", "model-init"],
       env: {},
       code: 1,
-      stderr: /CLAUDE_PLUGIN_DATA/,
+      stderr: /ACM_DATA_DIR/,
     },
     {
       argv: ["node", "dist/cli.js", "reembed"],

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_DOWNLOAD_MODEL = exports.BUDGET_MAX_TOKENS = exports.BUDGET_MIN_TOKENS = exports.DEFAULT_PRETOOL_BUDGET_TOKENS = exports.DEFAULT_BUDGET_TOKENS = exports.DB_FILENAME = exports.SIGNAL_DETAIL_MAX_CHARS = exports.RELATION_TYPE_MAX_CHARS = exports.RELATION_CAP = exports.CONTENT_MAX_CHARS = exports.ABSTRACT_MAX_CHARS = exports.TITLE_MAX_CHARS = exports.EMBED_DEADLINE_MS = exports.EMBED_DIM = exports.MODEL_DOWNLOAD_SIZE = exports.MODEL_PREFIXES = exports.MODEL_POOLING = exports.MODEL_DTYPE = exports.MODEL_ID = void 0;
+exports.DEFAULT_DATA_DIR_SEGMENTS = exports.DATA_DIR_ENV = exports.DEFAULT_DOWNLOAD_MODEL = exports.BUDGET_MAX_TOKENS = exports.BUDGET_MIN_TOKENS = exports.DEFAULT_PRETOOL_BUDGET_TOKENS = exports.DEFAULT_BUDGET_TOKENS = exports.DB_FILENAME = exports.SIGNAL_DETAIL_MAX_CHARS = exports.RELATION_TYPE_MAX_CHARS = exports.RELATION_CAP = exports.CONTENT_MAX_CHARS = exports.ABSTRACT_MAX_CHARS = exports.TITLE_MAX_CHARS = exports.EMBED_DEADLINE_MS = exports.EMBED_DIM = exports.MODEL_DOWNLOAD_SIZE = exports.MODEL_PREFIXES = exports.MODEL_POOLING = exports.MODEL_DTYPE = exports.MODEL_ID = void 0;
+exports.storePaths = storePaths;
 exports.loadConfig = loadConfig;
 const node_path_1 = require("node:path");
 exports.MODEL_ID = "onnx-community/granite-embedding-97m-multilingual-r2-ONNX";
@@ -24,6 +25,8 @@ exports.DEFAULT_PRETOOL_BUDGET_TOKENS = 300;
 exports.BUDGET_MIN_TOKENS = 100;
 exports.BUDGET_MAX_TOKENS = 2375;
 exports.DEFAULT_DOWNLOAD_MODEL = true;
+exports.DATA_DIR_ENV = "ACM_DATA_DIR";
+exports.DEFAULT_DATA_DIR_SEGMENTS = [".local", "share", "adaptive-cognitive-memory"];
 const RECALL_BUDGET_OPTION = "CLAUDE_PLUGIN_OPTION_RECALL_BUDGET_TOKENS";
 const PRETOOL_BUDGET_OPTION = "CLAUDE_PLUGIN_OPTION_PRETOOL_BUDGET_TOKENS";
 const DOWNLOAD_MODEL_OPTION = "CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL";
@@ -52,15 +55,32 @@ function integerFromEnv(env, name, fallback, bounds) {
     }
     return parsed;
 }
-function loadConfig(env = process.env) {
-    const dataDir = env.CLAUDE_PLUGIN_DATA;
-    if (!dataDir) {
-        throw new Error("CLAUDE_PLUGIN_DATA is required: set the Claude Code plugin data directory");
+function defaultDataDir(home) {
+    if (home === undefined || !(0, node_path_1.isAbsolute)(home)) {
+        throw new Error(`${exports.DATA_DIR_ENV} or an absolute HOME is required to locate the memory data directory`);
     }
+    return (0, node_path_1.join)(home, ...exports.DEFAULT_DATA_DIR_SEGMENTS);
+}
+function dataDirFromEnv(env) {
+    const override = env[exports.DATA_DIR_ENV];
+    if (override === undefined) {
+        return defaultDataDir(env.HOME);
+    }
+    if (!(0, node_path_1.isAbsolute)(override)) {
+        throw new Error(`${exports.DATA_DIR_ENV} must be an absolute path, got: ${override}`);
+    }
+    return override;
+}
+function storePaths(dataDir, env) {
     return {
         dataDir,
         dbPath: env.ACM_DB_PATH ?? (0, node_path_1.join)(dataDir, exports.DB_FILENAME),
         modelCacheDir: env.ACM_MODEL_CACHE_DIR ?? (0, node_path_1.join)(dataDir, "models"),
+    };
+}
+function loadConfig(env = process.env) {
+    return {
+        ...storePaths(dataDirFromEnv(env), env),
         modelRemoteHost: env.ACM_MODEL_REMOTE_HOST,
         autoDownloadModel: switchFromEnv(env, DOWNLOAD_MODEL_OPTION, exports.DEFAULT_DOWNLOAD_MODEL),
         budgetTokens: integerFromEnv(env, RECALL_BUDGET_OPTION, exports.DEFAULT_BUDGET_TOKENS, BUDGET_BOUNDS),

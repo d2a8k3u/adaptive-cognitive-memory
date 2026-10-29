@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 export const MODEL_ID = "onnx-community/granite-embedding-97m-multilingual-r2-ONNX";
 export const MODEL_DTYPE = "q8";
@@ -21,6 +21,8 @@ export const DEFAULT_PRETOOL_BUDGET_TOKENS = 300;
 export const BUDGET_MIN_TOKENS = 100;
 export const BUDGET_MAX_TOKENS = 2375;
 export const DEFAULT_DOWNLOAD_MODEL = true;
+export const DATA_DIR_ENV = "ACM_DATA_DIR";
+export const DEFAULT_DATA_DIR_SEGMENTS = [".local", "share", "adaptive-cognitive-memory"] as const;
 
 export interface Config {
   dataDir: string;
@@ -77,15 +79,40 @@ function integerFromEnv(
   return parsed;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const dataDir = env.CLAUDE_PLUGIN_DATA;
-  if (!dataDir) {
-    throw new Error("CLAUDE_PLUGIN_DATA is required: set the Claude Code plugin data directory");
+function defaultDataDir(home: string | undefined): string {
+  if (home === undefined || !isAbsolute(home)) {
+    throw new Error(
+      `${DATA_DIR_ENV} or an absolute HOME is required to locate the memory data directory`,
+    );
   }
+  return join(home, ...DEFAULT_DATA_DIR_SEGMENTS);
+}
+
+function dataDirFromEnv(env: NodeJS.ProcessEnv): string {
+  const override = env[DATA_DIR_ENV];
+  if (override === undefined) {
+    return defaultDataDir(env.HOME);
+  }
+  if (!isAbsolute(override)) {
+    throw new Error(`${DATA_DIR_ENV} must be an absolute path, got: ${override}`);
+  }
+  return override;
+}
+
+export function storePaths(
+  dataDir: string,
+  env: NodeJS.ProcessEnv,
+): Pick<Config, "dataDir" | "dbPath" | "modelCacheDir"> {
   return {
     dataDir,
     dbPath: env.ACM_DB_PATH ?? join(dataDir, DB_FILENAME),
     modelCacheDir: env.ACM_MODEL_CACHE_DIR ?? join(dataDir, "models"),
+  };
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  return {
+    ...storePaths(dataDirFromEnv(env), env),
     modelRemoteHost: env.ACM_MODEL_REMOTE_HOST,
     autoDownloadModel: switchFromEnv(env, DOWNLOAD_MODEL_OPTION, DEFAULT_DOWNLOAD_MODEL),
     budgetTokens: integerFromEnv(env, RECALL_BUDGET_OPTION, DEFAULT_BUDGET_TOKENS, BUDGET_BOUNDS),
