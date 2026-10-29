@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostProfile, InvalidHostError, resolveHost } from "../src/host";
+import { hostToolName } from "../src/toolnames";
 
 const PLUGIN_DIR = "/plugins/adaptive-cognitive-memory";
 
@@ -64,4 +65,14 @@ describe("hostProfile", () => {
       expect(hostProfile(host)).toMatchObject({ id: host, ...features });
     },
   );
+});
+
+describe("hostToolName", () => {
+  it.each([
+    { host: "claude", name: "mcp__plugin_adaptive-cognitive-memory_memory__memory_store" },
+    { host: "codex", name: "mcp__memory__memory_store" },
+    { host: "opencode", name: "memory_memory_store" },
+  ] as const)("names memory_store the way $host reports it", ({ host, name }) => {
+    expect(hostToolName(host, "memory_store")).toBe(name);
+  });
 });

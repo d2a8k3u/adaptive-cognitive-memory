@@ -1,13 +1,13 @@
 import type { RecalledMemory } from "./gate";
 import type { MemoryKind } from "./policy";
-import { STORE_TOOL } from "./toolnames";
+import { hostToolName } from "./toolnames";
 
 export const PINNED_KINDS: readonly MemoryKind[] = ["constraint", "preference"];
 export const STALE_AFTER_INJECTION_EVENTS = 500;
 
 const REINJECTING_SOURCES: ReadonlySet<string> = new Set(["resume", "compact"]);
 const ROUTED_SOURCES: ReadonlySet<string> = new Set(["startup", "clear", "compact"]);
-const ROUTING_LINE = `Native auto memory is also on: store durable lessons with ${STORE_TOOL}, not in the auto-memory MEMORY.md.`;
+const ROUTING_LINE = `Native auto memory is also on: store durable lessons with ${hostToolName("claude", "memory_store")}, not in the auto-memory MEMORY.md.`;
 
 export function routesLessons(source: string | undefined): boolean {
   return ROUTED_SOURCES.has(source ?? "");

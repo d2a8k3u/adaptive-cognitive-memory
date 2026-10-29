@@ -38,10 +38,11 @@ const HOOK_EVENTS = [
 const SESSION_EVENTS = ["PostToolUse", "Stop"];
 const CLI_ENTRY = (0, node_path_1.join)(version_1.PLUGIN_ROOT, "dist", "cli.js");
 const BASH_TOOL = "Bash";
-const FEEDBACK_TOOL = (0, toolnames_1.hostToolName)("memory_feedback");
+const STORE_TOOL = (0, toolnames_1.hostToolName)("claude", "memory_store");
+const FEEDBACK_TOOL = (0, toolnames_1.hostToolName)("claude", "memory_feedback");
 const STORE_RECEIPT_TOOLS = new Set([
-    toolnames_1.STORE_TOOL,
-    (0, toolnames_1.hostToolName)("memory_update"),
+    STORE_TOOL,
+    (0, toolnames_1.hostToolName)("claude", "memory_update"),
 ]);
 function isHookEvent(value) {
     return typeof value === "string" && HOOK_EVENTS.includes(value);
@@ -400,7 +401,7 @@ function failedToolText(scope, input) {
 function stopText(scope, stopHookActive) {
     return withDatabase(scope.config, async ({ db }) => db
         .transaction(() => {
-        const decided = (0, capture_1.checkpoint)((0, signals_1.openSignals)(db, scope.sessionId), stopHookActive);
+        const decided = (0, capture_1.checkpoint)((0, signals_1.openSignals)(db, scope.sessionId), stopHookActive, STORE_TOOL);
         if (decided === undefined) {
             return "";
         }

@@ -57,7 +57,7 @@ import {
   writeBadgeState,
 } from "./statusline";
 import { BADGE_STATE_VERSION, type BadgeState, isBadgeSessionId } from "./statusline/badge";
-import { hostToolName, STORE_TOOL } from "./toolnames";
+import { hostToolName } from "./toolnames";
 import { PLUGIN_ROOT } from "./version";
 
 const HOOK_EVENTS = [
@@ -75,10 +75,11 @@ type SessionEvent = (typeof SESSION_EVENTS)[number];
 const CLI_ENTRY = join(PLUGIN_ROOT, "dist", "cli.js");
 
 const BASH_TOOL = "Bash";
-const FEEDBACK_TOOL = hostToolName("memory_feedback");
+const STORE_TOOL = hostToolName("claude", "memory_store");
+const FEEDBACK_TOOL = hostToolName("claude", "memory_feedback");
 const STORE_RECEIPT_TOOLS: ReadonlySet<string> = new Set([
   STORE_TOOL,
-  hostToolName("memory_update"),
+  hostToolName("claude", "memory_update"),
 ]);
 
 interface HookInput {
@@ -603,7 +604,7 @@ function stopText(scope: SessionScope, stopHookActive: boolean): Promise<string>
   return withDatabase(scope.config, async ({ db }) =>
     db
       .transaction(() => {
-        const decided = checkpoint(openSignals(db, scope.sessionId), stopHookActive);
+        const decided = checkpoint(openSignals(db, scope.sessionId), stopHookActive, STORE_TOOL);
         if (decided === undefined) {
           return "";
         }

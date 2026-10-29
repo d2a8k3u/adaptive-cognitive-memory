@@ -21,7 +21,7 @@ import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, LIST_PAGE_MAX_CHARS } from "../src/
 import { MAX_HEAD_WORDS } from "../src/keys";
 import { TICKET_ROWS_MAX } from "../src/search";
 import { snippetLine } from "../src/statusline";
-import { hostToolName, MEMORY_SERVER_NAME } from "../src/toolnames";
+import { hostToolName, MEMORY_SERVER_KEY } from "../src/toolnames";
 import { TOOL_DEFINITIONS, type ToolDefinition } from "../src/tools";
 import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
 
@@ -130,9 +130,9 @@ describe("plugin version owner", () => {
       mcpServers: Record<string, unknown>;
     };
 
-    expect(Object.keys(mcp.mcpServers)).toEqual([MEMORY_SERVER_NAME]);
-    expect(hostToolName("memory_store")).toBe(
-      `mcp__plugin_${plugin.name}_${MEMORY_SERVER_NAME}__memory_store`,
+    expect(Object.keys(mcp.mcpServers)).toEqual([MEMORY_SERVER_KEY]);
+    expect(hostToolName("claude", "memory_store")).toBe(
+      `mcp__plugin_${plugin.name}_${MEMORY_SERVER_KEY}__memory_store`,
     );
   });
 });
