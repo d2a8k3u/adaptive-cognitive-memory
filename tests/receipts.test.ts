@@ -16,7 +16,8 @@ const CREATED_AT = "2026-10-01T00:00:00.000Z";
 const openedDbs: OpenedDb[] = [];
 
 function openStore(): OpenedDb {
-  const config = loadConfig({ CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-receipts-")) });
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-receipts-"));
+  const config = loadConfig({ CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir });
   const opened = openDatabase(config);
   openedDbs.push(opened);
   return opened;

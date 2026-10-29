@@ -51,8 +51,10 @@ function hookEntryPath(): string {
 }
 
 function freshEnv(): NodeJS.ProcessEnv {
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-read-"));
   return {
-    CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-read-")),
+    CLAUDE_PLUGIN_DATA: dataDir,
+    ACM_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-read-claude-")),
     ...testModelEnv,
   };

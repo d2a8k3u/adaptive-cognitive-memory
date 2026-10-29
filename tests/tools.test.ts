@@ -84,7 +84,7 @@ function openDeps(
   pluginData = mkdtempSync(join(tmpdir(), "acm-tools-")),
   instructionSources = emptyInstructionSources(),
 ): ToolDeps {
-  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
   const opened = openDatabase(config);
   openedDbs.push(opened);
   const env: MemoryEnv = {
@@ -98,6 +98,7 @@ function openDeps(
     embedDeadlineMs: config.embedDeadlineMs,
     processEnv: {
       CLAUDE_PLUGIN_DATA: pluginData,
+      ACM_DATA_DIR: pluginData,
       CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-tools-claude-")),
     },
     instructionSources,

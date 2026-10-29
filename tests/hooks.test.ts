@@ -108,8 +108,10 @@ function freshEnv(overrides: Record<string, string> = {}): {
   env: NodeJS.ProcessEnv;
   config: Config;
 } {
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-hooks-"));
   const env: NodeJS.ProcessEnv = {
-    CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-hooks-")),
+    CLAUDE_PLUGIN_DATA: dataDir,
+    ACM_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-hooks-claude-")),
     ...testModelEnv,
     ...overrides,

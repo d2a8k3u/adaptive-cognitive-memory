@@ -37,7 +37,7 @@ function listId(index: number): string {
 
 function openDeps(): ToolDeps {
   const pluginData = mkdtempSync(join(tmpdir(), "acm-listing-"));
-  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
   const opened = openDatabase(config);
   openedDbs.push(opened);
   const projectDir = mkdtempSync(join(tmpdir(), "acm-listing-project-"));
@@ -45,7 +45,7 @@ function openDeps(): ToolDeps {
     env: { db: opened.db, vecLoaded: opened.vecLoaded, modelCacheDir: config.modelCacheDir },
     projectId: PROJECT,
     embedDeadlineMs: config.embedDeadlineMs,
-    processEnv: { CLAUDE_PLUGIN_DATA: pluginData },
+    processEnv: { CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData },
     instructionSources: { projectDir, autoMemoryIndex: undefined },
   };
 }

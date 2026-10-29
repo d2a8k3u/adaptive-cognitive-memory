@@ -116,9 +116,8 @@ describe("statusReport", () => {
 
 describe("statusFacts", () => {
   it("counts the newest recall events per event name, leaving older ones out of the window", () => {
-    const opened = openDatabase(
-      loadConfig({ CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-status-")) }),
-    );
+    const dataDir = mkdtempSync(join(tmpdir(), "acm-status-"));
+    const opened = openDatabase(loadConfig({ CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir }));
     try {
       const insert = opened.db.prepare(
         "INSERT INTO recall_events (session_id, event, at, injected) VALUES ('s', ?, ?, ?)",

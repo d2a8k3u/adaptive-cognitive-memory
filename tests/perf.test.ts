@@ -152,7 +152,11 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
     projectDir = realpathSync(mkdtempSync(join(tmpdir(), "acm-perf-project-")));
     projectId = resolveProjectId(projectDir);
     const config = seedConfig(pluginData, testModelCacheDir);
-    hookEnv = { CLAUDE_PLUGIN_DATA: pluginData, ACM_MODEL_CACHE_DIR: testModelCacheDir };
+    hookEnv = {
+      CLAUDE_PLUGIN_DATA: pluginData,
+      ACM_DATA_DIR: pluginData,
+      ACM_MODEL_CACHE_DIR: testModelCacheDir,
+    };
     const startedAt = performance.now();
     await seedMemories(config, seedRows(projectId));
     seedFinishedMs = Math.round(performance.now() - startedAt);
@@ -280,6 +284,7 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
       const emptyModelCache = mkdtempSync(join(tmpdir(), "acm-perf-no-model-"));
       const failureEnv: NodeJS.ProcessEnv = {
         CLAUDE_PLUGIN_DATA: pluginData,
+        ACM_DATA_DIR: pluginData,
         ACM_MODEL_CACHE_DIR: emptyModelCache,
         ACM_MODEL_REMOTE_HOST: UNREACHABLE_MODEL_HOST,
         CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false",
@@ -438,6 +443,7 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
       }
       const ticketEnv = {
         CLAUDE_PLUGIN_DATA: ticketData,
+        ACM_DATA_DIR: ticketData,
         ACM_MODEL_CACHE_DIR: testModelCacheDir,
         PATH: process.env.PATH,
         ...GIT_ISOLATION,

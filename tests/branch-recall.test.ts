@@ -202,8 +202,10 @@ function checkedOut(dir: string): Checkout {
 }
 
 function hookEnv(path: string | undefined): NodeJS.ProcessEnv {
+  const dataDir = tempDir("acm-branch-data-");
   return {
-    CLAUDE_PLUGIN_DATA: tempDir("acm-branch-data-"),
+    CLAUDE_PLUGIN_DATA: dataDir,
+    ACM_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: tempDir("acm-branch-claude-"),
     ...testModelEnv,
     PATH: path,

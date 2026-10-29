@@ -51,10 +51,21 @@ const PROJECT_DIR = realpathSync(mkdtempSync(join(tmpdir(), "acm-doctor-project-
 const CHILD_KILL_MS = 30_000;
 
 function healthyEnv(): NodeJS.ProcessEnv {
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-doctor-"));
   return {
-    CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-doctor-")),
+    CLAUDE_PLUGIN_DATA: dataDir,
+    ACM_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-doctor-claude-")),
     ACM_MODEL_CACHE_DIR: testModelCacheDir,
+  };
+}
+
+function reembedEnv(): NodeJS.ProcessEnv {
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-cli-reembed-"));
+  return {
+    CLAUDE_PLUGIN_DATA: dataDir,
+    ACM_DATA_DIR: dataDir,
+    ACM_MODEL_CACHE_DIR: mkdtempSync(join(tmpdir(), "acm-cli-reembed-model-")),
   };
 }
 
@@ -180,7 +191,12 @@ describe("runDoctor", () => {
     const configDir = mkdtempSync(join(tmpdir(), "acm-doctor-claude-"));
     const pluginData = join(configDir, "plugins", "data", "adaptive-cognitive-memory-inline");
     mkdirSync(pluginData, { recursive: true });
-    const env = { ...healthyEnv(), CLAUDE_CONFIG_DIR: configDir, CLAUDE_PLUGIN_DATA: pluginData };
+    const env = {
+      ...healthyEnv(),
+      CLAUDE_CONFIG_DIR: configDir,
+      CLAUDE_PLUGIN_DATA: pluginData,
+      ACM_DATA_DIR: pluginData,
+    };
 
     const before = checkByName(runDoctor(env, PROJECT_DIR), "data_retention");
     await runCli(["node", "dist/cli.js", "export", join(configDir, "backup.jsonl")], env);
@@ -540,10 +556,7 @@ describe("runCli", () => {
     },
     {
       argv: ["node", "dist/cli.js", "reembed"],
-      env: {
-        CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-cli-reembed-")),
-        ACM_MODEL_CACHE_DIR: mkdtempSync(join(tmpdir(), "acm-cli-reembed-model-")),
-      },
+      env: reembedEnv(),
       code: 1,
       stderr: /model-init/,
     },

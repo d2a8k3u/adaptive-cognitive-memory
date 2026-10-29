@@ -90,6 +90,7 @@ function runnerSource(): string {
 function runnerEnv(config: Config, facts: readonly string[], projectId: string): NodeJS.ProcessEnv {
   return {
     CLAUDE_PLUGIN_DATA: config.pluginData,
+    ACM_DATA_DIR: config.pluginData,
     ACM_DB_PATH: config.dbPath,
     ACM_MODEL_CACHE_DIR: config.modelCacheDir,
     ACM_DIST: distDir(),

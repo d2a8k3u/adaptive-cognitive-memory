@@ -63,8 +63,10 @@ function hookEntryPath(): string {
 }
 
 function freshEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-failure-"));
   return {
-    CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-failure-")),
+    CLAUDE_PLUGIN_DATA: dataDir,
+    ACM_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-failure-claude-")),
     ...testModelEnv,
     ...overrides,
