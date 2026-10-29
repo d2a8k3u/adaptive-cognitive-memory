@@ -23,7 +23,7 @@ export const BUDGET_MAX_TOKENS = 2375;
 export const DEFAULT_DOWNLOAD_MODEL = true;
 
 export interface Config {
-  pluginData: string;
+  dataDir: string;
   dbPath: string;
   modelCacheDir: string;
   modelRemoteHost: string | undefined;
@@ -78,14 +78,14 @@ function integerFromEnv(
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const pluginData = env.CLAUDE_PLUGIN_DATA;
-  if (!pluginData) {
+  const dataDir = env.CLAUDE_PLUGIN_DATA;
+  if (!dataDir) {
     throw new Error("CLAUDE_PLUGIN_DATA is required: set the Claude Code plugin data directory");
   }
   return {
-    pluginData,
-    dbPath: env.ACM_DB_PATH ?? join(pluginData, DB_FILENAME),
-    modelCacheDir: env.ACM_MODEL_CACHE_DIR ?? join(pluginData, "models"),
+    dataDir,
+    dbPath: env.ACM_DB_PATH ?? join(dataDir, DB_FILENAME),
+    modelCacheDir: env.ACM_MODEL_CACHE_DIR ?? join(dataDir, "models"),
     modelRemoteHost: env.ACM_MODEL_REMOTE_HOST,
     autoDownloadModel: switchFromEnv(env, DOWNLOAD_MODEL_OPTION, DEFAULT_DOWNLOAD_MODEL),
     budgetTokens: integerFromEnv(env, RECALL_BUDGET_OPTION, DEFAULT_BUDGET_TOKENS, BUDGET_BOUNDS),

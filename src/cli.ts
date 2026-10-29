@@ -64,8 +64,8 @@ function switchRecall(config: Config, cwd: string, enabled: boolean): number {
 function switchStatusline(config: Config, enabled: boolean): number {
   console.log(
     enabled
-      ? enableStatusline(config.pluginData, distShim(), new Date().toISOString())
-      : disableStatusline(config.pluginData),
+      ? enableStatusline(config.dataDir, distShim(), new Date().toISOString())
+      : disableStatusline(config.dataDir),
   );
   return 0;
 }

@@ -4,7 +4,7 @@ import { type Config, MODEL_DTYPE, MODEL_ID } from "./cfg";
 import { modelCachePath } from "./embeddings";
 import { downloadLockPath, downloadModel, type ModelFetcher } from "./modeldownload";
 
-type ModelInitConfig = Pick<Config, "pluginData" | "modelCacheDir" | "modelRemoteHost">;
+type ModelInitConfig = Pick<Config, "dataDir" | "modelCacheDir" | "modelRemoteHost">;
 
 function directoryBytes(dir: string): number {
   return readdirSync(dir, { withFileTypes: true }).reduce((total, entry) => {
@@ -37,7 +37,7 @@ export async function modelInit(config: ModelInitConfig): Promise<number> {
   );
   if (outcome === "busy") {
     console.error(
-      `another model-init is already downloading the embedding model (lock ${downloadLockPath(config.pluginData)}); wait for it to finish`,
+      `another model-init is already downloading the embedding model (lock ${downloadLockPath(config.dataDir)}); wait for it to finish`,
     );
     return 1;
   }

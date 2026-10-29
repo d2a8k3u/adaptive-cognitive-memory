@@ -59,8 +59,8 @@ function switchRecall(config, cwd, enabled) {
 }
 function switchStatusline(config, enabled) {
     console.log(enabled
-        ? (0, statusline_1.enableStatusline)(config.pluginData, (0, statusline_1.distShim)(), new Date().toISOString())
-        : (0, statusline_1.disableStatusline)(config.pluginData));
+        ? (0, statusline_1.enableStatusline)(config.dataDir, (0, statusline_1.distShim)(), new Date().toISOString())
+        : (0, statusline_1.disableStatusline)(config.dataDir));
     return 0;
 }
 function fileExists(error) {

@@ -112,28 +112,28 @@ function readStateRecord(path, isRecord) {
     }
     return isRecord(value) ? value : undefined;
 }
-function downloadLockPath(pluginData) {
-    return (0, node_path_1.join)(pluginData, LOCK_FILENAME);
+function downloadLockPath(dataDir) {
+    return (0, node_path_1.join)(dataDir, LOCK_FILENAME);
 }
-function downloadFailurePath(pluginData) {
-    return (0, node_path_1.join)(pluginData, FAILURE_FILENAME);
+function downloadFailurePath(dataDir) {
+    return (0, node_path_1.join)(dataDir, FAILURE_FILENAME);
 }
-function readDownloadLock(pluginData) {
-    return readStateRecord(downloadLockPath(pluginData), isDownloadLock);
+function readDownloadLock(dataDir) {
+    return readStateRecord(downloadLockPath(dataDir), isDownloadLock);
 }
-function readDownloadFailure(pluginData) {
-    return readStateRecord(downloadFailurePath(pluginData), isDownloadFailure);
+function readDownloadFailure(dataDir) {
+    return readStateRecord(downloadFailurePath(dataDir), isDownloadFailure);
 }
 function observedModelSetup(config, nowMs) {
     return modelSetup({
         modelCached: (0, embeddings_1.modelCached)(config.modelCacheDir),
         autoDownload: config.autoDownloadModel,
-        lock: readDownloadLock(config.pluginData),
+        lock: readDownloadLock(config.dataDir),
         nowMs,
     });
 }
-function recordDownloadFailure(pluginData, failure) {
-    (0, node_fs_1.writeFileSync)(downloadFailurePath(pluginData), JSON.stringify(failure));
+function recordDownloadFailure(dataDir, failure) {
+    (0, node_fs_1.writeFileSync)(downloadFailurePath(dataDir), JSON.stringify(failure));
 }
 function createLock(path, lock) {
     try {
@@ -147,22 +147,22 @@ function createLock(path, lock) {
         throw error;
     }
 }
-function acquireDownloadLock(pluginData, now) {
-    const path = downloadLockPath(pluginData);
+function acquireDownloadLock(dataDir, now) {
+    const path = downloadLockPath(dataDir);
     const lock = { pid: process.pid, startedAt: now.toISOString() };
     if (createLock(path, lock)) {
         return lock;
     }
-    if (lockFresh(readDownloadLock(pluginData), now.getTime())) {
+    if (lockFresh(readDownloadLock(dataDir), now.getTime())) {
         return undefined;
     }
     (0, node_fs_1.rmSync)(path, { force: true });
     return createLock(path, lock) ? lock : undefined;
 }
-function releaseDownloadLock(pluginData, lock) {
-    const current = readDownloadLock(pluginData);
+function releaseDownloadLock(dataDir, lock) {
+    const current = readDownloadLock(dataDir);
     if (current?.pid === lock.pid && current.startedAt === lock.startedAt) {
-        (0, node_fs_1.rmSync)(downloadLockPath(pluginData), { force: true });
+        (0, node_fs_1.rmSync)(downloadLockPath(dataDir), { force: true });
     }
 }
 function removeStagingLeftovers(modelCacheDir) {
@@ -201,23 +201,23 @@ async function downloadModel(dirs, fetchModel, clock) {
     if ((0, embeddings_1.modelCached)(dirs.modelCacheDir)) {
         return "already-cached";
     }
-    const lock = acquireDownloadLock(dirs.pluginData, clock());
+    const lock = acquireDownloadLock(dirs.dataDir, clock());
     if (lock === undefined) {
         return "busy";
     }
     try {
         const outcome = await fetchAndInstall(dirs, fetchModel);
-        (0, node_fs_1.rmSync)(downloadFailurePath(dirs.pluginData), { force: true });
+        (0, node_fs_1.rmSync)(downloadFailurePath(dirs.dataDir), { force: true });
         return outcome;
     }
     catch (error) {
-        recordDownloadFailure(dirs.pluginData, {
+        recordDownloadFailure(dirs.dataDir, {
             failedAt: clock().toISOString(),
             error: failureMessage(error),
         });
         throw error;
     }
     finally {
-        releaseDownloadLock(dirs.pluginData, lock);
+        releaseDownloadLock(dirs.dataDir, lock);
     }
 }

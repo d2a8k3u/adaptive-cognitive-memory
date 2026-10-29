@@ -39,7 +39,7 @@ describe("loadConfig", () => {
   it("resolves defaults from CLAUDE_PLUGIN_DATA", () => {
     const config = loadConfig({ CLAUDE_PLUGIN_DATA: "/data" });
     expect(config).toEqual({
-      pluginData: "/data",
+      dataDir: "/data",
       dbPath: join("/data", "memory.sqlite"),
       modelCacheDir: join("/data", "models"),
       modelRemoteHost: undefined,

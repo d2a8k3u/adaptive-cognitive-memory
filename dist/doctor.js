@@ -75,17 +75,17 @@ function checkNativeModule() {
     });
 }
 function checkPluginData(config) {
-    const probePath = (0, node_path_1.join)(config.pluginData, ".acm-doctor-probe");
+    const probePath = (0, node_path_1.join)(config.dataDir, ".acm-doctor-probe");
     try {
         (0, node_fs_1.writeFileSync)(probePath, "probe");
     }
     catch (error) {
-        return failed("plugin_data", `${config.pluginData}: ${errorMessage(error)}`, PLUGIN_DATA_FIX);
+        return failed("plugin_data", `${config.dataDir}: ${errorMessage(error)}`, PLUGIN_DATA_FIX);
     }
     finally {
         (0, node_fs_1.rmSync)(probePath, { force: true });
     }
-    return rated("plugin_data", passOrFail(true, `${config.pluginData} writable`), PLUGIN_DATA_FIX);
+    return rated("plugin_data", passOrFail(true, `${config.dataDir} writable`), PLUGIN_DATA_FIX);
 }
 function checkDatabase(opened, openDetail, dbPath) {
     if (!opened) {
@@ -110,15 +110,15 @@ function checkVec(opened, openDetail) {
         ? rated("vec", passOrFail(true, "sqlite-vec loaded"), VEC_FIX)
         : failed("vec", `sqlite-vec not loaded — vector search unavailable: ${opened.vecError}`, VEC_FIX);
 }
-function missingModelCheck(pluginData, path) {
-    const lock = (0, modeldownload_1.readDownloadLock)(pluginData);
+function missingModelCheck(dataDir, path) {
+    const lock = (0, modeldownload_1.readDownloadLock)(dataDir);
     if ((0, modeldownload_1.lockFresh)(lock, Date.now())) {
         return rated("model", {
             status: "warn",
             detail: `model missing at ${path}; downloading since ${lock.startedAt} (pid ${lock.pid})`,
         }, MODEL_DOWNLOADING_FIX);
     }
-    const failure = (0, modeldownload_1.readDownloadFailure)(pluginData);
+    const failure = (0, modeldownload_1.readDownloadFailure)(dataDir);
     const cause = failure === undefined
         ? ""
         : `; the last download failed at ${failure.failedAt}: ${failure.error}`;
@@ -131,7 +131,7 @@ function checkModel(config, opened) {
     const path = (0, embeddings_1.modelCachePath)(config.modelCacheDir);
     if (!(0, embeddings_1.modelCached)(config.modelCacheDir)) {
         try {
-            return missingModelCheck(config.pluginData, path);
+            return missingModelCheck(config.dataDir, path);
         }
         catch (error) {
             return failed("model", `model missing at ${path}; ${errorMessage(error)}`, MODEL_FIX);

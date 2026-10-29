@@ -1135,10 +1135,10 @@ describe("hooks empty database (AC-13)", () => {
 describe("hooks internal error contract", () => {
   it("exits 0 with no stdout and one class-only stderr line when the db cannot open", async () => {
     const { env, config } = freshEnv();
-    writeFileSync(join(config.pluginData, "blocker"), "not a directory");
+    writeFileSync(join(config.dataDir, "blocker"), "not a directory");
     const blockedEnv: NodeJS.ProcessEnv = {
       ...env,
-      ACM_DB_PATH: join(config.pluginData, "blocker", "memory.sqlite"),
+      ACM_DB_PATH: join(config.dataDir, "blocker", "memory.sqlite"),
     };
 
     const result = await spawnHook(
@@ -1277,8 +1277,8 @@ describe("hooks model download", () => {
   async function downloadSettled(config: Config): Promise<void> {
     await vi.waitFor(
       () => {
-        expect(readDownloadFailure(config.pluginData)).toBeDefined();
-        expect(readDownloadLock(config.pluginData)).toBeUndefined();
+        expect(readDownloadFailure(config.dataDir)).toBeDefined();
+        expect(readDownloadLock(config.dataDir)).toBeUndefined();
       },
       { timeout: DOWNLOAD_SETTLE_MS, interval: 50 },
     );
@@ -1315,9 +1315,9 @@ describe("hooks model download", () => {
     const whileOff = startMarker();
     const afterwards = startMarker();
 
-    acquireDownloadLock(config.pluginData, new Date());
+    acquireDownloadLock(config.dataDir, new Date());
     const locked = await sessionStart(env, whileLocked);
-    rmSync(downloadLockPath(config.pluginData));
+    rmSync(downloadLockPath(config.dataDir));
     const off = await sessionStart(
       { ...env, CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false" },
       whileOff,

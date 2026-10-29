@@ -53,14 +53,14 @@ function integerFromEnv(env, name, fallback, bounds) {
     return parsed;
 }
 function loadConfig(env = process.env) {
-    const pluginData = env.CLAUDE_PLUGIN_DATA;
-    if (!pluginData) {
+    const dataDir = env.CLAUDE_PLUGIN_DATA;
+    if (!dataDir) {
         throw new Error("CLAUDE_PLUGIN_DATA is required: set the Claude Code plugin data directory");
     }
     return {
-        pluginData,
-        dbPath: env.ACM_DB_PATH ?? (0, node_path_1.join)(pluginData, exports.DB_FILENAME),
-        modelCacheDir: env.ACM_MODEL_CACHE_DIR ?? (0, node_path_1.join)(pluginData, "models"),
+        dataDir,
+        dbPath: env.ACM_DB_PATH ?? (0, node_path_1.join)(dataDir, exports.DB_FILENAME),
+        modelCacheDir: env.ACM_MODEL_CACHE_DIR ?? (0, node_path_1.join)(dataDir, "models"),
         modelRemoteHost: env.ACM_MODEL_REMOTE_HOST,
         autoDownloadModel: switchFromEnv(env, DOWNLOAD_MODEL_OPTION, exports.DEFAULT_DOWNLOAD_MODEL),
         budgetTokens: integerFromEnv(env, RECALL_BUDGET_OPTION, exports.DEFAULT_BUDGET_TOKENS, BUDGET_BOUNDS),

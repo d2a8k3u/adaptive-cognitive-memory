@@ -41,10 +41,10 @@ export function toolText(result: ToolCallResult): string {
   return block.text;
 }
 
-export function seedConfig(pluginData: string, modelCacheDir: string): Config {
+export function seedConfig(dataDir: string, modelCacheDir: string): Config {
   return {
-    pluginData,
-    dbPath: join(pluginData, DB_FILENAME),
+    dataDir,
+    dbPath: join(dataDir, DB_FILENAME),
     modelCacheDir,
     modelRemoteHost: undefined,
     autoDownloadModel: false,

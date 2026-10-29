@@ -43,7 +43,7 @@ export type ModelFetcher = (cacheDir: string) => Promise<void>;
 
 export type DownloadOutcome = "downloaded" | "already-cached" | "busy";
 
-export type DownloadDirs = Pick<Config, "pluginData" | "modelCacheDir">;
+export type DownloadDirs = Pick<Config, "dataDir" | "modelCacheDir">;
 
 export function lockFresh(lock: DownloadLock | undefined, nowMs: number): lock is DownloadLock {
   return lock !== undefined && nowMs - Date.parse(lock.startedAt) < DOWNLOAD_LOCK_STALE_MS;
@@ -151,36 +151,36 @@ function readStateRecord<T>(path: string, isRecord: (value: unknown) => value is
   return isRecord(value) ? value : undefined;
 }
 
-export function downloadLockPath(pluginData: string): string {
-  return join(pluginData, LOCK_FILENAME);
+export function downloadLockPath(dataDir: string): string {
+  return join(dataDir, LOCK_FILENAME);
 }
 
-function downloadFailurePath(pluginData: string): string {
-  return join(pluginData, FAILURE_FILENAME);
+function downloadFailurePath(dataDir: string): string {
+  return join(dataDir, FAILURE_FILENAME);
 }
 
-export function readDownloadLock(pluginData: string): DownloadLock | undefined {
-  return readStateRecord(downloadLockPath(pluginData), isDownloadLock);
+export function readDownloadLock(dataDir: string): DownloadLock | undefined {
+  return readStateRecord(downloadLockPath(dataDir), isDownloadLock);
 }
 
-export function readDownloadFailure(pluginData: string): DownloadFailure | undefined {
-  return readStateRecord(downloadFailurePath(pluginData), isDownloadFailure);
+export function readDownloadFailure(dataDir: string): DownloadFailure | undefined {
+  return readStateRecord(downloadFailurePath(dataDir), isDownloadFailure);
 }
 
 export function observedModelSetup(
-  config: Pick<Config, "pluginData" | "modelCacheDir" | "autoDownloadModel">,
+  config: Pick<Config, "dataDir" | "modelCacheDir" | "autoDownloadModel">,
   nowMs: number,
 ): ModelSetup {
   return modelSetup({
     modelCached: modelCached(config.modelCacheDir),
     autoDownload: config.autoDownloadModel,
-    lock: readDownloadLock(config.pluginData),
+    lock: readDownloadLock(config.dataDir),
     nowMs,
   });
 }
 
-export function recordDownloadFailure(pluginData: string, failure: DownloadFailure): void {
-  writeFileSync(downloadFailurePath(pluginData), JSON.stringify(failure));
+export function recordDownloadFailure(dataDir: string, failure: DownloadFailure): void {
+  writeFileSync(downloadFailurePath(dataDir), JSON.stringify(failure));
 }
 
 function createLock(path: string, lock: DownloadLock): boolean {
@@ -195,23 +195,23 @@ function createLock(path: string, lock: DownloadLock): boolean {
   }
 }
 
-export function acquireDownloadLock(pluginData: string, now: Date): DownloadLock | undefined {
-  const path = downloadLockPath(pluginData);
+export function acquireDownloadLock(dataDir: string, now: Date): DownloadLock | undefined {
+  const path = downloadLockPath(dataDir);
   const lock = { pid: process.pid, startedAt: now.toISOString() };
   if (createLock(path, lock)) {
     return lock;
   }
-  if (lockFresh(readDownloadLock(pluginData), now.getTime())) {
+  if (lockFresh(readDownloadLock(dataDir), now.getTime())) {
     return undefined;
   }
   rmSync(path, { force: true });
   return createLock(path, lock) ? lock : undefined;
 }
 
-function releaseDownloadLock(pluginData: string, lock: DownloadLock): void {
-  const current = readDownloadLock(pluginData);
+function releaseDownloadLock(dataDir: string, lock: DownloadLock): void {
+  const current = readDownloadLock(dataDir);
   if (current?.pid === lock.pid && current.startedAt === lock.startedAt) {
-    rmSync(downloadLockPath(pluginData), { force: true });
+    rmSync(downloadLockPath(dataDir), { force: true });
   }
 }
 
@@ -262,21 +262,21 @@ export async function downloadModel(
   if (modelCached(dirs.modelCacheDir)) {
     return "already-cached";
   }
-  const lock = acquireDownloadLock(dirs.pluginData, clock());
+  const lock = acquireDownloadLock(dirs.dataDir, clock());
   if (lock === undefined) {
     return "busy";
   }
   try {
     const outcome = await fetchAndInstall(dirs, fetchModel);
-    rmSync(downloadFailurePath(dirs.pluginData), { force: true });
+    rmSync(downloadFailurePath(dirs.dataDir), { force: true });
     return outcome;
   } catch (error) {
-    recordDownloadFailure(dirs.pluginData, {
+    recordDownloadFailure(dirs.dataDir, {
       failedAt: clock().toISOString(),
       error: failureMessage(error),
     });
     throw error;
   } finally {
-    releaseDownloadLock(dirs.pluginData, lock);
+    releaseDownloadLock(dirs.dataDir, lock);
   }
 }

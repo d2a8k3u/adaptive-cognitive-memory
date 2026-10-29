@@ -31,7 +31,7 @@ function transformersFetcher(remoteHost) {
 async function modelInit(config) {
     const outcome = await (0, modeldownload_1.downloadModel)(config, transformersFetcher(config.modelRemoteHost), () => new Date());
     if (outcome === "busy") {
-        console.error(`another model-init is already downloading the embedding model (lock ${(0, modeldownload_1.downloadLockPath)(config.pluginData)}); wait for it to finish`);
+        console.error(`another model-init is already downloading the embedding model (lock ${(0, modeldownload_1.downloadLockPath)(config.dataDir)}); wait for it to finish`);
         return 1;
     }
     const modelPath = (0, embeddings_1.modelCachePath)(config.modelCacheDir);

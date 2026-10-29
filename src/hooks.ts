@@ -250,7 +250,7 @@ function fsErrorCode(error: unknown): string | undefined {
 }
 
 function whileStatuslineEnabled(scope: HookScope, work: (paths: StatuslinePaths) => void): void {
-  const paths = statuslinePaths(scope.config.pluginData);
+  const paths = statuslinePaths(scope.config.dataDir);
   if (!statuslineEnabled(paths)) {
     return;
   }
@@ -383,7 +383,7 @@ async function setUpModel(scope: HookScope): Promise<string | undefined> {
   if (setup === "start-download") {
     startModelDownload(scope.env);
   }
-  return modelNotice(setup, readDownloadFailure(scope.config.pluginData));
+  return modelNotice(setup, readDownloadFailure(scope.config.dataDir));
 }
 
 async function sessionStartReply(scope: HookScope, source: string | undefined): Promise<HookReply> {

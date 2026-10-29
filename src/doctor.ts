@@ -120,15 +120,15 @@ function checkNativeModule(): DoctorCheck {
 }
 
 function checkPluginData(config: Config): DoctorCheck {
-  const probePath = join(config.pluginData, ".acm-doctor-probe");
+  const probePath = join(config.dataDir, ".acm-doctor-probe");
   try {
     writeFileSync(probePath, "probe");
   } catch (error) {
-    return failed("plugin_data", `${config.pluginData}: ${errorMessage(error)}`, PLUGIN_DATA_FIX);
+    return failed("plugin_data", `${config.dataDir}: ${errorMessage(error)}`, PLUGIN_DATA_FIX);
   } finally {
     rmSync(probePath, { force: true });
   }
-  return rated("plugin_data", passOrFail(true, `${config.pluginData} writable`), PLUGIN_DATA_FIX);
+  return rated("plugin_data", passOrFail(true, `${config.dataDir} writable`), PLUGIN_DATA_FIX);
 }
 
 function checkDatabase(
@@ -168,8 +168,8 @@ function checkVec(opened: OpenedDb | undefined, openDetail: string): DoctorCheck
       );
 }
 
-function missingModelCheck(pluginData: string, path: string): DoctorCheck {
-  const lock = readDownloadLock(pluginData);
+function missingModelCheck(dataDir: string, path: string): DoctorCheck {
+  const lock = readDownloadLock(dataDir);
   if (lockFresh(lock, Date.now())) {
     return rated(
       "model",
@@ -180,7 +180,7 @@ function missingModelCheck(pluginData: string, path: string): DoctorCheck {
       MODEL_DOWNLOADING_FIX,
     );
   }
-  const failure = readDownloadFailure(pluginData);
+  const failure = readDownloadFailure(dataDir);
   const cause =
     failure === undefined
       ? ""
@@ -195,7 +195,7 @@ function checkModel(config: Config | undefined, opened: OpenedDb | undefined): D
   const path = modelCachePath(config.modelCacheDir);
   if (!modelCached(config.modelCacheDir)) {
     try {
-      return missingModelCheck(config.pluginData, path);
+      return missingModelCheck(config.dataDir, path);
     } catch (error) {
       return failed("model", `model missing at ${path}; ${errorMessage(error)}`, MODEL_FIX);
     }

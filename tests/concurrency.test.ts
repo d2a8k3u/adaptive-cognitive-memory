@@ -49,7 +49,7 @@ function runnerSource(): string {
     'const { openDatabase } = require(process.env.ACM_DIST + "/db/database.js");',
     'const { store } = require(process.env.ACM_DIST + "/db/memories.js");',
     "const config = {",
-    "  pluginData: process.env.CLAUDE_PLUGIN_DATA,",
+    "  dataDir: process.env.ACM_DATA_DIR,",
     "  dbPath: process.env.ACM_DB_PATH,",
     "  modelCacheDir: process.env.ACM_MODEL_CACHE_DIR,",
     "  budgetTokens: 1200,",
@@ -89,8 +89,8 @@ function runnerSource(): string {
 
 function runnerEnv(config: Config, facts: readonly string[], projectId: string): NodeJS.ProcessEnv {
   return {
-    CLAUDE_PLUGIN_DATA: config.pluginData,
-    ACM_DATA_DIR: config.pluginData,
+    CLAUDE_PLUGIN_DATA: config.dataDir,
+    ACM_DATA_DIR: config.dataDir,
     ACM_DB_PATH: config.dbPath,
     ACM_MODEL_CACHE_DIR: config.modelCacheDir,
     ACM_DIST: distDir(),

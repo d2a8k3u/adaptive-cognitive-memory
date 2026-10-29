@@ -136,7 +136,7 @@ function fsErrorCode(error) {
         : undefined;
 }
 function whileStatuslineEnabled(scope, work) {
-    const paths = (0, statusline_1.statuslinePaths)(scope.config.pluginData);
+    const paths = (0, statusline_1.statuslinePaths)(scope.config.dataDir);
     if (!(0, statusline_1.statuslineEnabled)(paths)) {
         return;
     }
@@ -232,7 +232,7 @@ async function setUpModel(scope) {
     if (setup === "start-download") {
         startModelDownload(scope.env);
     }
-    return modelNotice(setup, readDownloadFailure(scope.config.pluginData));
+    return modelNotice(setup, readDownloadFailure(scope.config.dataDir));
 }
 async function sessionStartReply(scope, source) {
     const notice = await setUpModel(scope);

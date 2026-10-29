@@ -36,9 +36,9 @@ function lockAged(ageMs: number): DownloadLock {
   return { pid: 4242, startedAt: new Date(NOW_MS - ageMs).toISOString() };
 }
 
-function freshDirs(): { pluginData: string; modelCacheDir: string } {
-  const pluginData = mkdtempSync(join(tmpdir(), "acm-download-"));
-  return { pluginData, modelCacheDir: join(pluginData, "models") };
+function freshDirs(): { dataDir: string; modelCacheDir: string } {
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-download-"));
+  return { dataDir, modelCacheDir: join(dataDir, "models") };
 }
 
 function writeModel(
@@ -177,7 +177,7 @@ describe("downloadModel", () => {
     expect(modelCached(dirs.modelCacheDir)).toBe(true);
     expect(installedContent(dirs.modelCacheDir)).toBe("fetched");
     expect(readdirSync(dirs.modelCacheDir)).toEqual([MODEL_ORG_DIR]);
-    expect(readDownloadLock(dirs.pluginData)).toBeUndefined();
+    expect(readDownloadLock(dirs.dataDir)).toBeUndefined();
   });
 
   it("fails with no model at the final path, no staging directory and the failure recorded", async () => {
@@ -194,18 +194,18 @@ describe("downloadModel", () => {
 
     expect(existsSync(modelCachePath(dirs.modelCacheDir))).toBe(false);
     expect(readdirSync(dirs.modelCacheDir)).toEqual([]);
-    expect(readDownloadFailure(dirs.pluginData)).toEqual({
+    expect(readDownloadFailure(dirs.dataDir)).toEqual({
       failedAt: NOW.toISOString(),
       error: "fetch failed (connect ECONNREFUSED 127.0.0.1:9)",
     });
-    expect(readDownloadLock(dirs.pluginData)).toBeUndefined();
+    expect(readDownloadLock(dirs.dataDir)).toBeUndefined();
   });
 
   it("replaces what an interrupted earlier run left behind and clears its recorded failure", async () => {
     const dirs = freshDirs();
     writeModel(dirs.modelCacheDir, "partial", [CONFIG_FILE]);
     writeModel(join(dirs.modelCacheDir, `${STAGING_DIR_PREFIX}crashed`), "partial", [CONFIG_FILE]);
-    recordDownloadFailure(dirs.pluginData, {
+    recordDownloadFailure(dirs.dataDir, {
       failedAt: "2026-10-13T08:00:00.000Z",
       error: "fetch failed",
     });
@@ -215,19 +215,19 @@ describe("downloadModel", () => {
     expect(outcome).toBe("downloaded");
     expect(installedContent(dirs.modelCacheDir)).toBe("fetched");
     expect(readdirSync(dirs.modelCacheDir)).toEqual([MODEL_ORG_DIR]);
-    expect(readDownloadFailure(dirs.pluginData)).toBeUndefined();
+    expect(readDownloadFailure(dirs.dataDir)).toBeUndefined();
   });
 
   it("returns busy without fetching while another run holds a fresh lock", async () => {
     const dirs = freshDirs();
-    const held = acquireDownloadLock(dirs.pluginData, NOW);
+    const held = acquireDownloadLock(dirs.dataDir, NOW);
 
     const outcome = await downloadModel(dirs, fetching("fetched"), () => NOW);
 
     expect(held).toBeDefined();
     expect(outcome).toBe("busy");
     expect(modelCached(dirs.modelCacheDir)).toBe(false);
-    expect(readDownloadLock(dirs.pluginData)).toEqual(held);
+    expect(readDownloadLock(dirs.dataDir)).toEqual(held);
   });
 
   it.each([
@@ -242,7 +242,7 @@ describe("downloadModel", () => {
     },
   ])("takes over $name", async ({ leave }) => {
     const dirs = freshDirs();
-    leave(dirs.pluginData);
+    leave(dirs.dataDir);
 
     const outcome = await downloadModel(dirs, fetching("fetched"), () => NOW);
 
@@ -254,14 +254,14 @@ describe("downloadModel", () => {
     const dirs = freshDirs();
     let takenOver: DownloadLock | undefined;
     const outlasted: ModelFetcher = async (cacheDir) => {
-      takenOver = acquireDownloadLock(dirs.pluginData, new Date(NOW_MS + DOWNLOAD_LOCK_STALE_MS));
+      takenOver = acquireDownloadLock(dirs.dataDir, new Date(NOW_MS + DOWNLOAD_LOCK_STALE_MS));
       writeModel(cacheDir, "fetched");
     };
 
     await downloadModel(dirs, outlasted, () => NOW);
 
     expect(takenOver).toBeDefined();
-    expect(readDownloadLock(dirs.pluginData)).toEqual(takenOver);
+    expect(readDownloadLock(dirs.dataDir)).toEqual(takenOver);
   });
 
   it("keeps a model another process completed during the fetch and discards its own copy", async () => {

@@ -33,8 +33,8 @@ export interface StatuslinePaths {
   readonly sessions: string;
 }
 
-export function statuslinePaths(pluginData: string): StatuslinePaths {
-  const root = join(resolve(pluginData), STATUSLINE_DIR);
+export function statuslinePaths(dataDir: string): StatuslinePaths {
+  const root = join(resolve(dataDir), STATUSLINE_DIR);
   return {
     root,
     marker: join(root, MARKER_FILE),
@@ -104,8 +104,8 @@ export function pruneBadgeStates(paths: StatuslinePaths, cutoff: string): void {
   }
 }
 
-export function enableStatusline(pluginData: string, shimSource: Buffer, now: string): string {
-  const paths = statuslinePaths(pluginData);
+export function enableStatusline(dataDir: string, shimSource: Buffer, now: string): string {
+  const paths = statuslinePaths(dataDir);
   const snippet = snippetLine(paths.shim);
   mkdirSync(paths.sessions, { recursive: true });
   replaceFile(paths.shim, shimSource);
@@ -113,8 +113,8 @@ export function enableStatusline(pluginData: string, shimSource: Buffer, now: st
   return snippet;
 }
 
-export function disableStatusline(pluginData: string): string {
-  const paths = statuslinePaths(pluginData);
+export function disableStatusline(dataDir: string): string {
+  const paths = statuslinePaths(dataDir);
   const snippet = snippetLine(paths.shim);
   rmSync(paths.root, { recursive: true, force: true });
   return snippet;
