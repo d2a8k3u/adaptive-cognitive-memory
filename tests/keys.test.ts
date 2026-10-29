@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorHit, commandHead, keyHit, type MemoryKeys, toolLookup } from "../src/keys";
+import { anchorHit, commandHead, keyHit, type MemoryKeys, targetLookup } from "../src/keys";
 
 const KEYS: MemoryKeys = {
   conflictKey: "project.primary_database",
@@ -25,10 +25,14 @@ describe("keyHit", () => {
 });
 
 function bashAnchors(command: string): readonly string[] {
-  return toolLookup("Bash", { command }, "/repo")?.anchors ?? [];
+  return targetLookup({ kind: "command", toolInput: { command } }, "/repo")?.anchors ?? [];
 }
 
-describe("toolLookup for Bash", () => {
+function fileLookup(...paths: readonly string[]) {
+  return targetLookup({ kind: "files", paths }, "/repo");
+}
+
+describe("targetLookup for a command", () => {
   it("emits the one, two and three word heads and the head behind a runner", () => {
     expect(bashAnchors("uv run pytest -q tests/test_invoices.py")).toEqual(
       expect.arrayContaining([
@@ -104,9 +108,12 @@ describe("toolLookup for Bash", () => {
   });
 
   it("offers the head words as tokens for the keyword signal", () => {
-    expect(toolLookup("Bash", { command: "uv run alembic upgrade head" }, "/repo")?.tokens).toEqual(
-      expect.arrayContaining(["uv", "run", "alembic", "upgrade"]),
-    );
+    expect(
+      targetLookup(
+        { kind: "command", toolInput: { command: "uv run alembic upgrade head" } },
+        "/repo",
+      )?.tokens,
+    ).toEqual(expect.arrayContaining(["uv", "run", "alembic", "upgrade"]));
   });
 });
 
@@ -135,11 +142,9 @@ describe("commandHead", () => {
   });
 });
 
-describe("toolLookup for Edit and Write", () => {
+describe("targetLookup for files", () => {
   it("emits the project-relative path, basename, directory prefixes and extensions", () => {
-    expect(
-      toolLookup("Edit", { file_path: "/repo/src/components/GuideCard.spec.ts" }, "/repo"),
-    ).toEqual({
+    expect(fileLookup("/repo/src/components/GuideCard.spec.ts")).toEqual({
       anchors: expect.arrayContaining([
         "src/components/GuideCard.spec.ts",
         "GuideCard.spec.ts",
@@ -153,25 +158,31 @@ describe("toolLookup for Edit and Write", () => {
   });
 
   it("does not turn a longer dotfile into its shorter prefix", () => {
-    const anchors = toolLookup("Write", { file_path: "/repo/.env.example" }, "/repo")?.anchors;
+    const anchors = fileLookup("/repo/.env.example")?.anchors;
     expect(anchors).toEqual(expect.arrayContaining([".env.example", ".example"]));
     expect(anchors).not.toContain(".env");
   });
 
   it("keeps only the basename and extensions for a file outside the project", () => {
-    const anchors = toolLookup(
-      "Edit",
-      { file_path: "/elsewhere/notes/todo.txt" },
-      "/repo",
-    )?.anchors;
+    const anchors = fileLookup("/elsewhere/notes/todo.txt")?.anchors;
     expect(anchors).toEqual(expect.arrayContaining(["todo.txt", ".txt"]));
     expect(anchors?.some((anchor) => anchor.includes("/"))).toBe(false);
   });
 
-  it("has nothing to look up for other tools or inputs without a path or command", () => {
-    expect(toolLookup("Grep", { file_path: "/repo/a.ts" }, "/repo")).toBeUndefined();
-    expect(toolLookup("Edit", { old_string: "a" }, "/repo")).toBeUndefined();
-    expect(toolLookup("Bash", { command: "   " }, "/repo")).toBeUndefined();
+  it("unites the anchors of the first 32 paths and gives later paths no recall", () => {
+    const anchors = fileLookup(
+      ...Array.from({ length: 33 }, (_, index) => `/repo/dir${index}/file${index}.ts`),
+    )?.anchors;
+    expect(anchors).toEqual(expect.arrayContaining(["dir0/file0.ts", "dir31/file31.ts"]));
+    expect(anchors).not.toContain("dir32/file32.ts");
+  });
+
+  it("has nothing to look up without a target, a command or a path", () => {
+    expect(targetLookup({ kind: "none" }, "/repo")).toBeUndefined();
+    expect(fileLookup()).toBeUndefined();
+    expect(
+      targetLookup({ kind: "command", toolInput: { command: "   " } }, "/repo"),
+    ).toBeUndefined();
   });
 });
 

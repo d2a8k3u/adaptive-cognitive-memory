@@ -5,7 +5,7 @@ exports.keyHit = keyHit;
 exports.parseStoredList = parseStoredList;
 exports.anchorHit = anchorHit;
 exports.commandHead = commandHead;
-exports.toolLookup = toolLookup;
+exports.targetLookup = targetLookup;
 const node_path_1 = require("node:path");
 const prompt_1 = require("./prompt");
 const CONFLICT_KEY_NAMESPACE_SEPARATOR = ".";
@@ -48,7 +48,6 @@ const NAVIGATION_COMMANDS = new Set([
     "export",
     "set",
 ]);
-const PATH_TOOLS = new Set(["Edit", "Write", "Read"]);
 const FLAG_MARK = "-";
 const REDIRECTION = /[<>]/;
 const OPEN_REDIRECTION = /[<>]$/;
@@ -285,14 +284,27 @@ function commandHead(toolInput) {
         .at(-1);
     return producer === undefined ? undefined : leadingWords(producer).join(" ");
 }
-function toolLookup(toolName, toolInput, projectDir) {
-    if (toolName === "Bash") {
-        const command = stringProperty(toolInput, "command");
-        return command === undefined ? undefined : bashLookup(command, projectDir);
+function filesLookup(paths, projectDir) {
+    const lookups = paths
+        .slice(0, MAX_COMMAND_SEGMENTS)
+        .flatMap((path) => pathLookup(path, projectDir) ?? []);
+    if (lookups.length === 0) {
+        return undefined;
     }
-    if (PATH_TOOLS.has(toolName)) {
-        const filePath = stringProperty(toolInput, "file_path");
-        return filePath === undefined ? undefined : pathLookup(filePath, projectDir);
+    return {
+        anchors: [...new Set(lookups.flatMap((lookup) => lookup.anchors))],
+        tokens: [...new Set(lookups.flatMap((lookup) => lookup.tokens))],
+    };
+}
+function targetLookup(target, projectDir) {
+    switch (target.kind) {
+        case "command": {
+            const command = stringProperty(target.toolInput, "command");
+            return command === undefined ? undefined : bashLookup(command, projectDir);
+        }
+        case "files":
+            return filesLookup(target.paths, projectDir);
+        case "none":
+            return undefined;
     }
-    return undefined;
 }

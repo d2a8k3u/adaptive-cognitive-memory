@@ -52,7 +52,6 @@ const NAVIGATION_COMMANDS: ReadonlySet<string> = new Set([
   "export",
   "set",
 ]);
-const PATH_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "Read"]);
 const FLAG_MARK = "-";
 const REDIRECTION = /[<>]/;
 const OPEN_REDIRECTION = /[<>]$/;
@@ -331,18 +330,33 @@ export function commandHead(toolInput: unknown): string | undefined {
   return producer === undefined ? undefined : leadingWords(producer).join(" ");
 }
 
-export function toolLookup(
-  toolName: string,
-  toolInput: unknown,
-  projectDir: string,
-): ToolLookup | undefined {
-  if (toolName === "Bash") {
-    const command = stringProperty(toolInput, "command");
-    return command === undefined ? undefined : bashLookup(command, projectDir);
+export type ToolTarget =
+  | { readonly kind: "command"; readonly toolInput: unknown }
+  | { readonly kind: "files"; readonly paths: readonly string[] }
+  | { readonly kind: "none" };
+
+function filesLookup(paths: readonly string[], projectDir: string): ToolLookup | undefined {
+  const lookups = paths
+    .slice(0, MAX_COMMAND_SEGMENTS)
+    .flatMap((path) => pathLookup(path, projectDir) ?? []);
+  if (lookups.length === 0) {
+    return undefined;
   }
-  if (PATH_TOOLS.has(toolName)) {
-    const filePath = stringProperty(toolInput, "file_path");
-    return filePath === undefined ? undefined : pathLookup(filePath, projectDir);
+  return {
+    anchors: [...new Set(lookups.flatMap((lookup) => lookup.anchors))],
+    tokens: [...new Set(lookups.flatMap((lookup) => lookup.tokens))],
+  };
+}
+
+export function targetLookup(target: ToolTarget, projectDir: string): ToolLookup | undefined {
+  switch (target.kind) {
+    case "command": {
+      const command = stringProperty(target.toolInput, "command");
+      return command === undefined ? undefined : bashLookup(command, projectDir);
+    }
+    case "files":
+      return filesLookup(target.paths, projectDir);
+    case "none":
+      return undefined;
   }
-  return undefined;
 }
