@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runCli = runCli;
 const node_fs_1 = require("node:fs");
+const node_path_1 = require("node:path");
 const cfg_1 = require("./cfg");
 const database_1 = require("./db/database");
 const memories_1 = require("./db/memories");
@@ -15,8 +16,9 @@ const ids_1 = require("./ids");
 const modelinit_1 = require("./modelinit");
 const statusline_1 = require("./statusline");
 const storelocation_1 = require("./storelocation");
+const storemove_1 = require("./storemove");
 const transfer_2 = require("./transfer");
-const USAGE = "usage: cli <doctor|model-init|reembed|recall on|recall off|statusline on|statusline off|export <file>|import <file>>";
+const USAGE = "usage: cli <doctor|model-init|reembed|recall on|recall off|statusline on|statusline off|export <file>|import <file>|store move --from <dir>>";
 const REEMBED_BATCH = 32;
 const FILE_EXISTS_CODE = "EEXIST";
 async function reembed(config) {
@@ -144,6 +146,37 @@ function doctor(env, cwd) {
     console.log(JSON.stringify(report, null, 2));
     return report.status === "ok" ? 0 : 1;
 }
+function moveSource(argv) {
+    const [subcommand, flag, from] = argv.slice(3);
+    return subcommand === "move" && flag === "--from" && from !== undefined && (0, node_path_1.isAbsolute)(from)
+        ? from
+        : undefined;
+}
+function reportMove(outcome, from, dataDir) {
+    switch (outcome.kind) {
+        case "moved": {
+            const rows = outcome.digest.tables.reduce((sum, table) => sum + table.rows, 0);
+            console.log(`moved the memory store from ${from} to ${dataDir}: ${outcome.digest.tables.length} tables, ${rows} rows verified`);
+            if (outcome.statuslineSnippet !== undefined) {
+                console.log(`statusline: set the Claude Code statusLine command to: ${outcome.statuslineSnippet}`);
+            }
+            return 0;
+        }
+        case "already-moved":
+            console.log(`the memory store was already moved from ${from} to ${outcome.movedTo}`);
+            return 0;
+        case "refused":
+            console.error(`move refused: ${outcome.reason}; the source store is unchanged`);
+            return 1;
+        case "verification-failed":
+            console.error(`move failed: ${outcome.reason}; the source store is unchanged and ${dataDir} was not used`);
+            return 1;
+    }
+}
+function moveCommand(from, env) {
+    const config = (0, cfg_1.loadConfig)(env);
+    return reportMove((0, storemove_1.moveStore)(from, config, new Date().toISOString()), from, config.dataDir);
+}
 async function onResolvedStore(command, env) {
     const profile = (0, host_1.hostProfile)((0, host_1.resolveHost)(env));
     const config = (0, cfg_1.loadConfig)(env);
@@ -169,6 +202,14 @@ async function reportingFailure(run) {
 async function runCli(argv, env = process.env, cwd = process.cwd()) {
     if (argv[2] === "doctor") {
         return reportingFailure(() => doctor(env, cwd));
+    }
+    if (argv[2] === "store") {
+        const from = moveSource(argv);
+        if (from === undefined) {
+            console.error(USAGE);
+            return 2;
+        }
+        return reportingFailure(() => moveCommand(from, env));
     }
     const command = commandFor(argv, cwd);
     if (command === undefined) {

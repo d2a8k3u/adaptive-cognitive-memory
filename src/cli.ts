@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { type Config, loadConfig } from "./cfg";
 import { openDatabase } from "./db/database";
 import { embedMissing } from "./db/memories";
@@ -19,10 +20,11 @@ import {
   storeNotice,
   storeState,
 } from "./storelocation";
+import { type MoveOutcome, moveStore } from "./storemove";
 import { exportText, parseImport } from "./transfer";
 
 const USAGE =
-  "usage: cli <doctor|model-init|reembed|recall on|recall off|statusline on|statusline off|export <file>|import <file>>";
+  "usage: cli <doctor|model-init|reembed|recall on|recall off|statusline on|statusline off|export <file>|import <file>|store move --from <dir>>";
 const REEMBED_BATCH = 32;
 const FILE_EXISTS_CODE = "EEXIST";
 
@@ -164,6 +166,46 @@ function doctor(env: NodeJS.ProcessEnv, cwd: string): number {
   return report.status === "ok" ? 0 : 1;
 }
 
+function moveSource(argv: readonly string[]): string | undefined {
+  const [subcommand, flag, from] = argv.slice(3);
+  return subcommand === "move" && flag === "--from" && from !== undefined && isAbsolute(from)
+    ? from
+    : undefined;
+}
+
+function reportMove(outcome: MoveOutcome, from: string, dataDir: string): number {
+  switch (outcome.kind) {
+    case "moved": {
+      const rows = outcome.digest.tables.reduce((sum, table) => sum + table.rows, 0);
+      console.log(
+        `moved the memory store from ${from} to ${dataDir}: ${outcome.digest.tables.length} tables, ${rows} rows verified`,
+      );
+      if (outcome.statuslineSnippet !== undefined) {
+        console.log(
+          `statusline: set the Claude Code statusLine command to: ${outcome.statuslineSnippet}`,
+        );
+      }
+      return 0;
+    }
+    case "already-moved":
+      console.log(`the memory store was already moved from ${from} to ${outcome.movedTo}`);
+      return 0;
+    case "refused":
+      console.error(`move refused: ${outcome.reason}; the source store is unchanged`);
+      return 1;
+    case "verification-failed":
+      console.error(
+        `move failed: ${outcome.reason}; the source store is unchanged and ${dataDir} was not used`,
+      );
+      return 1;
+  }
+}
+
+function moveCommand(from: string, env: NodeJS.ProcessEnv): number {
+  const config = loadConfig(env);
+  return reportMove(moveStore(from, config, new Date().toISOString()), from, config.dataDir);
+}
+
 async function onResolvedStore(command: Command, env: NodeJS.ProcessEnv): Promise<number> {
   const profile = hostProfile(resolveHost(env));
   const config = loadConfig(env);
@@ -194,6 +236,14 @@ export async function runCli(
 ): Promise<number> {
   if (argv[2] === "doctor") {
     return reportingFailure(() => doctor(env, cwd));
+  }
+  if (argv[2] === "store") {
+    const from = moveSource(argv);
+    if (from === undefined) {
+      console.error(USAGE);
+      return 2;
+    }
+    return reportingFailure(() => moveCommand(from, env));
   }
   const command = commandFor(argv, cwd);
   if (command === undefined) {
