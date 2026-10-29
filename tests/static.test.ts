@@ -57,14 +57,18 @@ const LLM_CLIENT_ROOTS = [
   "openai",
 ];
 
-function distJsFiles(dir: string = DIST_DIR): string[] {
+function filesUnder(dir: string, suffixes: readonly string[]): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
-      return distJsFiles(path);
+      return filesUnder(path, suffixes);
     }
-    return entry.name.endsWith(".js") ? [path] : [];
+    return suffixes.some((suffix) => entry.name.endsWith(suffix)) ? [path] : [];
   });
+}
+
+function distJsFiles(): string[] {
+  return filesUnder(DIST_DIR, [".js"]);
 }
 
 function specifiersOf(content: string): string[] {
@@ -798,5 +802,36 @@ describe("static dist gates", () => {
     const shim = readFileSync(join(DIST_DIR, "statusline", "badge.js"), "utf8");
 
     expect([...new Set(specifiersOf(shim))].sort()).toEqual(["node:fs", "node:path"]);
+  });
+});
+
+const STOREMOVE_IMPORT = /from\s+"(?:\.\.?\/)+storemove"/;
+const MOVE_INVOCATION = /cli\.js"?\s+store\s+move\b|"store",\s*"move"|\bmoveStore\(/;
+const TEMP_DIR_USE = /mkdtempSync\(|tmpdir\(\)/;
+const REAL_STORE_REFERENCE = /homedir\(|~\/\.claude|\.claude\/plugins\/data|\$HOME/;
+const MOVE_RUNNER_DIRS = ["tests", ".github", "hooks", "evals"];
+const MOVE_RUNNER_SUFFIXES = [".ts", ".js", ".cjs", ".mjs", ".json", ".yml", ".yaml", ".sh", ".md"];
+
+describe("store move (FR-7)", () => {
+  it("is imported by src/cli.ts and by no other src module", () => {
+    const importers = filesUnder(join(process.cwd(), "src"), [".ts"])
+      .filter((file) => STOREMOVE_IMPORT.test(readFileSync(file, "utf8")))
+      .map((file) => relative(process.cwd(), file));
+
+    expect(importers).toEqual(["src/cli.ts"]);
+  });
+
+  it("is run by tests, CI, hooks and evals only against stores under a temp dir", () => {
+    const invoking = MOVE_RUNNER_DIRS.flatMap((dir) =>
+      filesUnder(join(process.cwd(), dir), MOVE_RUNNER_SUFFIXES),
+    )
+      .map((file) => ({ file: relative(process.cwd(), file), text: readFileSync(file, "utf8") }))
+      .filter(({ text }) => MOVE_INVOCATION.test(text));
+    const offenders = invoking
+      .filter(({ text }) => !TEMP_DIR_USE.test(text) || REAL_STORE_REFERENCE.test(text))
+      .map(({ file }) => file);
+
+    expect(invoking.map(({ file }) => file)).toContain("tests/storemove.test.ts");
+    expect(offenders).toEqual([]);
   });
 });
