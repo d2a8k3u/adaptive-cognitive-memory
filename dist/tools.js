@@ -461,7 +461,8 @@ async function memoryDoctor(deps) {
     return (0, doctor_1.runDoctor)(deps.processEnv, deps.instructionSources.projectDir);
 }
 async function memoryStatus(deps) {
-    return (0, status_2.statusReport)((0, status_1.statusFacts)(deps.env.db, deps.projectId), new Date().toISOString());
+    const report = (0, status_2.statusReport)((0, status_1.statusFacts)(deps.env.db, deps.projectId), new Date().toISOString());
+    return deps.storeMove === undefined ? report : { ...report, store_move: deps.storeMove };
 }
 const ID_PROPERTY = { type: "string", maxLength: ids_1.ID_MAX_CHARS };
 const TYPE_PROPERTY = { type: "string", enum: [...policy_1.MEMORY_TYPES] };

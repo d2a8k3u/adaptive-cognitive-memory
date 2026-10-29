@@ -10,9 +10,11 @@ const transfer_1 = require("./db/transfer");
 const transitions_1 = require("./db/transitions");
 const doctor_1 = require("./doctor");
 const embeddings_1 = require("./embeddings");
+const host_1 = require("./host");
 const ids_1 = require("./ids");
 const modelinit_1 = require("./modelinit");
 const statusline_1 = require("./statusline");
+const storelocation_1 = require("./storelocation");
 const transfer_2 = require("./transfer");
 const USAGE = "usage: cli <doctor|model-init|reembed|recall on|recall off|statusline on|statusline off|export <file>|import <file>>";
 const REEMBED_BATCH = 32;
@@ -137,24 +139,43 @@ function commandFor(argv, cwd) {
             return undefined;
     }
 }
+function doctor(env, cwd) {
+    const report = (0, doctor_1.runDoctor)(env, cwd);
+    console.log(JSON.stringify(report, null, 2));
+    return report.status === "ok" ? 0 : 1;
+}
+async function onResolvedStore(command, env) {
+    const profile = (0, host_1.hostProfile)((0, host_1.resolveHost)(env));
+    const config = (0, cfg_1.loadConfig)(env);
+    const state = (0, storelocation_1.storeState)(config.dataDir, (0, storelocation_1.legacyFacts)(profile, env, config.dataDir));
+    if ((0, storelocation_1.storeMissing)(state)) {
+        console.error((0, storelocation_1.storeNotice)(state, config.dataDir));
+        return 1;
+    }
+    if (state.kind === "shared") {
+        (0, storelocation_1.ensureDataDir)(config);
+    }
+    return command((0, storelocation_1.storeConfig)(config, state, env));
+}
+async function reportingFailure(run) {
+    try {
+        return await run();
+    }
+    catch (error) {
+        console.error((0, doctor_1.errorMessage)(error));
+        return 1;
+    }
+}
 async function runCli(argv, env = process.env, cwd = process.cwd()) {
     if (argv[2] === "doctor") {
-        const report = (0, doctor_1.runDoctor)(env, cwd);
-        console.log(JSON.stringify(report, null, 2));
-        return report.status === "ok" ? 0 : 1;
+        return reportingFailure(() => doctor(env, cwd));
     }
     const command = commandFor(argv, cwd);
     if (command === undefined) {
         console.error(USAGE);
         return 2;
     }
-    try {
-        return await command((0, cfg_1.loadConfig)(env));
-    }
-    catch (error) {
-        console.error((0, doctor_1.errorMessage)(error));
-        return 1;
-    }
+    return reportingFailure(() => onResolvedStore(command, env));
 }
 if (require.main === module) {
     void runCli(process.argv, process.env).then((code) => {

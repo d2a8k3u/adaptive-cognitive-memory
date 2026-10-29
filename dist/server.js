@@ -16,10 +16,12 @@ const embeddings_1 = require("./embeddings");
 const host_1 = require("./host");
 const ids_1 = require("./ids");
 const outage_1 = require("./outage");
+const storelocation_1 = require("./storelocation");
 const tools_1 = require("./tools");
 const version_1 = require("./version");
 const START_BACKFILL_BATCH = 32;
 const DOCTOR_TOOL = "memory_doctor";
+const SWITCH_FAILURE = "memory could not switch to the moved store";
 function toolResult(outcome) {
     const isError = (0, tools_1.isToolError)(outcome);
     return {
@@ -36,8 +38,10 @@ async function callTool(backend, definition, args) {
     }
     return { error: { message: (0, outage_1.unavailableMessage)(backend.outage) } };
 }
-function createMcpServer(backend) {
-    const server = new index_js_1.Server({ name: "memory", version: version_1.PLUGIN_VERSION }, { capabilities: { tools: { listChanged: false } } });
+function createMcpServer(initial, options = {}) {
+    let current = initial;
+    let afterMove = options.afterMove;
+    const server = new index_js_1.Server({ name: "memory", version: version_1.PLUGIN_VERSION }, { capabilities: { tools: { listChanged: false } }, instructions: options.instructions });
     server.setRequestHandler(types_js_1.ListToolsRequestSchema, () => ({
         tools: tools_1.TOOL_DEFINITIONS.map((definition) => ({
             name: definition.name,
@@ -50,24 +54,34 @@ function createMcpServer(backend) {
         if (definition === undefined) {
             throw new types_js_1.McpError(types_js_1.ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
         }
-        return toolResult(await callTool(backend, definition, request.params.arguments ?? {}));
+        if (afterMove !== undefined && (0, storelocation_1.sourceMoved)(afterMove.legacyDir)) {
+            try {
+                current = afterMove.open();
+            }
+            catch (error) {
+                return toolResult({ error: { message: `${SWITCH_FAILURE}: ${(0, doctor_1.errorMessage)(error)}` } });
+            }
+            afterMove = undefined;
+        }
+        return toolResult(await callTool(current, definition, request.params.arguments ?? {}));
     });
     return server;
 }
-function openStorage(config) {
+function openStorage(config, dependencyFix) {
     try {
         return { opened: (0, database_1.openDatabase)(config) };
     }
     catch (error) {
-        const outage = (0, outage_1.storageOutage)(error, (0, host_1.hostProfile)("claude").dependencyFix);
+        const outage = (0, outage_1.storageOutage)(error, dependencyFix);
         if (outage === undefined) {
             throw error;
         }
         return { outage };
     }
 }
-function toolBackend(config, env, projectDir) {
-    const storage = openStorage(config);
+function toolBackend(shell, config, storeMove) {
+    const { env, projectDir } = shell;
+    const storage = openStorage(config, shell.profile.dependencyFix);
     if ("outage" in storage) {
         return { available: false, outage: storage.outage, processEnv: env, projectDir };
     }
@@ -90,8 +104,39 @@ function toolBackend(config, env, projectDir) {
                 projectDir,
                 autoMemoryIndex: autoMemory.enabled ? autoMemory.indexPath : undefined,
             },
+            storeMove,
         },
     };
+}
+function currentStoreState(shell) {
+    const { profile, env, config } = shell;
+    return (0, storelocation_1.storeState)(config.dataDir, (0, storelocation_1.legacyFacts)(profile, env, config.dataDir));
+}
+function storeMoveOf(state, dataDir) {
+    const notice = (0, storelocation_1.storeNotice)(state, dataDir);
+    return state.kind === "shared" || notice === undefined
+        ? undefined
+        : { state: state.kind, notice };
+}
+function stateBackend(shell, state) {
+    const { config, env, projectDir } = shell;
+    if ((0, storelocation_1.storeMissing)(state)) {
+        return {
+            available: false,
+            outage: { cause: `the moved store ${state.movedTo} does not exist`, fix: storelocation_1.MOVED_STORE_FIX },
+            processEnv: env,
+            projectDir,
+        };
+    }
+    if (state.kind === "shared") {
+        (0, storelocation_1.ensureDataDir)(config);
+    }
+    return toolBackend(shell, (0, storelocation_1.storeConfig)(config, state, env), storeMoveOf(state, config.dataDir));
+}
+function afterMoveOf(shell, state) {
+    return state.kind === "legacy"
+        ? { legacyDir: state.legacyDir, open: () => stateBackend(shell, currentStoreState(shell)) }
+        : undefined;
 }
 async function maintainVectors(env) {
     if (!env.vecLoaded) {
@@ -110,8 +155,19 @@ async function maintainVectors(env) {
     }
 }
 async function runServer(env = process.env) {
-    const backend = toolBackend((0, cfg_1.loadConfig)(env), env, process.cwd());
-    await createMcpServer(backend).connect(new stdio_js_1.StdioServerTransport());
+    const shell = {
+        profile: (0, host_1.hostProfile)((0, host_1.resolveHost)(env)),
+        config: (0, cfg_1.loadConfig)(env),
+        env,
+        projectDir: process.cwd(),
+    };
+    const state = currentStoreState(shell);
+    const backend = stateBackend(shell, state);
+    const options = {
+        instructions: (0, storelocation_1.storeNotice)(state, shell.config.dataDir),
+        afterMove: afterMoveOf(shell, state),
+    };
+    await createMcpServer(backend, options).connect(new stdio_js_1.StdioServerTransport());
     if (backend.available) {
         void maintainVectors(backend.deps.env).catch((error) => {
             console.error(`memory start-up backfill failed and was not recorded: ${(0, doctor_1.errorMessage)(error)}`);

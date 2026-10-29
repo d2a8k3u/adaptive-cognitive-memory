@@ -1,7 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MOVED_MARKER_FILE = void 0;
+exports.MOVED_STORE_FIX = exports.MOVED_MARKER_FILE = void 0;
 exports.storeState = storeState;
+exports.storeMissing = storeMissing;
 exports.legacyFacts = legacyFacts;
 exports.storeConfig = storeConfig;
 exports.storeNotice = storeNotice;
@@ -14,6 +15,7 @@ const cfg_1 = require("./cfg");
 const host_1 = require("./host");
 const version_1 = require("./version");
 exports.MOVED_MARKER_FILE = "moved.json";
+exports.MOVED_STORE_FIX = `set ${cfg_1.DATA_DIR_ENV} to the directory that holds the moved store`;
 const MARKER_VERSION = 1;
 const SHARED = { kind: "shared" };
 function storeState(dataDir, legacy) {
@@ -32,6 +34,9 @@ function storeState(dataDir, legacy) {
         return { kind: "legacy", legacyDir: legacy.dir };
     }
     return SHARED;
+}
+function storeMissing(state) {
+    return state.kind === "moved-elsewhere" && !state.targetExists;
 }
 function markerPath(legacyDir) {
     return (0, node_path_1.join)(legacyDir, exports.MOVED_MARKER_FILE);

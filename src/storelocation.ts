@@ -27,6 +27,12 @@ export type StoreState =
   | { readonly kind: "legacy"; readonly legacyDir: string }
   | { readonly kind: "moved-elsewhere"; readonly movedTo: string; readonly targetExists: boolean };
 
+export type MissingStore = Extract<StoreState, { kind: "moved-elsewhere" }> & {
+  readonly targetExists: false;
+};
+
+export const MOVED_STORE_FIX = `set ${DATA_DIR_ENV} to the directory that holds the moved store`;
+
 const MARKER_VERSION = 1;
 
 interface MovedMarker {
@@ -56,6 +62,10 @@ export function storeState(dataDir: string, legacy: LegacyFacts | undefined): St
     return { kind: "legacy", legacyDir: legacy.dir };
   }
   return SHARED;
+}
+
+export function storeMissing(state: StoreState): state is MissingStore {
+  return state.kind === "moved-elsewhere" && !state.targetExists;
 }
 
 function markerPath(legacyDir: string): string {

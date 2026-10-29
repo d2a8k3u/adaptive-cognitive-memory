@@ -1,4 +1,4 @@
-import {
+import fs, {
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -9,13 +9,19 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Config, DB_FILENAME, loadConfig } from "../src/cfg";
-import { openDatabase } from "../src/db/database";
+import { runCli } from "../src/cli";
+import { type OpenedDb, openDatabase } from "../src/db/database";
 import { type HostId, hostProfile } from "../src/host";
 import { newId, resolveProjectId } from "../src/ids";
+import { createMcpServer, type ServerOptions, type ToolBackend } from "../src/server";
 import {
   ensureDataDir,
   type LegacyFacts,
@@ -28,8 +34,14 @@ import {
   storeState,
   writeMovedMarker,
 } from "../src/storelocation";
-import { testModelCacheDir, testModelEnv } from "../vitest.config";
-import { type ProcessResult, runProcess, seedConfig } from "./fixtures/seed";
+import { testEmbedDeadlineMs, testModelCacheDir, testModelEnv } from "../vitest.config";
+import {
+  type ProcessResult,
+  runProcess,
+  seedConfig,
+  type ToolCallResult,
+  toolText,
+} from "./fixtures/seed";
 
 const MOVED_AT = "2026-10-30T00:00:00.000Z";
 const DIGEST = "digest-of-the-moved-store";
@@ -359,8 +371,9 @@ const STORE_TOOL = "mcp__plugin_adaptive-cognitive-memory_memory__memory_store";
 const PINNED_ABSTRACT = "never push to the main branch directly, open a pull request";
 const LEGACY_ONLY_ABSTRACT = "this line lives only in the store left behind by the move";
 
-function seededStore(dir: string, abstract: string): void {
+function seededStore(dir: string, abstract: string): string {
   mkdirSync(dir, { recursive: true });
+  const id = newId();
   const opened = openDatabase(seedConfig(dir, testModelCacheDir));
   try {
     opened.db
@@ -368,10 +381,11 @@ function seededStore(dir: string, abstract: string): void {
         `INSERT INTO memories (id, type, kind, scope, project_id, title, abstract, content, importance, superseded_by, created_at, updated_at)
          VALUES (?, 'semantic', 'constraint', 'project', ?, 'main branch', ?, 'body', 0.7, NULL, '2026-10-13T00:00:00.000Z', '2026-10-13T00:00:00.000Z')`,
       )
-      .run(newId(), PROJECT_ID, abstract);
+      .run(id, PROJECT_ID, abstract);
   } finally {
     opened.db.close();
   }
+  return id;
 }
 
 function openRememberSignal(dir: string, sessionId: string): void {
@@ -396,7 +410,7 @@ function storeRows<T>(dir: string, sql: string): T[] {
   }
 }
 
-function claudeEnv(legacyDir: string, dataDir: string): NodeJS.ProcessEnv {
+function claudeEnv(legacyDir: string, dataDir: string): Record<string, string> {
   return {
     CLAUDE_PLUGIN_DATA: legacyDir,
     ACM_DATA_DIR: dataDir,
@@ -571,4 +585,328 @@ describe("Claude hooks by store location", () => {
     },
     SPAWNED_TIMEOUT_MS,
   );
+});
+
+const SERVER_ENTRY = join(process.cwd(), "dist", "server.js");
+const OWNER_ONLY = 0o700;
+const clients: Client[] = [];
+const openedStores: OpenedDb[] = [];
+
+afterEach(async () => {
+  for (const client of clients.splice(0)) {
+    await client.close();
+  }
+  for (const opened of openedStores.splice(0)) {
+    opened.db.close();
+  }
+  vi.restoreAllMocks();
+});
+
+async function spawnedServer(env: Record<string, string>): Promise<Client> {
+  const client = new Client({ name: "acm-location-check", version: "0.0.0" });
+  clients.push(client);
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [SERVER_ENTRY],
+      env: { PATH: process.env.PATH ?? "", ...env },
+      cwd: PROJECT_DIR,
+      stderr: "pipe",
+    }),
+  );
+  return client;
+}
+
+async function inProcessServer(initial: ToolBackend, options: ServerOptions): Promise<Client> {
+  const server = createMcpServer(initial, options);
+  const client = new Client({ name: "acm-location-switch", version: "0.0.0" });
+  clients.push(client);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return client;
+}
+
+function storeBackend(dir: string): ToolBackend {
+  const config = seedConfig(dir, testModelCacheDir);
+  const opened = openDatabase(config);
+  openedStores.push(opened);
+  return {
+    available: true,
+    deps: {
+      env: { db: opened.db, vecLoaded: opened.vecLoaded, modelCacheDir: config.modelCacheDir },
+      projectId: PROJECT_ID,
+      embedDeadlineMs: testEmbedDeadlineMs,
+      processEnv: {},
+      instructionSources: { projectDir: PROJECT_DIR, autoMemoryIndex: undefined },
+    },
+  };
+}
+
+function toolValue(result: ToolCallResult): unknown {
+  return JSON.parse(toolText(result));
+}
+
+async function memoryGet(client: Client, id: string): Promise<unknown> {
+  return toolValue(
+    (await client.callTool({ name: "memory_get", arguments: { id } })) as ToolCallResult,
+  );
+}
+
+interface MovedStores {
+  readonly legacyDir: string;
+  readonly dataDir: string;
+  readonly legacyId: string;
+  readonly sharedId: string;
+}
+
+function movedStores(): MovedStores {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-switch-")));
+  const legacyDir = join(root, "legacy");
+  const dataDir = join(root, "shared");
+  return {
+    legacyDir,
+    dataDir,
+    legacyId: seededStore(legacyDir, LEGACY_ONLY_ABSTRACT),
+    sharedId: seededStore(dataDir, PINNED_ABSTRACT),
+  };
+}
+
+const FROM_LEGACY = expect.objectContaining({ abstract: LEGACY_ONLY_ABSTRACT });
+const FROM_SHARED = expect.objectContaining({ abstract: PINNED_ABSTRACT });
+
+describe("MCP server by store location", () => {
+  it(
+    "serves an unmoved legacy store, with the move notice in its instructions and memory_status, and creates nothing in the data dir",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-server-legacy-")));
+      const legacyDir = join(root, "legacy");
+      const dataDir = join(root, "shared");
+      mkdirSync(legacyDir);
+      openDatabase(seedConfig(legacyDir, testModelCacheDir)).db.close();
+      const client = await spawnedServer(claudeEnv(legacyDir, dataDir));
+
+      const status = toolValue(
+        (await client.callTool({ name: "memory_status", arguments: {} })) as ToolCallResult,
+      );
+      const stored = toolValue(
+        (await client.callTool({
+          name: "memory_store",
+          arguments: {
+            title: "release freeze",
+            content: "Releases freeze on Fridays. Nothing deploys after noon.",
+            type: "semantic",
+            kind: "fact",
+            conflict_key: "project.release_freeze",
+          },
+        })) as ToolCallResult,
+      );
+
+      const notice = storeNotice({ kind: "legacy", legacyDir }, dataDir);
+      expect(client.getInstructions()).toBe(notice);
+      expect(status).toMatchObject({ store_move: { state: "legacy", notice } });
+      expect(stored).toMatchObject({ action: "created" });
+      expect(storeRows(legacyDir, "SELECT title FROM memories")).toEqual([
+        { title: "release freeze" },
+      ]);
+      expect(existsSync(dataDir)).toBe(false);
+    },
+    SPAWNED_TIMEOUT_MS,
+  );
+
+  it(
+    "creates the shared data dir, open to the owner only, and carries no store notice in the shared state",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-server-fresh-")));
+      const dataDir = join(root, "share", "adaptive-cognitive-memory");
+      const client = await spawnedServer({
+        ACM_DATA_DIR: dataDir,
+        CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-location-claude-")),
+        ...testModelEnv,
+      });
+
+      const status = toolValue(
+        (await client.callTool({ name: "memory_status", arguments: {} })) as ToolCallResult,
+      );
+
+      expect(client.getInstructions()).toBeUndefined();
+      expect(status).not.toHaveProperty("store_move");
+      expect(statSync(dataDir).mode & 0o777).toBe(OWNER_ONLY);
+    },
+    SPAWNED_TIMEOUT_MS,
+  );
+
+  it(
+    "turns memory off with the move notice when the marker names a missing store, and creates nothing",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-server-gone-")));
+      const legacyDir = join(root, "legacy");
+      const movedTo = join(root, "gone");
+      const dataDir = join(root, "shared");
+      seededStore(legacyDir, LEGACY_ONLY_ABSTRACT);
+      writeMovedMarker(legacyDir, movedTo, DIGEST, MOVED_AT);
+      const client = await spawnedServer(claudeEnv(legacyDir, dataDir));
+
+      const search = (await client.callTool({
+        name: "memory_search",
+        arguments: { query: "main branch" },
+      })) as ToolCallResult;
+
+      expect(client.getInstructions()).toBe(
+        storeNotice({ kind: "moved-elsewhere", movedTo, targetExists: false }, dataDir),
+      );
+      expect({ isError: search.isError, value: toolValue(search) }).toEqual({
+        isError: true,
+        value: {
+          error: {
+            message: `memory unavailable: the moved store ${movedTo} does not exist. Fix: set ACM_DATA_DIR to the directory that holds the moved store.`,
+          },
+        },
+      });
+      expect([existsSync(dataDir), existsSync(movedTo)]).toEqual([false, false]);
+    },
+    SPAWNED_TIMEOUT_MS,
+  );
+
+  it("opens the moved store once for two concurrent calls after the marker appears", async () => {
+    const stores = movedStores();
+    const open = vi.fn(() => storeBackend(stores.dataDir));
+    const client = await inProcessServer(storeBackend(stores.legacyDir), {
+      afterMove: { legacyDir: stores.legacyDir, open },
+    });
+    writeMovedMarker(stores.legacyDir, stores.dataDir, DIGEST, MOVED_AT);
+
+    const served = await Promise.all([
+      memoryGet(client, stores.sharedId),
+      memoryGet(client, stores.sharedId),
+    ]);
+
+    expect(served).toEqual([FROM_SHARED, FROM_SHARED]);
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers the call that finds the marker with the switch error when the moved store fails to open, and retries on the next call", async () => {
+    const stores = movedStores();
+    const open = vi
+      .fn<() => ToolBackend>()
+      .mockImplementationOnce(() => {
+        throw new Error("EACCES: permission denied");
+      })
+      .mockImplementation(() => storeBackend(stores.dataDir));
+    const client = await inProcessServer(storeBackend(stores.legacyDir), {
+      afterMove: { legacyDir: stores.legacyDir, open },
+    });
+    writeMovedMarker(stores.legacyDir, stores.dataDir, DIGEST, MOVED_AT);
+
+    const failed = (await client.callTool({
+      name: "memory_get",
+      arguments: { id: stores.legacyId },
+    })) as ToolCallResult;
+    const retried = await memoryGet(client, stores.sharedId);
+
+    expect({ isError: failed.isError, value: toolValue(failed) }).toEqual({
+      isError: true,
+      value: {
+        error: { message: "memory could not switch to the moved store: EACCES: permission denied" },
+      },
+    });
+    expect(retried).toEqual(FROM_SHARED);
+    expect(open).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks for the marker with one existsSync per call until the switch, and never after it", async () => {
+    const stores = movedStores();
+    const marker = join(stores.legacyDir, MOVED_MARKER_FILE);
+    const client = await inProcessServer(storeBackend(stores.legacyDir), {
+      afterMove: { legacyDir: stores.legacyDir, open: () => storeBackend(stores.dataDir) },
+    });
+    const exists = vi.spyOn(fs, "existsSync");
+    syncBuiltinESMExports();
+    try {
+      const beforeMove = [
+        await memoryGet(client, stores.legacyId),
+        await memoryGet(client, stores.legacyId),
+      ];
+      writeMovedMarker(stores.legacyDir, stores.dataDir, DIGEST, MOVED_AT);
+      const afterMove = [
+        await memoryGet(client, stores.sharedId),
+        await memoryGet(client, stores.sharedId),
+        await memoryGet(client, stores.sharedId),
+      ];
+
+      expect(beforeMove).toEqual([FROM_LEGACY, FROM_LEGACY]);
+      expect(afterMove).toEqual([FROM_SHARED, FROM_SHARED, FROM_SHARED]);
+      expect(exists.mock.calls.filter(([path]) => path === marker)).toHaveLength(3);
+    } finally {
+      exists.mockRestore();
+      syncBuiltinESMExports();
+    }
+  });
+});
+
+describe("CLI by store location", () => {
+  it("switches recall in the unmoved legacy store and creates nothing in the data dir", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-cli-legacy-")));
+    const legacyDir = join(root, "legacy");
+    const dataDir = join(root, "shared");
+    seededStore(legacyDir, PINNED_ABSTRACT);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const code = await runCli(
+      ["node", "cli.js", "recall", "on"],
+      claudeEnv(legacyDir, dataDir),
+      PROJECT_DIR,
+    );
+
+    expect(code).toBe(0);
+    expect(
+      storeRows(
+        legacyDir,
+        "SELECT project_id AS projectId, recall_enabled AS recallEnabled FROM project_settings",
+      ),
+    ).toEqual([{ projectId: PROJECT_ID, recallEnabled: 1 }]);
+    expect(existsSync(dataDir)).toBe(false);
+  });
+
+  it("refuses a store command with the notice when the marker names a missing store, and creates nothing", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-cli-gone-")));
+    const legacyDir = join(root, "legacy");
+    const movedTo = join(root, "gone");
+    const dataDir = join(root, "shared");
+    const exportFile = join(root, "backup.jsonl");
+    seededStore(legacyDir, LEGACY_ONLY_ABSTRACT);
+    writeMovedMarker(legacyDir, movedTo, DIGEST, MOVED_AT);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const code = await runCli(
+      ["node", "cli.js", "export", exportFile],
+      claudeEnv(legacyDir, dataDir),
+      PROJECT_DIR,
+    );
+
+    expect(code).toBe(1);
+    expect(errors.mock.calls).toEqual([
+      [storeNotice({ kind: "moved-elsewhere", movedTo, targetExists: false }, dataDir)],
+    ]);
+    expect([existsSync(dataDir), existsSync(movedTo), existsSync(exportFile)]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("creates the shared data dir, open to the owner only, before a store command opens the store there", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-cli-fresh-")));
+    const dataDir = join(root, "share", "adaptive-cognitive-memory");
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const code = await runCli(
+      ["node", "cli.js", "recall", "on"],
+      { ACM_DATA_DIR: dataDir, ...testModelEnv },
+      PROJECT_DIR,
+    );
+
+    expect(code).toBe(0);
+    expect(statSync(dataDir).mode & 0o777).toBe(OWNER_ONLY);
+  });
 });

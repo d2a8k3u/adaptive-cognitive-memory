@@ -7,9 +7,18 @@ import { exportSnapshot, importRecords, stampExport } from "./db/transfer";
 import { reconcileVecStates } from "./db/transitions";
 import { errorMessage, runDoctor } from "./doctor";
 import { modelCached, modelCachePath } from "./embeddings";
+import { hostProfile, resolveHost } from "./host";
 import { resolveProjectId } from "./ids";
 import { modelInit } from "./modelinit";
 import { disableStatusline, distShim, enableStatusline } from "./statusline";
+import {
+  ensureDataDir,
+  legacyFacts,
+  storeConfig,
+  storeMissing,
+  storeNotice,
+  storeState,
+} from "./storelocation";
 import { exportText, parseImport } from "./transfer";
 
 const USAGE =
@@ -149,27 +158,49 @@ function commandFor(argv: readonly string[], cwd: string): Command | undefined {
   }
 }
 
+function doctor(env: NodeJS.ProcessEnv, cwd: string): number {
+  const report = runDoctor(env, cwd);
+  console.log(JSON.stringify(report, null, 2));
+  return report.status === "ok" ? 0 : 1;
+}
+
+async function onResolvedStore(command: Command, env: NodeJS.ProcessEnv): Promise<number> {
+  const profile = hostProfile(resolveHost(env));
+  const config = loadConfig(env);
+  const state = storeState(config.dataDir, legacyFacts(profile, env, config.dataDir));
+  if (storeMissing(state)) {
+    console.error(storeNotice(state, config.dataDir));
+    return 1;
+  }
+  if (state.kind === "shared") {
+    ensureDataDir(config);
+  }
+  return command(storeConfig(config, state, env));
+}
+
+async function reportingFailure(run: () => Promise<number> | number): Promise<number> {
+  try {
+    return await run();
+  } catch (error) {
+    console.error(errorMessage(error));
+    return 1;
+  }
+}
+
 export async function runCli(
   argv: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
   cwd: string = process.cwd(),
 ): Promise<number> {
   if (argv[2] === "doctor") {
-    const report = runDoctor(env, cwd);
-    console.log(JSON.stringify(report, null, 2));
-    return report.status === "ok" ? 0 : 1;
+    return reportingFailure(() => doctor(env, cwd));
   }
   const command = commandFor(argv, cwd);
   if (command === undefined) {
     console.error(USAGE);
     return 2;
   }
-  try {
-    return await command(loadConfig(env));
-  } catch (error) {
-    console.error(errorMessage(error));
-    return 1;
-  }
+  return reportingFailure(() => onResolvedStore(command, env));
 }
 
 if (require.main === module) {
