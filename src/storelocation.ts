@@ -96,6 +96,11 @@ function existingRealPath(dir: string): string | undefined {
   return existsSync(dir) ? realpathSync(dir) : undefined;
 }
 
+export function movedMarkerTarget(legacyDir: string): string | undefined {
+  const path = markerPath(legacyDir);
+  return existsSync(path) ? markerTarget(readFileSync(path, "utf8")) : undefined;
+}
+
 export function legacyFacts(
   profile: HostProfile,
   env: NodeJS.ProcessEnv,

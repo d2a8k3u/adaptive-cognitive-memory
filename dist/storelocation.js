@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MOVED_STORE_FIX = exports.MOVED_MARKER_FILE = void 0;
 exports.storeState = storeState;
 exports.storeMissing = storeMissing;
+exports.movedMarkerTarget = movedMarkerTarget;
 exports.legacyFacts = legacyFacts;
 exports.storeConfig = storeConfig;
 exports.storeNotice = storeNotice;
@@ -62,6 +63,10 @@ function markerTarget(text) {
 }
 function existingRealPath(dir) {
     return (0, node_fs_1.existsSync)(dir) ? (0, node_fs_1.realpathSync)(dir) : undefined;
+}
+function movedMarkerTarget(legacyDir) {
+    const path = markerPath(legacyDir);
+    return (0, node_fs_1.existsSync)(path) ? markerTarget((0, node_fs_1.readFileSync)(path, "utf8")) : undefined;
 }
 function legacyFacts(profile, env, dataDir) {
     const dir = profile.legacyDataEnv === undefined ? undefined : env[profile.legacyDataEnv];
