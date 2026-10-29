@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { join } from "node:path";
 import { readAutoMemory } from "./automemory";
 import { ticketId } from "./branch";
 import { FAILURE_GATE, PROMPT_GATE, PROMPT_MIN_WORDS, TOOL_GATE } from "./calibration";
@@ -33,10 +32,13 @@ import {
   type ToolCandidate,
   type ToolGate,
 } from "./gate";
-import { hostProfile } from "./host";
+import { CLI_ENTRY, type HostId, type HostProfile, hostProfile, resolveHost } from "./host";
+import { type HookReply, hostOutput } from "./hosts/output";
+import type { EngineAction, HookRequest, HostInput } from "./hosts/request";
+import { hostRequest } from "./hosts/translate";
 import { collectLocationFacts, type LocationFacts, projectIdentity, resolveProjectId } from "./ids";
 import { type Injection, renderInjection } from "./inject";
-import { commandHead, type ToolLookup, toolLookup } from "./keys";
+import { commandHead, type ToolLookup, type ToolTarget, targetLookup } from "./keys";
 import { parseFeedbackVerdicts } from "./lifecycle";
 import { sessionNotice, storageOutage } from "./outage";
 import { admitPrompt } from "./prompt";
@@ -58,57 +60,38 @@ import {
   writeBadgeState,
 } from "./statusline";
 import { BADGE_STATE_VERSION, type BadgeState, isBadgeSessionId } from "./statusline/badge";
+import {
+  ensureDataDir,
+  legacyFacts,
+  type StoreState,
+  storeConfig,
+  storeNotice,
+  storeState,
+} from "./storelocation";
 import { hostToolName } from "./toolnames";
-import { PLUGIN_ROOT } from "./version";
 
-const HOOK_EVENTS = [
-  "SessionStart",
-  "UserPromptSubmit",
-  "PreToolUse",
-  "PostToolUse",
-  "PostToolUseFailure",
-  "Stop",
-] as const;
-type HookEvent = (typeof HOOK_EVENTS)[number];
-const SESSION_EVENTS = ["PostToolUse", "Stop"] as const;
-type SessionEvent = (typeof SESSION_EVENTS)[number];
+const UNKNOWN_EVENT = "unknown";
 
-const CLI_ENTRY = join(PLUGIN_ROOT, "dist", "cli.js");
-
-const BASH_TOOL = "Bash";
-const CLAUDE_PROFILE = hostProfile("claude");
-const STORE_TOOL = hostToolName("claude", "memory_store");
-const FEEDBACK_TOOL = hostToolName("claude", "memory_feedback");
-const STORE_RECEIPT_TOOLS: ReadonlySet<string> = new Set([
-  STORE_TOOL,
-  hostToolName("claude", "memory_update"),
-]);
-
-interface HookInput {
-  hook_event_name?: unknown;
-  cwd?: unknown;
-  session_id?: unknown;
-  source?: unknown;
-  prompt?: unknown;
-  tool_name?: unknown;
-  tool_input?: unknown;
-  error?: unknown;
-  is_interrupt?: unknown;
-  stop_hook_active?: unknown;
-}
+type CommandFailedAction = Extract<EngineAction, { readonly kind: "command-failed" }>;
 
 interface SessionScope {
   readonly config: Config;
+  readonly profile: HostProfile;
   readonly sessionId: string;
   readonly now: string;
 }
 
-interface HookScope {
+interface RequestScope {
   readonly config: Config;
+  readonly profile: HostProfile;
   readonly env: NodeJS.ProcessEnv;
-  readonly projectDir: string;
+  readonly projectDir: string | undefined;
   readonly sessionId: string | undefined;
   readonly now: string;
+}
+
+interface HookScope extends RequestScope {
+  readonly projectDir: string;
 }
 
 interface Selection {
@@ -116,11 +99,6 @@ interface Selection {
   readonly rows: readonly RecalledMemory[];
   readonly budgetTokens: number;
   readonly degraded?: DegradedFlags;
-}
-
-interface HookReply {
-  readonly context: string;
-  readonly notice?: string;
 }
 
 interface StartLocation {
@@ -135,33 +113,11 @@ interface CommandFailure {
   readonly error: string | undefined;
 }
 
-function isHookEvent(value: unknown): value is HookEvent {
-  return typeof value === "string" && (HOOK_EVENTS as readonly string[]).includes(value);
-}
-
-function isSessionEvent(event: HookEvent): event is SessionEvent {
-  return (SESSION_EVENTS as readonly HookEvent[]).includes(event);
-}
-
-function stringField(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
 function projectDirectory(
   sessionProjectDir: string | undefined,
   eventCwd: string | undefined,
 ): string | undefined {
   return sessionProjectDir !== undefined && sessionProjectDir !== "" ? sessionProjectDir : eventCwd;
-}
-
-function hookOutput(event: HookEvent, reply: HookReply): string | undefined {
-  const output = {
-    ...(reply.notice === undefined ? {} : { systemMessage: reply.notice }),
-    ...(reply.context === ""
-      ? {}
-      : { hookSpecificOutput: { hookEventName: event, additionalContext: reply.context } }),
-  };
-  return Object.keys(output).length === 0 ? undefined : JSON.stringify(output);
 }
 
 function contextOnly(text: Promise<string>): Promise<HookReply> {
@@ -235,7 +191,7 @@ function injectAndRecord(opened: OpenedDb, scope: HookScope, selection: Selectio
   const injection = renderInjection(
     selection.rows,
     selection.budgetTokens,
-    CLAUDE_PROFILE.doctorInstruction,
+    scope.profile.doctorInstruction,
     selection.degraded,
   );
   recordRecall(opened, scope, selection.event, injection.injectedIds);
@@ -258,6 +214,9 @@ function fsErrorCode(error: unknown): string | undefined {
 }
 
 function whileStatuslineEnabled(scope: HookScope, work: (paths: StatuslinePaths) => void): void {
+  if (!scope.profile.statuslineBadge) {
+    return;
+  }
   const paths = statuslinePaths(scope.config.dataDir);
   if (!statuslineEnabled(paths)) {
     return;
@@ -360,7 +319,7 @@ async function sessionStartRecall(
 }
 
 function lessonRouting(scope: HookScope, facts: LocationFacts, source: string | undefined): string {
-  return routesLessons(source)
+  return scope.profile.nativeAutoMemory && routesLessons(source)
     ? routingLine(readAutoMemory(scope.env, scope.projectDir, facts).enabled)
     : "";
 }
@@ -394,12 +353,21 @@ async function setUpModel(scope: HookScope): Promise<string | undefined> {
   return modelNotice(
     setup,
     readDownloadFailure(scope.config.dataDir),
-    CLAUDE_PROFILE.doctorInstruction,
+    scope.profile.doctorInstruction,
   );
 }
 
-async function sessionStartReply(scope: HookScope, source: string | undefined): Promise<HookReply> {
-  const notice = await setUpModel(scope);
+function joinedNotices(notices: readonly (string | undefined)[]): string | undefined {
+  const present = notices.filter((notice) => notice !== undefined);
+  return present.length === 0 ? undefined : present.join("\n");
+}
+
+async function sessionStartReply(
+  scope: HookScope,
+  source: string | undefined,
+  locationNotice: string | undefined,
+): Promise<HookReply> {
+  const notice = joinedNotices([locationNotice, await setUpModel(scope)]);
   return { context: await sessionStartText(scope, source), notice };
 }
 
@@ -496,7 +464,8 @@ async function toolRecall(
   });
 }
 
-function toolText(scope: HookScope, lookup: ToolLookup | undefined): Promise<string> {
+function toolText(scope: HookScope, target: ToolTarget): Promise<string> {
+  const lookup = targetLookup(target, scope.projectDir);
   const projectId = resolveProjectId(scope.projectDir);
   return withDatabase(scope.config, async (opened) => {
     const recallOn = recallEnabled(opened.db, projectId);
@@ -522,35 +491,27 @@ function silently(config: Config, work: (opened: OpenedDb) => void): Promise<str
   });
 }
 
-function bashHead(input: HookInput): string | undefined {
-  const head =
-    stringField(input.tool_name) === BASH_TOOL ? commandHead(input.tool_input) : undefined;
+function signalHead(toolInput: unknown): string | undefined {
+  const head = commandHead(toolInput);
   return head === undefined ? undefined : signalDetail(head);
 }
 
-function launchedInBackground(toolInput: unknown): boolean {
-  return (
-    typeof toolInput === "object" &&
-    toolInput !== null &&
-    "run_in_background" in toolInput &&
-    toolInput.run_in_background === true
-  );
+function feedbackReceiptText(scope: SessionScope, toolInput: unknown): Promise<string> {
+  return silently(scope.config, (opened) => recordFeedbackCall(opened, scope, toolInput));
 }
 
-function postToolText(scope: SessionScope, input: HookInput): Promise<string> {
-  const { config, sessionId, now } = scope;
-  const toolName = stringField(input.tool_name) ?? "";
-  if (toolName === FEEDBACK_TOOL) {
-    return silently(config, (opened) => recordFeedbackCall(opened, scope, input.tool_input));
-  }
-  if (STORE_RECEIPT_TOOLS.has(toolName)) {
-    return silently(config, ({ db }) => closeSessionSignals(db, sessionId, "receipt", now));
-  }
-  const head = launchedInBackground(input.tool_input) ? undefined : bashHead(input);
+function storeReceiptText(scope: SessionScope): Promise<string> {
+  const { sessionId, now } = scope;
+  return silently(scope.config, ({ db }) => closeSessionSignals(db, sessionId, "receipt", now));
+}
+
+function commandPassedText(scope: SessionScope, toolInput: unknown): Promise<string> {
+  const { sessionId, now } = scope;
+  const head = signalHead(toolInput);
   if (head === undefined) {
     return Promise.resolve("");
   }
-  return silently(config, ({ db }) => resolveCommand(db, { sessionId, head, at: now }));
+  return silently(scope.config, ({ db }) => resolveCommand(db, { sessionId, head, at: now }));
 }
 
 function claimAndRecord(
@@ -586,7 +547,7 @@ async function failureRecall(
   const injection = renderInjection(
     rows,
     scope.config.pretoolBudgetTokens,
-    CLAUDE_PROFILE.doctorInstruction,
+    scope.profile.doctorInstruction,
   );
   if (injection.injectedIds.length === 0) {
     return recordAbstention(opened, scope, "PostToolUseFailure");
@@ -594,8 +555,8 @@ async function failureRecall(
   return claimAndRecord(opened, scope, failure, injection);
 }
 
-function failedToolText(scope: HookScope, input: HookInput): Promise<string> {
-  const head = input.is_interrupt === true ? undefined : bashHead(input);
+function failedToolText(scope: HookScope, action: CommandFailedAction): Promise<string> {
+  const head = action.interrupted ? undefined : signalHead(action.toolInput);
   const sessionId = scope.sessionId;
   if (head === undefined || sessionId === undefined) {
     return Promise.resolve("");
@@ -604,7 +565,7 @@ function failedToolText(scope: HookScope, input: HookInput): Promise<string> {
     sessionId,
     head,
     projectId: resolveProjectId(scope.projectDir),
-    error: stringField(input.error),
+    error: action.error,
   };
   return withDatabase(scope.config, async (opened) => {
     recordCommandFailure(opened.db, { sessionId, head, at: scope.now });
@@ -619,7 +580,11 @@ function stopText(scope: SessionScope, stopHookActive: boolean): Promise<string>
   return withDatabase(scope.config, async ({ db }) =>
     db
       .transaction(() => {
-        const decided = checkpoint(openSignals(db, scope.sessionId), stopHookActive, STORE_TOOL);
+        const decided = checkpoint(
+          openSignals(db, scope.sessionId),
+          stopHookActive,
+          hostToolName(scope.profile.id, "memory_store"),
+        );
         if (decided === undefined) {
           return "";
         }
@@ -630,74 +595,153 @@ function stopText(scope: SessionScope, stopHookActive: boolean): Promise<string>
   );
 }
 
-function sessionEventText(
-  event: SessionEvent,
-  input: HookInput,
-  scope: SessionScope,
+function projectScope(scope: RequestScope): HookScope {
+  const projectDir = scope.projectDir;
+  if (projectDir === undefined) {
+    throw new Error("a project action needs the project directory its request was guarded on");
+  }
+  return { ...scope, projectDir };
+}
+
+function inSession(
+  scope: RequestScope,
+  work: (session: SessionScope) => Promise<string>,
 ): Promise<string> {
-  switch (event) {
-    case "PostToolUse":
-      return postToolText(scope, input);
-    case "Stop":
-      return stopText(scope, input.stop_hook_active === true);
+  const { config, profile, sessionId, now } = scope;
+  return sessionId === undefined ? Promise.resolve("") : work({ config, profile, sessionId, now });
+}
+
+function actionReply(
+  action: EngineAction,
+  scope: RequestScope,
+  locationNotice: string | undefined,
+): Promise<HookReply> {
+  switch (action.kind) {
+    case "session-start":
+      return sessionStartReply(projectScope(scope), action.source, locationNotice);
+    case "prompt":
+      return contextOnly(promptText(projectScope(scope), action.prompt));
+    case "tool-recall":
+      return contextOnly(toolText(projectScope(scope), action.target));
+    case "command-failed":
+      return contextOnly(failedToolText(projectScope(scope), action));
+    case "command-passed":
+      return contextOnly(
+        inSession(scope, (session) => commandPassedText(session, action.toolInput)),
+      );
+    case "feedback-receipt":
+      return contextOnly(
+        inSession(scope, (session) => feedbackReceiptText(session, action.toolInput)),
+      );
+    case "store-receipt":
+      return contextOnly(inSession(scope, storeReceiptText));
+    case "stop":
+      return contextOnly(inSession(scope, (session) => stopText(session, action.stopHookActive)));
   }
 }
 
-async function dispatch(
-  event: HookEvent,
-  input: HookInput,
+function storeMissing(state: StoreState): boolean {
+  return state.kind === "moved-elsewhere" && !state.targetExists;
+}
+
+function sessionProjectDir(profile: HostProfile, env: NodeJS.ProcessEnv): string | undefined {
+  return profile.projectDirEnv === undefined ? undefined : env[profile.projectDirEnv];
+}
+
+function passesScopeGuard(request: HookRequest, projectDir: string | undefined): boolean {
+  return request.scope === "session" ? request.sessionId !== undefined : projectDir !== undefined;
+}
+
+async function performRequest(
+  request: HookRequest,
+  profile: HostProfile,
   env: NodeJS.ProcessEnv,
-): Promise<HookReply> {
-  const sessionId = stringField(input.session_id);
+): Promise<readonly HookReply[]> {
   const now = new Date().toISOString();
-  if (isSessionEvent(event)) {
-    return sessionId === undefined
-      ? { context: "" }
-      : contextOnly(sessionEventText(event, input, { config: loadConfig(env), sessionId, now }));
+  const projectDir = projectDirectory(sessionProjectDir(profile, env), request.cwd);
+  if (!passesScopeGuard(request, projectDir)) {
+    return [];
   }
-  const projectDir = projectDirectory(env.CLAUDE_PROJECT_DIR, stringField(input.cwd));
-  if (projectDir === undefined) {
-    return { context: "" };
+  const config = loadConfig(env);
+  const state = storeState(config.dataDir, legacyFacts(profile, env, config.dataDir));
+  const notice = storeNotice(state, config.dataDir);
+  if (storeMissing(state)) {
+    return startsSession(request) ? [{ context: "", notice }] : [];
   }
-  const scope: HookScope = { config: loadConfig(env), env, projectDir, sessionId, now };
-  if (event === "UserPromptSubmit") {
-    return contextOnly(promptText(scope, stringField(input.prompt)?.trim() ?? ""));
+  if (state.kind === "shared" && request.actions.length > 0) {
+    ensureDataDir(config);
   }
-  if (event === "PreToolUse") {
-    return contextOnly(
-      toolText(scope, toolLookup(stringField(input.tool_name) ?? "", input.tool_input, projectDir)),
-    );
+  const scope: RequestScope = {
+    config: storeConfig(config, state, env),
+    profile,
+    env,
+    projectDir,
+    sessionId: request.sessionId,
+    now,
+  };
+  const replies: HookReply[] = [];
+  for (const action of request.actions) {
+    replies.push(await actionReply(action, scope, notice));
   }
-  if (event === "PostToolUseFailure") {
-    return contextOnly(failedToolText(scope, input));
+  return replies;
+}
+
+async function readHookInput(): Promise<HostInput | undefined> {
+  const raw = await readStdin();
+  if (raw.trim() === "") {
+    return undefined;
   }
-  return sessionStartReply(scope, stringField(input.source));
+  const input = JSON.parse(raw) as HostInput;
+  return typeof input.hook_event_name === "string" ? input : undefined;
+}
+
+function startsSession(request: HookRequest): boolean {
+  return request.actions.some((action) => action.kind === "session-start");
+}
+
+function printOutput(output: string | undefined): void {
+  if (output !== undefined) {
+    console.log(output);
+  }
+}
+
+function reportHookFailure(
+  host: HostId | undefined,
+  request: HookRequest | undefined,
+  error: unknown,
+): void {
+  const event = request?.event ?? UNKNOWN_EVENT;
+  if (host === undefined) {
+    reportFailure(event, error);
+    return;
+  }
+  const outage = storageOutage(error, hostProfile(host).dependencyFix);
+  if (outage === undefined) {
+    reportFailure(event, error);
+    return;
+  }
+  if (request !== undefined && startsSession(request)) {
+    printOutput(hostOutput(host, event, [{ context: "", notice: sessionNotice(outage) }]));
+  }
 }
 
 async function runHook(): Promise<void> {
-  let event = "unknown";
+  let host: HostId | undefined;
+  let request: HookRequest | undefined;
   try {
-    const raw = await readStdin();
-    if (raw.trim() === "") {
+    const input = await readHookInput();
+    if (input === undefined) {
       return;
     }
-    const input = JSON.parse(raw) as HookInput;
-    const hookEvent = input.hook_event_name;
-    if (!isHookEvent(hookEvent)) {
+    host = resolveHost(process.env);
+    request = hostRequest(host, input);
+    if (request === undefined) {
       return;
     }
-    event = hookEvent;
-    const output = hookOutput(hookEvent, await dispatch(hookEvent, input, process.env));
-    if (output !== undefined) {
-      console.log(output);
-    }
+    const replies = await performRequest(request, hostProfile(host), process.env);
+    printOutput(hostOutput(host, request.event, replies));
   } catch (error) {
-    const outage = storageOutage(error, CLAUDE_PROFILE.dependencyFix);
-    if (outage === undefined) {
-      reportFailure(event, error);
-    } else if (event === "SessionStart") {
-      console.log(JSON.stringify({ systemMessage: sessionNotice(outage) }));
-    }
+    reportHookFailure(host, request, error);
   }
 }
 

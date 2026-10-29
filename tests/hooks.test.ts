@@ -1152,6 +1152,26 @@ describe("hooks internal error contract", () => {
     expect(stderrLines).toHaveLength(1);
     expect(stderrLines[0]).toBe("memory hook SessionStart failed: SqliteError — no injection");
   });
+
+  it("exits 0 with no stdout and one class-only stderr line when ACM_HOST names no host", async () => {
+    const { env } = freshEnv({ ACM_HOST: "cursor" });
+
+    const result = await spawnHook(
+      env,
+      JSON.stringify({
+        hook_event_name: "SessionStart",
+        source: "startup",
+        cwd: CWD,
+        session_id: "session-host",
+      }),
+    );
+
+    expect(result).toEqual({
+      code: 0,
+      stdout: "",
+      stderr: "memory hook unknown failed: InvalidHostError — no injection\n",
+    });
+  });
 });
 
 describe("hooks storage outage", () => {
@@ -1339,6 +1359,12 @@ describe("hooks defensive stdin", () => {
       stdinText: "not json {",
       stdout: "",
       stderrPattern: /^memory hook unknown failed: SyntaxError — no injection$/,
+    },
+    {
+      name: "null stdin reports one typeerror line",
+      stdinText: "null",
+      stdout: "",
+      stderrPattern: /^memory hook unknown failed: TypeError — no injection$/,
     },
     {
       name: "empty stdin is a silent no-op",
