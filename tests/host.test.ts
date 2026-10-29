@@ -22,6 +22,7 @@ describe("resolveHost", () => {
       host: "claude",
     },
     { name: "no PLUGIN_ROOT", env: { CLAUDE_PLUGIN_ROOT: PLUGIN_DIR }, host: "claude" },
+    { name: "no plugin root at all", env: {}, host: "claude" },
     {
       name: "empty plugin roots",
       env: { PLUGIN_ROOT: "", CLAUDE_PLUGIN_ROOT: "" },
