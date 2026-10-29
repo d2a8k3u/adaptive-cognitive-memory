@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { DATA_DIR_ENV } from "./cfg";
 import {
   type BadgeState,
   fileJson,
@@ -54,7 +55,7 @@ export function distShim(): Buffer {
 export function snippetLine(shimPath: string): string {
   if (DOUBLE_QUOTE_SPECIALS.test(shimPath)) {
     throw new Error(
-      `${JSON.stringify(shimPath)} cannot be quoted in the statusline snippet: move CLAUDE_PLUGIN_DATA to a path without " $ \` \\ or a line break`,
+      `${JSON.stringify(shimPath)} cannot be quoted in the statusline snippet: set ${DATA_DIR_ENV} to a path without " $ \` \\ or a line break`,
     );
   }
   return `{ test -f "${shimPath}" && node "${shimPath}"; } || :`;
