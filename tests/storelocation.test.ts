@@ -314,6 +314,14 @@ describe("legacyFacts read from disk", () => {
     expect(storeState(paths.dataDir, facts)).toEqual(expected(paths));
   });
 
+  it("gives an empty CLAUDE_PLUGIN_DATA no legacy store, so the working directory never becomes one", () => {
+    const paths = layout();
+
+    expect(
+      legacyFacts(hostProfile("claude"), { CLAUDE_PLUGIN_DATA: "" }, paths.dataDir),
+    ).toBeUndefined();
+  });
+
   it("reads the marker writeMovedMarker wrote for a data dir reached through a symlink as shared", () => {
     const paths = layout();
     const linkedDataDir = join(paths.root, "data-link");

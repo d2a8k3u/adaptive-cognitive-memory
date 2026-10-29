@@ -1403,6 +1403,19 @@ describe("hooks defensive stdin", () => {
       expect(result.stderr.trimEnd()).toMatch(stderrPattern);
     }
   });
+
+  it("does no work and creates no data dir for a session hook without a session id", async () => {
+    const dataDir = join(mkdtempSync(join(tmpdir(), "acm-hooks-")), "never-created");
+    const { env } = freshEnv({ CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir });
+
+    const result = await spawnHook(
+      env,
+      JSON.stringify({ hook_event_name: "Stop", cwd: CWD, stop_hook_active: false }),
+    );
+
+    expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
+    expect(existsSync(dataDir)).toBe(false);
+  });
 });
 
 describe("hooks offline run (0 LLM)", () => {
