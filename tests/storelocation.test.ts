@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   statSync,
   symlinkSync,
@@ -336,6 +337,9 @@ describe("legacyFacts read from disk", () => {
 
     expect(sourceMoved(paths.legacyDir)).toBe(true);
     expect(readdirSync(paths.legacyDir).sort()).toEqual([DB_FILENAME, MOVED_MARKER_FILE]);
+    expect(readFileSync(join(paths.legacyDir, MOVED_MARKER_FILE), "utf8")).toBe(
+      `${JSON.stringify({ version: 1, movedTo: paths.dataDir, movedAt: MOVED_AT, digest: DIGEST })}\n`,
+    );
   });
 });
 

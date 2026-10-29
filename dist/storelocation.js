@@ -14,6 +14,7 @@ const cfg_1 = require("./cfg");
 const host_1 = require("./host");
 const version_1 = require("./version");
 exports.MOVED_MARKER_FILE = "moved.json";
+const MARKER_VERSION = 1;
 const SHARED = { kind: "shared" };
 function storeState(dataDir, legacy) {
     if (legacy === undefined) {
@@ -117,7 +118,12 @@ function sourceMoved(legacyDir) {
     return (0, node_fs_1.existsSync)(markerPath(legacyDir));
 }
 function writeMovedMarker(legacyDir, dataDirRealPath, digest, now) {
-    const marker = { movedTo: dataDirRealPath, digest, movedAt: now };
+    const marker = {
+        version: MARKER_VERSION,
+        movedTo: dataDirRealPath,
+        movedAt: now,
+        digest,
+    };
     const staged = `${markerPath(legacyDir)}.${process.pid}.tmp`;
     (0, node_fs_1.writeFileSync)(staged, `${JSON.stringify(marker)}\n`);
     (0, node_fs_1.renameSync)(staged, markerPath(legacyDir));

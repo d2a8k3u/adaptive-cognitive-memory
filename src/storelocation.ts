@@ -27,10 +27,13 @@ export type StoreState =
   | { readonly kind: "legacy"; readonly legacyDir: string }
   | { readonly kind: "moved-elsewhere"; readonly movedTo: string; readonly targetExists: boolean };
 
+const MARKER_VERSION = 1;
+
 interface MovedMarker {
+  readonly version: typeof MARKER_VERSION;
   readonly movedTo: string;
-  readonly digest: string;
   readonly movedAt: string;
+  readonly digest: string;
 }
 
 const SHARED: StoreState = { kind: "shared" };
@@ -159,7 +162,12 @@ export function writeMovedMarker(
   digest: string,
   now: string,
 ): void {
-  const marker: MovedMarker = { movedTo: dataDirRealPath, digest, movedAt: now };
+  const marker: MovedMarker = {
+    version: MARKER_VERSION,
+    movedTo: dataDirRealPath,
+    movedAt: now,
+    digest,
+  };
   const staged = `${markerPath(legacyDir)}.${process.pid}.tmp`;
   writeFileSync(staged, `${JSON.stringify(marker)}\n`);
   renameSync(staged, markerPath(legacyDir));
