@@ -43,7 +43,7 @@ export function resolveHost(env: NodeJS.ProcessEnv): HostId {
   return declared;
 }
 
-const CLI_ENTRY = join(PLUGIN_ROOT, "dist", "cli.js");
+export const CLI_ENTRY = join(PLUGIN_ROOT, "dist", "cli.js");
 
 const CLAUDE_PROFILE: HostProfile = {
   id: "claude",
