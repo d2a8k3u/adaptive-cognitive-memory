@@ -588,6 +588,7 @@ describe("Claude hooks by store location", () => {
 });
 
 const SERVER_ENTRY = join(process.cwd(), "dist", "server.js");
+const CLI_ENTRY = join(process.cwd(), "dist", "cli.js");
 const OWNER_ONLY = 0o700;
 const clients: Client[] = [];
 const openedStores: OpenedDb[] = [];
@@ -784,6 +785,82 @@ describe("MCP server by store location", () => {
         },
       });
       expect([existsSync(dataDir), existsSync(movedTo)]).toEqual([false, false]);
+    },
+    SPAWNED_TIMEOUT_MS,
+  );
+
+  it(
+    "switches a running Claude server to the shared store after the real store move, leaving the legacy store as it was",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "acm-location-server-move-")));
+      const legacyDir = join(root, "legacy");
+      const dataDir = join(root, "shared");
+      seededStore(legacyDir, PINNED_ABSTRACT);
+      const client = await spawnedServer(claudeEnv(legacyDir, dataDir));
+      const titles = "SELECT title FROM memories ORDER BY title";
+
+      const beforeMove = toolValue(
+        (await client.callTool({
+          name: "memory_store",
+          arguments: {
+            title: "release freeze",
+            content: "Releases freeze on Fridays. Nothing deploys after noon.",
+            type: "semantic",
+            kind: "fact",
+            conflict_key: "project.release_freeze",
+            resolution: { action: "ADD" },
+          },
+        })) as ToolCallResult,
+      );
+      const move = await runProcess({
+        command: process.execPath,
+        args: [CLI_ENTRY, "store", "move", "--from", legacyDir],
+        env: { ACM_DATA_DIR: dataDir, ...testModelEnv },
+        stdinText: "",
+        timeoutMs: SPAWNED_TIMEOUT_MS,
+      });
+      const found = toolValue(
+        (await client.callTool({
+          name: "memory_search",
+          arguments: { query: "release freeze" },
+        })) as ToolCallResult,
+      ) as { results: { id: string }[] };
+      const afterMove = toolValue(
+        (await client.callTool({
+          name: "memory_store",
+          arguments: {
+            title: "post-move note",
+            content: "The deploy checklist starts with the smoke suite.",
+            type: "semantic",
+            kind: "fact",
+            conflict_key: "project.deploy_checklist",
+            resolution: { action: "ADD" },
+          },
+        })) as ToolCallResult,
+      );
+      const status = toolValue(
+        (await client.callTool({ name: "memory_status", arguments: {} })) as ToolCallResult,
+      );
+
+      expect(beforeMove).toMatchObject({ action: "created", id: expect.any(String) });
+      expect({ code: move.code, stderr: move.stderr }).toEqual({ code: 0, stderr: "" });
+      expect(move.stdout).toMatch(
+        new RegExp(
+          `^moved the memory store from ${legacyDir} to ${dataDir}: \\d+ tables, \\d+ rows verified\\n$`,
+        ),
+      );
+      expect(found.results.map((row) => row.id)).toContain((beforeMove as { id: string }).id);
+      expect(afterMove).toMatchObject({ action: "created" });
+      expect(status).not.toHaveProperty("store_move");
+      expect(storeRows(legacyDir, titles)).toEqual([
+        { title: "main branch" },
+        { title: "release freeze" },
+      ]);
+      expect(storeRows(dataDir, titles)).toEqual([
+        { title: "main branch" },
+        { title: "post-move note" },
+        { title: "release freeze" },
+      ]);
     },
     SPAWNED_TIMEOUT_MS,
   );
