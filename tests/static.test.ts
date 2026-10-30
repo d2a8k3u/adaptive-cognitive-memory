@@ -835,3 +835,82 @@ describe("store move (FR-7)", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+const SKILL_NAMES = ["memory", "memory-curate"];
+const CLAUDE_ONLY_TOKENS = [
+  "/memory-recall",
+  "/memory-doctor",
+  "CLAUDE.md",
+  ".claude/rules",
+  "auto memory",
+];
+const SKILL_FRONTMATTER = /^---\n([\s\S]*?)\n---\n/;
+
+function skillFiles(): string[] {
+  return filesUnder(join(process.cwd(), "skills"), [".md"]);
+}
+
+describe("host-neutral skills (FR-27)", () => {
+  it.each(SKILL_NAMES)("%s keeps frontmatter name and description", (name) => {
+    const text = readFileSync(join(process.cwd(), "skills", name, "SKILL.md"), "utf8");
+    const frontmatter = SKILL_FRONTMATTER.exec(text)?.[1] ?? "";
+
+    expect(frontmatter).toMatch(new RegExp(`^name: ${name}$`, "m"));
+    expect(frontmatter).toMatch(/^description: >\n {2}\S/m);
+  });
+
+  it("name no command or file that exists on Claude Code alone", () => {
+    const offenders = skillFiles().flatMap((file) => {
+      const text = readFileSync(file, "utf8").toLowerCase();
+      return CLAUDE_ONLY_TOKENS.filter((token) => text.includes(token.toLowerCase())).map(
+        (token) => `${relative(process.cwd(), file)} → ${token}`,
+      );
+    });
+
+    expect(offenders).toEqual([]);
+  });
+});
+
+const CLAUDE_CODE_HEADING = /claude code/i;
+const HEADING_LINE = /^(#{1,6}) (.*)$/;
+const FENCE_LINE = /^```/;
+
+function lonePluginDataLines(file: string): string[] {
+  const headings: string[] = [];
+  let inFence = false;
+  const offenders: string[] = [];
+  readFileSync(file, "utf8")
+    .split("\n")
+    .forEach((line, index) => {
+      if (FENCE_LINE.test(line)) {
+        inFence = !inFence;
+        return;
+      }
+      const heading = inFence ? null : HEADING_LINE.exec(line);
+      if (heading !== null) {
+        headings.length = (heading[1] ?? "").length - 1;
+        headings.push(heading[2] ?? "");
+        return;
+      }
+      if (
+        line.includes("CLAUDE_PLUGIN_DATA") &&
+        !headings.some((h) => CLAUDE_CODE_HEADING.test(h))
+      ) {
+        offenders.push(`${relative(process.cwd(), file)}:${index + 1}`);
+      }
+    });
+  return offenders;
+}
+
+describe("CLAUDE_PLUGIN_DATA in the docs (FR-30)", () => {
+  it("appears only under a Claude Code heading in the README and docs", () => {
+    const files = [
+      join(process.cwd(), "README.md"),
+      ...readdirSync(DOCS_DIR)
+        .filter((name) => name.endsWith(".md"))
+        .map((name) => join(DOCS_DIR, name)),
+    ];
+
+    expect(files.flatMap(lonePluginDataLines)).toEqual([]);
+  });
+});
