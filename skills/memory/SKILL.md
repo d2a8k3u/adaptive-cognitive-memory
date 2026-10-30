@@ -22,12 +22,11 @@ One local database serves every project. Hook recall and `memory_search` surface
 
 Rules for every memory:
 
-- Store only what a future session could not re-derive from the code, git history or CLAUDE.md. The server rejects content that restates a line of the project's `CLAUDE.md`, `.claude/rules/*.md` or the auto-memory `MEMORY.md`.
+- Store only what a future session could not re-derive from the code, git history or the project's always-loaded instruction file. The server rejects content that restates a line of the instruction files it reads.
 - English, one topic per memory, insight first, then the reason.
 - Searchable terms: file paths, module names, commands, error signatures.
 - `questions`: 3–6 short prompts a user would type when this memory matters — the task or the symptom, not the answer (`How do I run the billing tests?`, `pytest fails with too many connections`). Write them in English and in the language the user writes in. Recall compares every prompt with each question, so they are how a memory is found in any language.
 - Do not ask the user before saving. Do not store agent, task or system text: write the lesson in your own words.
-- When Claude Code's native auto memory is also on, durable lessons still go to `memory_store`, not to the auto-memory `MEMORY.md`.
 
 The hooks never store anything and never flag a correction or a remember request: notice those yourself, in any language, and store them right away. After a failing command later passed, the Stop hook returns a memory checkpoint when you finish the turn without a store: store the durable lesson, or say there is none, then finish.
 
@@ -72,5 +71,5 @@ A rejection message names the resolution to use instead. An exact duplicate of a
 - For a full review with the user, use the `memory-curate` skill.
 - `memory_relate` is for load-bearing connections only, at most 20 per memory.
 - `memory_status` shows what the memory holds and does for this project: counts, the recall switch, how often recall injects, open capture moments and the last injections.
-- `/memory-recall off` stops recall in this project while storing keeps working; `/memory-recall on` restores it.
-- If recall reports a degraded mode or a session-start notice says memory is off, run `/memory-doctor` and follow the fix it names.
+- The user can switch recall off for this project; storing keeps working while it is off.
+- If recall reports a degraded mode or a session-start notice says memory is off, run the memory doctor and follow the fix it names.
