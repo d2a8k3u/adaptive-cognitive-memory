@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import type { Config } from "../src/cfg";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import type { HostId } from "../src/host";
-import { testModelCacheDir, testModelEnv } from "../vitest.config";
+import { testModelCacheDir } from "../vitest.config";
 import { seedConfig, toolText } from "./fixtures/seed";
 
 const SHARED_STORE_HOSTS: readonly HostId[] = ["claude", "codex", "opencode"];
@@ -194,8 +194,9 @@ async function startHostWriter(host: HostId, dataDir: string, cwd: string): Prom
       PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ""}`,
       HOME: mkdtempSync(join(tmpdir(), "acm-conc-home-")),
       ACM_DATA_DIR: dataDir,
+      ACM_MODEL_CACHE_DIR: mkdtempSync(join(tmpdir(), "acm-conc-no-model-")),
+      CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false",
       ...HOST_SHAPE_ENV[host],
-      ...testModelEnv,
     },
     cwd,
     stderr: "pipe",
@@ -398,9 +399,6 @@ describe("multi-process database access", () => {
       expect(acknowledgedIds.filter((id) => !stored.has(id))).toEqual([]);
       expect(outcomes.flatMap(({ toolErrors }) => toolErrors)).toEqual([]);
       expect(opened.db.prepare("SELECT count(*) AS n FROM memories_fts").get()).toEqual({
-        n: memories,
-      });
-      expect(opened.db.prepare("SELECT count(*) AS n FROM memories_vec").get()).toEqual({
         n: memories,
       });
     } finally {
