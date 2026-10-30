@@ -443,6 +443,37 @@ describe("OpenCode plugin session state", () => {
   });
 });
 
+describe("OpenCode re-prompt and the promptAsync call", () => {
+  it("skips recall for a re-prompt OpenCode delivers before promptAsync resolves", async () => {
+    scriptEngine({ stdout: contextReply([CHECKPOINT]) });
+    const plugin: { hooks?: Hooks } = {};
+    const stub = promptAsyncStub(async () => {
+      await chat(plugin.hooks!, SESSION, CHECKPOINT);
+      return { data: undefined };
+    });
+    plugin.hooks = await openPlugin(stub.client);
+
+    await plugin.hooks.event!({
+      event: { type: "session.idle", properties: { sessionID: SESSION } },
+    });
+
+    expect(stub.calls).toHaveLength(1);
+    expect(spawned).toHaveLength(1);
+  });
+
+  it("recalls for a user message equal to a checkpoint whose re-prompt failed", async () => {
+    scriptEngine({ stdout: contextReply([CHECKPOINT]) });
+    const stub = promptAsyncStub(async () => ({ error: { name: "BadRequest" } }));
+    const hooks = await openPlugin(stub.client);
+    stderrLines();
+
+    await hooks.event!({ event: { type: "session.idle", properties: { sessionID: SESSION } } });
+    await chat(hooks, SESSION, CHECKPOINT);
+
+    expect(spawned).toHaveLength(2);
+  });
+});
+
 describe("OpenCode part ids at the end of the 48-bit time field", () => {
   it("appends a part after an id one tick below the limit", async () => {
     scriptEngine({ stdout: contextReply(["<memory>recall</memory>"]) });

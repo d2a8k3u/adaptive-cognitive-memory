@@ -237,18 +237,22 @@ function updateSession(
   states.set(sessionID, { ...(current ?? NEW_SESSION), ...change });
 }
 
-async function promptAsync(
+async function reprompt(
   client: PluginInput["client"],
   sessionID: string,
   text: string,
-): Promise<{ readonly error?: unknown }> {
+): Promise<void> {
+  let result: { readonly error?: unknown };
   try {
-    return await client.session.promptAsync({
+    result = await client.session.promptAsync({
       path: { id: sessionID },
       body: { parts: [{ type: "text", text }] },
     });
   } catch (error) {
     throw new PromptAsyncError("the re-prompt was rejected", { cause: error });
+  }
+  if (result.error !== undefined) {
+    throw new PromptAsyncError("the re-prompt resolved with an error");
   }
 }
 
@@ -315,11 +319,14 @@ export const AdaptiveCognitiveMemory: Plugin = async ({ client, directory }) => 
           updateSession(states, sessionID, { continued: false });
           return;
         }
-        const result = await promptAsync(client, sessionID, checkpoint);
-        if (result.error !== undefined) {
-          throw new PromptAsyncError("the re-prompt resolved with an error");
+        updateSession(states, sessionID, { repromptText: checkpoint });
+        try {
+          await reprompt(client, sessionID, checkpoint);
+        } catch (error) {
+          updateSession(states, sessionID, { repromptText: undefined });
+          throw error;
         }
-        updateSession(states, sessionID, { continued: true, repromptText: checkpoint });
+        updateSession(states, sessionID, { continued: true });
       });
     },
     [COMPACTING_HOOK]: (input, output) =>
