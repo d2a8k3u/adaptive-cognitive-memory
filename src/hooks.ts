@@ -63,8 +63,8 @@ import { BADGE_STATE_VERSION, type BadgeState, isBadgeSessionId } from "./status
 import {
   ensureDataDir,
   legacyFacts,
-  type StoreState,
   storeConfig,
+  storeMissing,
   storeNotice,
   storeState,
 } from "./storelocation";
@@ -638,10 +638,6 @@ function actionReply(
     case "stop":
       return contextOnly(inSession(scope, (session) => stopText(session, action.stopHookActive)));
   }
-}
-
-function storeMissing(state: StoreState): boolean {
-  return state.kind === "moved-elsewhere" && !state.targetExists;
 }
 
 function sessionProjectDir(profile: HostProfile, env: NodeJS.ProcessEnv): string | undefined {

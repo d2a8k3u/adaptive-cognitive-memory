@@ -411,9 +411,6 @@ function actionReply(action, scope, locationNotice) {
             return contextOnly(inSession(scope, (session) => stopText(session, action.stopHookActive)));
     }
 }
-function storeMissing(state) {
-    return state.kind === "moved-elsewhere" && !state.targetExists;
-}
 function sessionProjectDir(profile, env) {
     return profile.projectDirEnv === undefined ? undefined : env[profile.projectDirEnv];
 }
@@ -429,7 +426,7 @@ async function performRequest(request, profile, env) {
     const config = (0, cfg_1.loadConfig)(env);
     const state = (0, storelocation_1.storeState)(config.dataDir, (0, storelocation_1.legacyFacts)(profile, env, config.dataDir));
     const notice = (0, storelocation_1.storeNotice)(state, config.dataDir);
-    if (storeMissing(state)) {
+    if ((0, storelocation_1.storeMissing)(state)) {
         return startsSession(request) ? [{ context: "", notice }] : [];
     }
     if (state.kind === "shared" && request.actions.length > 0) {
