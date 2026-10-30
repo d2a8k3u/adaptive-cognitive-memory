@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
+    "@opencode-ai/plugin": "1.19.5",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "22.20.5",
     "ajv": "8.20.0",
