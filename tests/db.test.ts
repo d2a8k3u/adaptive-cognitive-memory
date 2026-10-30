@@ -105,7 +105,7 @@ function insertMemory(db: Db, row: MemoryInsert): void {
 
 function tempConfig() {
   const pluginData = mkdtempSync(join(tmpdir(), "acm-db-"));
-  return loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+  return loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
 }
 
 function metaValue(db: Db, key: string): string | null {
@@ -496,10 +496,10 @@ describe("openDatabase", () => {
     let second: OpenedDb | undefined;
     try {
       process.chdir(cwdA);
-      const configA = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+      const configA = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
       first = openDatabase(configA);
       process.chdir(cwdB);
-      const configB = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+      const configB = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
       second = openDatabase(configB);
       expect(configB.dbPath).toBe(configA.dbPath);
       expect(existsSync(configA.dbPath)).toBe(true);

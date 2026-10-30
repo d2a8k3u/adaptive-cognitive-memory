@@ -61,12 +61,18 @@ import {
 import { DEFAULT_RECALL_LIMIT, type DegradedFlags, type RecallRow, recall } from "./search";
 import { type StatusReport, statusReport } from "./status";
 
+export interface StoreMove {
+  readonly state: "legacy" | "moved-elsewhere";
+  readonly notice: string;
+}
+
 export interface ToolDeps {
   env: MemoryEnv;
   projectId: string;
   embedDeadlineMs: number;
   processEnv: NodeJS.ProcessEnv;
   instructionSources: InstructionSources;
+  storeMove?: StoreMove;
 }
 
 export interface ToolErrorValue {
@@ -665,8 +671,11 @@ export async function memoryDoctor(deps: ToolDeps): Promise<DoctorReport> {
   return runDoctor(deps.processEnv, deps.instructionSources.projectDir);
 }
 
-export async function memoryStatus(deps: ToolDeps): Promise<StatusReport> {
-  return statusReport(statusFacts(deps.env.db, deps.projectId), new Date().toISOString());
+export async function memoryStatus(
+  deps: ToolDeps,
+): Promise<StatusReport & { store_move?: StoreMove }> {
+  const report = statusReport(statusFacts(deps.env.db, deps.projectId), new Date().toISOString());
+  return deps.storeMove === undefined ? report : { ...report, store_move: deps.storeMove };
 }
 
 export interface ToolInputSchema {

@@ -1,6 +1,5 @@
 import { SIGNAL_DETAIL_MAX_CHARS } from "./cfg";
 import { redact } from "./redact";
-import { STORE_TOOL } from "./toolnames";
 
 export type SignalKind = "correction" | "remember" | "resolution";
 
@@ -16,8 +15,11 @@ export interface Checkpoint {
 }
 
 const CHECKPOINT_OPENING = "Memory checkpoint: ";
-const CHECKPOINT_REQUEST = ` — store the durable lesson under the memory rules with ${STORE_TOOL}, or state that there is none, then finish.`;
 const CHECKPOINT_LISTED_MOMENTS = 5;
+
+function checkpointRequest(storeTool: string): string {
+  return ` — store the durable lesson under the memory rules with ${storeTool}, or state that there is none, then finish.`;
+}
 
 function signalClause(signal: OpenSignal): string {
   switch (signal.kind) {
@@ -40,6 +42,7 @@ function unlistedMoments(count: number): string[] {
 export function checkpoint(
   open: readonly OpenSignal[],
   stopHookActive: boolean,
+  storeTool: string,
 ): Checkpoint | undefined {
   if (stopHookActive || open.length === 0) {
     return undefined;
@@ -48,7 +51,7 @@ export function checkpoint(
   const listed = newestFirst.slice(0, CHECKPOINT_LISTED_MOMENTS).reverse();
   const clauses = [...listed, ...unlistedMoments(newestFirst.length - listed.length)];
   return {
-    text: `${CHECKPOINT_OPENING}${clauses.join("; ")}${CHECKPOINT_REQUEST}`,
+    text: `${CHECKPOINT_OPENING}${clauses.join("; ")}${checkpointRequest(storeTool)}`,
     closedIds: open.map((signal) => signal.id),
   };
 }

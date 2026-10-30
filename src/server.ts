@@ -15,9 +15,27 @@ import { embedMissing, type MemoryEnv } from "./db/memories";
 import { reconcileVecStates } from "./db/transitions";
 import { errorMessage, runDoctor } from "./doctor";
 import { modelCached } from "./embeddings";
+import { type HostProfile, hostProfile, resolveHost } from "./host";
 import { collectLocationFacts, projectIdentity } from "./ids";
 import { type StorageOutage, storageOutage, unavailableMessage } from "./outage";
-import { isToolError, TOOL_DEFINITIONS, type ToolDefinition, type ToolDeps } from "./tools";
+import {
+  ensureDataDir,
+  legacyFacts,
+  MOVED_STORE_FIX,
+  type StoreState,
+  sourceMoved,
+  storeConfig,
+  storeMissing,
+  storeNotice,
+  storeState,
+} from "./storelocation";
+import {
+  isToolError,
+  type StoreMove,
+  TOOL_DEFINITIONS,
+  type ToolDefinition,
+  type ToolDeps,
+} from "./tools";
 import { PLUGIN_VERSION } from "./version";
 
 export type ToolBackend =
@@ -29,8 +47,26 @@ export type ToolBackend =
       readonly projectDir: string;
     };
 
+export interface AfterMove {
+  readonly legacyDir: string;
+  readonly open: () => ToolBackend;
+}
+
+export interface ServerOptions {
+  readonly instructions?: string;
+  readonly afterMove?: AfterMove;
+}
+
+interface ServerShell {
+  readonly profile: HostProfile;
+  readonly config: Config;
+  readonly env: NodeJS.ProcessEnv;
+  readonly projectDir: string;
+}
+
 const START_BACKFILL_BATCH = 32;
 const DOCTOR_TOOL = "memory_doctor";
+const SWITCH_FAILURE = "memory could not switch to the moved store";
 
 function toolResult(outcome: unknown): CallToolResult {
   const isError = isToolError(outcome);
@@ -54,10 +90,12 @@ async function callTool(
   return { error: { message: unavailableMessage(backend.outage) } };
 }
 
-export function createMcpServer(backend: ToolBackend): Server {
+export function createMcpServer(initial: ToolBackend, options: ServerOptions = {}): Server {
+  let current = initial;
+  let afterMove = options.afterMove;
   const server = new Server(
     { name: "memory", version: PLUGIN_VERSION },
-    { capabilities: { tools: { listChanged: false } } },
+    { capabilities: { tools: { listChanged: false } }, instructions: options.instructions },
   );
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: TOOL_DEFINITIONS.map((definition) => ({
@@ -71,16 +109,27 @@ export function createMcpServer(backend: ToolBackend): Server {
     if (definition === undefined) {
       throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
     }
-    return toolResult(await callTool(backend, definition, request.params.arguments ?? {}));
+    if (afterMove !== undefined && sourceMoved(afterMove.legacyDir)) {
+      try {
+        current = afterMove.open();
+      } catch (error) {
+        return toolResult({ error: { message: `${SWITCH_FAILURE}: ${errorMessage(error)}` } });
+      }
+      afterMove = undefined;
+    }
+    return toolResult(await callTool(current, definition, request.params.arguments ?? {}));
   });
   return server;
 }
 
-function openStorage(config: Config): { opened: OpenedDb } | { outage: StorageOutage } {
+function openStorage(
+  config: Config,
+  dependencyFix: string,
+): { opened: OpenedDb } | { outage: StorageOutage } {
   try {
     return { opened: openDatabase(config) };
   } catch (error) {
-    const outage = storageOutage(error);
+    const outage = storageOutage(error, dependencyFix);
     if (outage === undefined) {
       throw error;
     }
@@ -88,8 +137,13 @@ function openStorage(config: Config): { opened: OpenedDb } | { outage: StorageOu
   }
 }
 
-function toolBackend(config: Config, env: NodeJS.ProcessEnv, projectDir: string): ToolBackend {
-  const storage = openStorage(config);
+function toolBackend(
+  shell: ServerShell,
+  config: Config,
+  storeMove: StoreMove | undefined,
+): ToolBackend {
+  const { env, projectDir } = shell;
+  const storage = openStorage(config, shell.profile.dependencyFix);
   if ("outage" in storage) {
     return { available: false, outage: storage.outage, processEnv: env, projectDir };
   }
@@ -112,8 +166,43 @@ function toolBackend(config: Config, env: NodeJS.ProcessEnv, projectDir: string)
         projectDir,
         autoMemoryIndex: autoMemory.enabled ? autoMemory.indexPath : undefined,
       },
+      storeMove,
     },
   };
+}
+
+function currentStoreState(shell: ServerShell): StoreState {
+  const { profile, env, config } = shell;
+  return storeState(config.dataDir, legacyFacts(profile, env, config.dataDir));
+}
+
+function storeMoveOf(state: StoreState, dataDir: string): StoreMove | undefined {
+  const notice = storeNotice(state, dataDir);
+  return state.kind === "shared" || notice === undefined
+    ? undefined
+    : { state: state.kind, notice };
+}
+
+function stateBackend(shell: ServerShell, state: StoreState): ToolBackend {
+  const { config, env, projectDir } = shell;
+  if (storeMissing(state)) {
+    return {
+      available: false,
+      outage: { cause: `the moved store ${state.movedTo} does not exist`, fix: MOVED_STORE_FIX },
+      processEnv: env,
+      projectDir,
+    };
+  }
+  if (state.kind === "shared") {
+    ensureDataDir(config);
+  }
+  return toolBackend(shell, storeConfig(config, state, env), storeMoveOf(state, config.dataDir));
+}
+
+function afterMoveOf(shell: ServerShell, state: StoreState): AfterMove | undefined {
+  return state.kind === "legacy"
+    ? { legacyDir: state.legacyDir, open: () => stateBackend(shell, currentStoreState(shell)) }
+    : undefined;
 }
 
 async function maintainVectors(env: MemoryEnv): Promise<void> {
@@ -133,8 +222,19 @@ async function maintainVectors(env: MemoryEnv): Promise<void> {
 }
 
 export async function runServer(env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const backend = toolBackend(loadConfig(env), env, process.cwd());
-  await createMcpServer(backend).connect(new StdioServerTransport());
+  const shell: ServerShell = {
+    profile: hostProfile(resolveHost(env)),
+    config: loadConfig(env),
+    env,
+    projectDir: process.cwd(),
+  };
+  const state = currentStoreState(shell);
+  const backend = stateBackend(shell, state);
+  const options: ServerOptions = {
+    instructions: storeNotice(state, shell.config.dataDir),
+    afterMove: afterMoveOf(shell, state),
+  };
+  await createMcpServer(backend, options).connect(new StdioServerTransport());
   if (backend.available) {
     void maintainVectors(backend.deps.env).catch((error: unknown) => {
       console.error(`memory start-up backfill failed and was not recorded: ${errorMessage(error)}`);

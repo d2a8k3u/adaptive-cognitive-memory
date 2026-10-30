@@ -36,7 +36,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|mcp__plugin_adaptive-cognitive-memory_memory__memory_(feedback|store|update)",
+        "matcher": "Bash|mcp__plugin_adaptive-cognitive-memory_memory__memory_(feedback|store|update)|mcp__memory__memory_(feedback|store|update)",
         "hooks": [
           {
             "type": "command",

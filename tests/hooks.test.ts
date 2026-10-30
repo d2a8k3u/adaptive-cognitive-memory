@@ -34,7 +34,7 @@ const RECEIPT_TOOL_NAMES = [
   "mcp__plugin_adaptive-cognitive-memory_memory__memory_update",
 ] as const;
 const POST_TOOL_MATCHER =
-  "Bash|mcp__plugin_adaptive-cognitive-memory_memory__memory_(feedback|store|update)";
+  "Bash|mcp__plugin_adaptive-cognitive-memory_memory__memory_(feedback|store|update)|mcp__memory__memory_(feedback|store|update)";
 const ROUTING_LINE =
   "Native auto memory is also on: store durable lessons with mcp__plugin_adaptive-cognitive-memory_memory__memory_store, not in the auto-memory MEMORY.md.";
 
@@ -43,6 +43,74 @@ interface HookResult {
   stdout: string;
   stderr: string;
 }
+
+type HookFields = Readonly<Record<string, unknown>>;
+
+interface HostEvents {
+  readonly sessionStart: HookFields;
+  readonly prompt: (prompt: string) => HookFields;
+  readonly bash: (command: string) => HookFields;
+  readonly stop: HookFields;
+}
+
+interface HostShape {
+  readonly host: string;
+  readonly env: Record<string, string>;
+  readonly stdin: (sessionId: string) => HookFields;
+  readonly events: HostEvents;
+  readonly sessionStartContext: (result: HookResult) => string;
+}
+
+const CLAUDE_EVENTS: HostEvents = {
+  sessionStart: { hook_event_name: "SessionStart" },
+  prompt: (prompt) => ({ hook_event_name: "UserPromptSubmit", prompt }),
+  bash: (command) => ({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command },
+  }),
+  stop: { hook_event_name: "Stop", stop_hook_active: false },
+};
+
+const HOST_SHAPES: readonly HostShape[] = [
+  {
+    host: "Claude",
+    env: {},
+    stdin: () => ({}),
+    events: CLAUDE_EVENTS,
+    sessionStartContext: (result) => injectedContext(result, "SessionStart"),
+  },
+  {
+    host: "Codex",
+    env: { PLUGIN_ROOT: process.cwd(), CLAUDE_PLUGIN_ROOT: process.cwd() },
+    stdin: (sessionId) => ({
+      session_id: sessionId,
+      transcript_path: null,
+      model: "gpt-5-codex",
+      permission_mode: "default",
+    }),
+    events: CLAUDE_EVENTS,
+    sessionStartContext: (result) => injectedContext(result, "SessionStart"),
+  },
+  {
+    host: "OpenCode",
+    env: { ACM_HOST: "opencode" },
+    stdin: (sessionId) => ({ session_id: sessionId }),
+    events: {
+      sessionStart: { hook_event_name: "chat.message", prompt: "", session_start: true },
+      prompt: (prompt) => ({ hook_event_name: "chat.message", prompt, session_start: false }),
+      bash: (command) => ({
+        hook_event_name: "tool.execute.after",
+        tool: "bash",
+        args: { command },
+        exit: 0,
+        output: "",
+      }),
+      stop: { hook_event_name: "session.idle", stop_hook_active: false },
+    },
+    sessionStartContext: (result) => opencodeContexts(result).join("\n"),
+  },
+];
 
 interface SeededMemory {
   id: string;
@@ -108,8 +176,10 @@ function freshEnv(overrides: Record<string, string> = {}): {
   env: NodeJS.ProcessEnv;
   config: Config;
 } {
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-hooks-"));
   const env: NodeJS.ProcessEnv = {
-    CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-hooks-")),
+    CLAUDE_PLUGIN_DATA: dataDir,
+    ACM_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-hooks-claude-")),
     ...testModelEnv,
     ...overrides,
@@ -124,6 +194,12 @@ function injectedContext(result: HookResult, event: string): string {
   });
   return (output as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput
     .additionalContext;
+}
+
+function opencodeContexts(result: HookResult): string[] {
+  const output: unknown = result.stdout === "" ? undefined : JSON.parse(result.stdout);
+  expect(output).toEqual({ context: expect.any(Array) });
+  return (output as { context: string[] }).context;
 }
 
 async function seedMemories(config: Config, rows: readonly SeededMemory[]): Promise<void> {
@@ -1133,10 +1209,10 @@ describe("hooks empty database (AC-13)", () => {
 describe("hooks internal error contract", () => {
   it("exits 0 with no stdout and one class-only stderr line when the db cannot open", async () => {
     const { env, config } = freshEnv();
-    writeFileSync(join(config.pluginData, "blocker"), "not a directory");
+    writeFileSync(join(config.dataDir, "blocker"), "not a directory");
     const blockedEnv: NodeJS.ProcessEnv = {
       ...env,
-      ACM_DB_PATH: join(config.pluginData, "blocker", "memory.sqlite"),
+      ACM_DB_PATH: join(config.dataDir, "blocker", "memory.sqlite"),
     };
 
     const result = await spawnHook(
@@ -1149,6 +1225,26 @@ describe("hooks internal error contract", () => {
     const stderrLines = result.stderr.split("\n").filter((line) => line !== "");
     expect(stderrLines).toHaveLength(1);
     expect(stderrLines[0]).toBe("memory hook SessionStart failed: SqliteError — no injection");
+  });
+
+  it("exits 0 with no stdout and one class-only stderr line when ACM_HOST names no host", async () => {
+    const { env } = freshEnv({ ACM_HOST: "cursor" });
+
+    const result = await spawnHook(
+      env,
+      JSON.stringify({
+        hook_event_name: "SessionStart",
+        source: "startup",
+        cwd: CWD,
+        session_id: "session-host",
+      }),
+    );
+
+    expect(result).toEqual({
+      code: 0,
+      stdout: "",
+      stderr: "memory hook unknown failed: InvalidHostError — no injection\n",
+    });
   });
 });
 
@@ -1275,8 +1371,8 @@ describe("hooks model download", () => {
   async function downloadSettled(config: Config): Promise<void> {
     await vi.waitFor(
       () => {
-        expect(readDownloadFailure(config.pluginData)).toBeDefined();
-        expect(readDownloadLock(config.pluginData)).toBeUndefined();
+        expect(readDownloadFailure(config.dataDir)).toBeDefined();
+        expect(readDownloadLock(config.dataDir)).toBeUndefined();
       },
       { timeout: DOWNLOAD_SETTLE_MS, interval: 50 },
     );
@@ -1313,9 +1409,9 @@ describe("hooks model download", () => {
     const whileOff = startMarker();
     const afterwards = startMarker();
 
-    acquireDownloadLock(config.pluginData, new Date());
+    acquireDownloadLock(config.dataDir, new Date());
     const locked = await sessionStart(env, whileLocked);
-    rmSync(downloadLockPath(config.pluginData));
+    rmSync(downloadLockPath(config.dataDir));
     const off = await sessionStart(
       { ...env, CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false" },
       whileOff,
@@ -1330,13 +1426,19 @@ describe("hooks model download", () => {
   }, 60_000);
 });
 
-describe("hooks defensive stdin", () => {
+describe.each(HOST_SHAPES)("hooks defensive stdin ($host shape)", ({ env: hostEnv, events }) => {
   it.each([
     {
       name: "unparseable json reports one syntaxerror line",
       stdinText: "not json {",
       stdout: "",
       stderrPattern: /^memory hook unknown failed: SyntaxError — no injection$/,
+    },
+    {
+      name: "null stdin reports one typeerror line",
+      stdinText: "null",
+      stdout: "",
+      stderrPattern: /^memory hook unknown failed: TypeError — no injection$/,
     },
     {
       name: "empty stdin is a silent no-op",
@@ -1358,12 +1460,13 @@ describe("hooks defensive stdin", () => {
     },
     {
       name: "missing cwd is a silent no-op",
-      stdinText: JSON.stringify({ hook_event_name: "SessionStart" }),
+      stdinText: JSON.stringify(events.sessionStart),
       stdout: "",
       stderrPattern: null,
     },
   ])("$name", async ({ stdinText, stdout, stderrPattern }) => {
-    const { env } = freshEnv();
+    const dataDir = join(mkdtempSync(join(tmpdir(), "acm-hooks-")), "never-created");
+    const { env } = freshEnv({ ...hostEnv, CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir });
 
     const result = await spawnHook(env, stdinText);
 
@@ -1374,79 +1477,92 @@ describe("hooks defensive stdin", () => {
     } else {
       expect(result.stderr.trimEnd()).toMatch(stderrPattern);
     }
+    expect(existsSync(dataDir)).toBe(false);
+  });
+
+  it("does no work and creates no data dir for a session hook without a session id", async () => {
+    const dataDir = join(mkdtempSync(join(tmpdir(), "acm-hooks-")), "never-created");
+    const { env } = freshEnv({ ...hostEnv, CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir });
+
+    const result = await spawnHook(env, JSON.stringify({ ...events.stop, cwd: CWD }));
+
+    expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
+    expect(existsSync(dataDir)).toBe(false);
   });
 });
 
-describe("hooks offline run (0 LLM)", () => {
-  it("serves every event without a single fetch attempt", async () => {
-    const { env, config } = freshEnv();
-    await seedMemories(config, [
-      {
-        id: "01J8GZSQHOOKOFFLINE0000000AAAA",
-        projectId: PROJECT_ID,
-        scope: "project",
-        type: "procedural",
-        kind: "constraint",
-        anchors: ["zzqnet"],
-        title: "offline fact",
-        abstract: "bash offline zzqnet drill works without any network",
-        content: "BODY-MARKER-3d77 body",
-        importance: 0.8,
-        vector: true,
-      },
-    ]);
-    const scratch = mkdtempSync(join(tmpdir(), "acm-hooks-net-"));
-    const markerPath = join(scratch, "net-marker");
-    const noNetModule = join(scratch, "no-net.cjs");
-    writeFileSync(
-      noNetModule,
-      [
-        'const fs = require("node:fs");',
-        "globalThis.fetch = function fetchStub() {",
-        '  fs.writeFileSync(process.env.ACM_NET_MARKER, "fetch attempted");',
-        '  throw new Error("network attempted");',
-        "};",
-      ].join("\n"),
-    );
-    const offlineEnv: NodeJS.ProcessEnv = {
-      ...env,
-      NODE_OPTIONS: `--require ${noNetModule}`,
-      ACM_NET_MARKER: markerPath,
-    };
+describe.each(HOST_SHAPES)(
+  "hooks offline run (0 LLM, $host shape)",
+  ({ env: hostEnv, stdin, events, sessionStartContext }) => {
+    it("serves every event without a single fetch attempt", async () => {
+      const { env, config } = freshEnv(hostEnv);
+      await seedMemories(config, [
+        {
+          id: "01J8GZSQHOOKOFFLINE0000000AAAA",
+          projectId: PROJECT_ID,
+          scope: "project",
+          type: "procedural",
+          kind: "constraint",
+          anchors: ["zzqnet"],
+          title: "offline fact",
+          abstract: "bash offline zzqnet drill works without any network",
+          content: "BODY-MARKER-3d77 body",
+          importance: 0.8,
+          vector: true,
+        },
+      ]);
+      const scratch = mkdtempSync(join(tmpdir(), "acm-hooks-net-"));
+      const markerPath = join(scratch, "net-marker");
+      const noNetModule = join(scratch, "no-net.cjs");
+      writeFileSync(
+        noNetModule,
+        [
+          'const fs = require("node:fs");',
+          "globalThis.fetch = function fetchStub() {",
+          '  fs.writeFileSync(process.env.ACM_NET_MARKER, "fetch attempted");',
+          '  throw new Error("network attempted");',
+          "};",
+        ].join("\n"),
+      );
+      const offlineEnv: NodeJS.ProcessEnv = {
+        ...env,
+        NODE_OPTIONS: `--require ${noNetModule}`,
+        ACM_NET_MARKER: markerPath,
+      };
 
-    const sessionStart = await spawnHook(
-      offlineEnv,
-      JSON.stringify({ hook_event_name: "SessionStart", cwd: CWD }),
-    );
-    const promptSubmit = await spawnHook(
-      offlineEnv,
-      JSON.stringify({
-        hook_event_name: "UserPromptSubmit",
-        cwd: CWD,
-        prompt: "offline zzqnet drill",
-      }),
-    );
-    const preTool = await spawnHook(
-      offlineEnv,
-      JSON.stringify({
-        hook_event_name: "PreToolUse",
-        cwd: CWD,
-        tool_name: "Bash",
-        tool_input: { command: "zzqnet drill --offline" },
-      }),
-    );
+      const sessionStart = await spawnHook(
+        offlineEnv,
+        JSON.stringify({ ...stdin("offline-start"), ...events.sessionStart, cwd: CWD }),
+      );
+      const promptSubmit = await spawnHook(
+        offlineEnv,
+        JSON.stringify({
+          ...stdin("offline-prompt"),
+          ...events.prompt("offline zzqnet drill"),
+          cwd: CWD,
+        }),
+      );
+      const preTool = await spawnHook(
+        offlineEnv,
+        JSON.stringify({
+          ...stdin("offline-pre-tool"),
+          ...events.bash("zzqnet drill --offline"),
+          cwd: CWD,
+        }),
+      );
 
-    expect(sessionStart.code).toBe(0);
-    expect(injectedContext(sessionStart, "SessionStart")).toContain(
-      "offline zzqnet drill works without any network",
-    );
-    expect(promptSubmit.code).toBe(0);
-    expect(promptSubmit.stdout).not.toBe("");
-    expect(preTool.code).toBe(0);
-    expect(preTool.stdout).not.toBe("");
-    expect(existsSync(markerPath)).toBe(false);
-  }, 60_000);
-});
+      expect(sessionStart.code).toBe(0);
+      expect(sessionStartContext(sessionStart)).toContain(
+        "offline zzqnet drill works without any network",
+      );
+      expect(promptSubmit.code).toBe(0);
+      expect(promptSubmit.stdout).not.toBe("");
+      expect(preTool.code).toBe(0);
+      expect(preTool.stdout).not.toBe("");
+      expect(existsSync(markerPath)).toBe(false);
+    }, 60_000);
+  },
+);
 
 describe("hooks import graph", () => {
   it("keeps search and embeddings out of the hooks static require graph", () => {

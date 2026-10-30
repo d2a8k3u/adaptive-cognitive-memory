@@ -52,7 +52,7 @@ describe("install", () => {
       const transport = new StdioClientTransport({
         command: process.execPath,
         args: [join(cloneDir, "dist", "server.js")],
-        env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData },
+        env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData },
       });
       client = new Client({ name: "acm-install-check", version: "0.0.0" });
       await client.connect(transport);

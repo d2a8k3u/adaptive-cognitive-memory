@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { DATA_DIR_ENV } from "./cfg";
 import {
   type BadgeState,
   fileJson,
@@ -33,8 +34,8 @@ export interface StatuslinePaths {
   readonly sessions: string;
 }
 
-export function statuslinePaths(pluginData: string): StatuslinePaths {
-  const root = join(resolve(pluginData), STATUSLINE_DIR);
+export function statuslinePaths(dataDir: string): StatuslinePaths {
+  const root = join(resolve(dataDir), STATUSLINE_DIR);
   return {
     root,
     marker: join(root, MARKER_FILE),
@@ -54,7 +55,7 @@ export function distShim(): Buffer {
 export function snippetLine(shimPath: string): string {
   if (DOUBLE_QUOTE_SPECIALS.test(shimPath)) {
     throw new Error(
-      `${JSON.stringify(shimPath)} cannot be quoted in the statusline snippet: move CLAUDE_PLUGIN_DATA to a path without " $ \` \\ or a line break`,
+      `${JSON.stringify(shimPath)} cannot be quoted in the statusline snippet: set ${DATA_DIR_ENV} to a path without " $ \` \\ or a line break`,
     );
   }
   return `{ test -f "${shimPath}" && node "${shimPath}"; } || :`;
@@ -104,8 +105,8 @@ export function pruneBadgeStates(paths: StatuslinePaths, cutoff: string): void {
   }
 }
 
-export function enableStatusline(pluginData: string, shimSource: Buffer, now: string): string {
-  const paths = statuslinePaths(pluginData);
+export function enableStatusline(dataDir: string, shimSource: Buffer, now: string): string {
+  const paths = statuslinePaths(dataDir);
   const snippet = snippetLine(paths.shim);
   mkdirSync(paths.sessions, { recursive: true });
   replaceFile(paths.shim, shimSource);
@@ -113,8 +114,8 @@ export function enableStatusline(pluginData: string, shimSource: Buffer, now: st
   return snippet;
 }
 
-export function disableStatusline(pluginData: string): string {
-  const paths = statuslinePaths(pluginData);
+export function disableStatusline(dataDir: string): string {
+  const paths = statuslinePaths(dataDir);
   const snippet = snippetLine(paths.shim);
   rmSync(paths.root, { recursive: true, force: true });
   return snippet;

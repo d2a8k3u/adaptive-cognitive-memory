@@ -39,6 +39,7 @@ function openWorldDatabase(stored: StoredWorld): OpenedDb {
   return openDatabase(
     loadConfig({
       CLAUDE_PLUGIN_DATA: stored.world.pluginData,
+      ACM_DATA_DIR: stored.world.pluginData,
       ACM_MODEL_CACHE_DIR: stored.world.modelCacheDir,
     }),
   );

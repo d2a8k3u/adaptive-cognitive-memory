@@ -4,10 +4,11 @@ exports.checkpoint = checkpoint;
 exports.signalDetail = signalDetail;
 const cfg_1 = require("./cfg");
 const redact_1 = require("./redact");
-const toolnames_1 = require("./toolnames");
 const CHECKPOINT_OPENING = "Memory checkpoint: ";
-const CHECKPOINT_REQUEST = ` — store the durable lesson under the memory rules with ${toolnames_1.STORE_TOOL}, or state that there is none, then finish.`;
 const CHECKPOINT_LISTED_MOMENTS = 5;
+function checkpointRequest(storeTool) {
+    return ` — store the durable lesson under the memory rules with ${storeTool}, or state that there is none, then finish.`;
+}
 function signalClause(signal) {
     switch (signal.kind) {
         case "correction":
@@ -24,7 +25,7 @@ function unlistedMoments(count) {
     }
     return [`and ${count} more moment${count === 1 ? "" : "s"}`];
 }
-function checkpoint(open, stopHookActive) {
+function checkpoint(open, stopHookActive, storeTool) {
     if (stopHookActive || open.length === 0) {
         return undefined;
     }
@@ -32,7 +33,7 @@ function checkpoint(open, stopHookActive) {
     const listed = newestFirst.slice(0, CHECKPOINT_LISTED_MOMENTS).reverse();
     const clauses = [...listed, ...unlistedMoments(newestFirst.length - listed.length)];
     return {
-        text: `${CHECKPOINT_OPENING}${clauses.join("; ")}${CHECKPOINT_REQUEST}`,
+        text: `${CHECKPOINT_OPENING}${clauses.join("; ")}${checkpointRequest(storeTool)}`,
         closedIds: open.map((signal) => signal.id),
     };
 }

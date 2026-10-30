@@ -40,7 +40,7 @@ const openedDbs: OpenedDb[] = [];
 
 function openEnv(): MemoryEnv {
   const pluginData = mkdtempSync(join(tmpdir(), "acm-relations-"));
-  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
   const opened = openDatabase(config);
   openedDbs.push(opened);
   return { db: opened.db, vecLoaded: opened.vecLoaded, modelCacheDir: config.modelCacheDir };

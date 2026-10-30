@@ -1,5 +1,5 @@
 import { SchemaTooNewError } from "./db/schema";
-import { PLUGIN_INSTALL_ID, PLUGIN_NAME, PLUGIN_ROOT } from "./version";
+import { PLUGIN_NAME, PLUGIN_ROOT } from "./version";
 
 export interface StorageOutage {
   readonly cause: string;
@@ -16,7 +16,6 @@ const SCOPED_PACKAGE_PREFIX = "@";
 
 export const NATIVE_MODULE_FIX = `run npm rebuild better-sqlite3 in ${PLUGIN_ROOT}, or reinstall the plugin, so the native module matches node ${process.versions.node}`;
 const UPDATE_FIX = "update the plugin to a version that reads this database";
-const DEPENDENCY_FIX = `run claude plugin update ${PLUGIN_INSTALL_ID} to retry Claude Code's dependency install, or npm ci --ignore-scripts in ${PLUGIN_ROOT}`;
 
 function errorCode(error: unknown): string | undefined {
   return error instanceof Error && "code" in error && typeof error.code === "string"
@@ -41,7 +40,7 @@ function missingDependency(error: unknown): string | undefined {
   return specifier === undefined ? undefined : packageName(specifier);
 }
 
-export function storageOutage(error: unknown): StorageOutage | undefined {
+export function storageOutage(error: unknown, dependencyFix: string): StorageOutage | undefined {
   if (error instanceof SchemaTooNewError) {
     return { cause: error.message, fix: UPDATE_FIX };
   }
@@ -52,7 +51,7 @@ export function storageOutage(error: unknown): StorageOutage | undefined {
   if (dependency !== undefined) {
     return {
       cause: `the plugin's npm dependencies are not installed (missing ${dependency})`,
-      fix: DEPENDENCY_FIX,
+      fix: dependencyFix,
     };
   }
   return undefined;

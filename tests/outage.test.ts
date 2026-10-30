@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { hostProfile } from "../src/host";
 import { storageOutage } from "../src/outage";
+
+const CLAUDE_DEPENDENCY_FIX = hostProfile("claude").dependencyFix;
 
 function missing(code: string, message: string): Error {
   return Object.assign(new Error(message), { code });
@@ -32,7 +35,7 @@ describe("storageOutage", () => {
       missingPackage: "@modelcontextprotocol/sdk",
     },
   ])("reports $name as missing npm dependencies", ({ error, missingPackage }) => {
-    expect(storageOutage(error)?.cause).toBe(
+    expect(storageOutage(error, CLAUDE_DEPENDENCY_FIX)?.cause).toBe(
       `the plugin's npm dependencies are not installed (missing ${missingPackage})`,
     );
   });
@@ -42,6 +45,6 @@ describe("storageOutage", () => {
     missing("MODULE_NOT_FOUND", "Cannot find module '/plugin/dist/search.js'"),
     missing("ENOENT", "Cannot find module 'better-sqlite3'"),
   ])("leaves a broken build or another failure to the defect report: %s", (error) => {
-    expect(storageOutage(error)).toBeUndefined();
+    expect(storageOutage(error, CLAUDE_DEPENDENCY_FIX)).toBeUndefined();
   });
 });

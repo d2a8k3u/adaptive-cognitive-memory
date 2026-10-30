@@ -20,10 +20,10 @@ afterEach(() => {
 });
 
 function initConfig(modelCacheDir?: string) {
-  const pluginData = mkdtempSync(join(tmpdir(), "acm-init-"));
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-init-"));
   return {
-    pluginData,
-    modelCacheDir: modelCacheDir ?? join(pluginData, "models"),
+    dataDir,
+    modelCacheDir: modelCacheDir ?? join(dataDir, "models"),
     modelRemoteHost: undefined,
   };
 }
@@ -63,12 +63,12 @@ describe("modelInit", () => {
     env.fetch = fetchAttempt;
     const errorPrint = vi.spyOn(console, "error").mockImplementation(() => {});
     const config = initConfig();
-    acquireDownloadLock(config.pluginData, new Date());
+    acquireDownloadLock(config.dataDir, new Date());
 
     const code = await modelInit(config);
 
     expect(code).toBe(1);
     expect(fetchAttempt).not.toHaveBeenCalled();
-    expect(errorPrint.mock.calls.flat().join(" ")).toContain(downloadLockPath(config.pluginData));
+    expect(errorPrint.mock.calls.flat().join(" ")).toContain(downloadLockPath(config.dataDir));
   });
 });

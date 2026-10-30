@@ -66,7 +66,7 @@ export function minLineTokens(): number {
   );
 }
 
-function degradedHeading(degraded: DegradedFlags | undefined): string[] {
+function degradedHeading(degraded: DegradedFlags | undefined, doctorInstruction: string): string[] {
   const missing: string[] = [];
   if (degraded?.model) {
     missing.push("model");
@@ -78,7 +78,9 @@ function degradedHeading(degraded: DegradedFlags | undefined): string[] {
     ...(missing.length === 0 ? [] : [`${missing.join(", ")} missing`]),
     ...(degraded?.embedding_timeout ? ["embedding timeout"] : []),
   ];
-  return causes.length === 0 ? [] : [`memory degraded (${causes.join("; ")}) — run /memory-doctor`];
+  return causes.length === 0
+    ? []
+    : [`memory degraded (${causes.join("; ")}) — run ${doctorInstruction}`];
 }
 
 function joinedLength(lines: readonly string[]): number {
@@ -95,9 +97,10 @@ function sectionedBody(rendered: readonly RenderedLine[]): string[] {
 export function renderInjection(
   rows: readonly RecalledMemory[],
   budgetTokens: number,
+  doctorInstruction: string,
   degraded?: DegradedFlags,
 ): Injection {
-  const heading = degradedHeading(degraded);
+  const heading = degradedHeading(degraded, doctorInstruction);
   let used = joinedLength([...heading, BLOCK_OPEN, HEADER, BLOCK_CLOSE]);
   const rendered: RenderedLine[] = [];
   for (const row of rows) {

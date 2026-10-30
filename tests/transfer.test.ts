@@ -91,7 +91,8 @@ function insertMemory(db: Db, seed: MemorySeed): void {
 }
 
 function pluginEnv(): NodeJS.ProcessEnv {
-  return { CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-transfer-")) };
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-transfer-"));
+  return { CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir };
 }
 
 function withDb<T>(env: NodeJS.ProcessEnv, work: (db: Db) => T): T {

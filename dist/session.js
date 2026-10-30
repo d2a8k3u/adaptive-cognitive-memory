@@ -10,7 +10,7 @@ exports.PINNED_KINDS = ["constraint", "preference"];
 exports.STALE_AFTER_INJECTION_EVENTS = 500;
 const REINJECTING_SOURCES = new Set(["resume", "compact"]);
 const ROUTED_SOURCES = new Set(["startup", "clear", "compact"]);
-const ROUTING_LINE = `Native auto memory is also on: store durable lessons with ${toolnames_1.STORE_TOOL}, not in the auto-memory MEMORY.md.`;
+const ROUTING_LINE = `Native auto memory is also on: store durable lessons with ${(0, toolnames_1.hostToolName)("claude", "memory_store")}, not in the auto-memory MEMORY.md.`;
 function routesLessons(source) {
     return ROUTED_SOURCES.has(source ?? "");
 }

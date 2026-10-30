@@ -9,7 +9,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Hooks, PluginInput } from "@opencode-ai/plugin";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { AdaptiveCognitiveMemory } from "../opencode/adaptive-cognitive-memory";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import { LIST_LIMIT_MAX, type ListRequest, listMemories } from "../src/db/listing";
 import type { MemoryType } from "../src/db/memories";
@@ -152,7 +154,11 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
     projectDir = realpathSync(mkdtempSync(join(tmpdir(), "acm-perf-project-")));
     projectId = resolveProjectId(projectDir);
     const config = seedConfig(pluginData, testModelCacheDir);
-    hookEnv = { CLAUDE_PLUGIN_DATA: pluginData, ACM_MODEL_CACHE_DIR: testModelCacheDir };
+    hookEnv = {
+      CLAUDE_PLUGIN_DATA: pluginData,
+      ACM_DATA_DIR: pluginData,
+      ACM_MODEL_CACHE_DIR: testModelCacheDir,
+    };
     const startedAt = performance.now();
     await seedMemories(config, seedRows(projectId));
     seedFinishedMs = Math.round(performance.now() - startedAt);
@@ -225,6 +231,117 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
   );
 
   it.skipIf(process.env.CI === "true")(
+    "Codex-shaped prompt hook runs hold the warm p95 cap and each finish within the hook timeout",
+    { timeout: 300_000 },
+    async () => {
+      const codexEnv: NodeJS.ProcessEnv = {
+        ...hookEnv,
+        PLUGIN_ROOT: process.cwd(),
+        CLAUDE_PLUGIN_ROOT: process.cwd(),
+      };
+      const spawnCodexHook = (sessionId: string) =>
+        runProcess({
+          command: process.execPath,
+          args: [distEntry("hooks.js")],
+          env: codexEnv,
+          stdinText: JSON.stringify({
+            session_id: sessionId,
+            transcript_path: null,
+            cwd: projectDir,
+            hook_event_name: "UserPromptSubmit",
+            model: "gpt-5-codex",
+            permission_mode: "default",
+            turn_id: `${sessionId}-turn`,
+            prompt: RECALL_PROMPT,
+          }),
+          timeoutMs: 30_000,
+        });
+
+      const runMs: number[] = [];
+      for (let index = 0; index <= WARM_RUNS; index += 1) {
+        const runStartedAt = performance.now();
+        const run = await spawnCodexHook(`perf-codex-${index}`);
+        runMs.push(performance.now() - runStartedAt);
+        expect(run.code).toBe(0);
+        expect(run.stderr).toBe("");
+        expect(run.stdout).toContain("<memory>");
+      }
+      const warmMs = runMs.slice(1);
+      const warmP95 = percentile(warmMs, 0.95);
+      const slowestMs = Math.max(...runMs);
+      console.log(
+        `NFR-1 Codex warm hook p95: ${Math.round(warmP95)} ms (cap ${WARM_P95_CAP_MS}), slowest of ${runMs.length} runs ${Math.round(slowestMs)} ms (cap ${HOOK_TIMEOUT_FLOOR_S} s)`,
+      );
+      expect(warmP95).toBeLessThanOrEqual(WARM_P95_CAP_MS);
+      expect(slowestMs).toBeLessThanOrEqual(HOOK_TIMEOUT_FLOOR_S * 1000);
+    },
+  );
+
+  it.skipIf(process.env.CI === "true")(
+    "OpenCode plugin prompt recalls hold the warm p95 cap from spawn to exit and each finish within the hook timeout",
+    { timeout: 300_000 },
+    async () => {
+      vi.stubEnv("ACM_DATA_DIR", pluginData);
+      vi.stubEnv("ACM_DB_PATH", undefined);
+      vi.stubEnv("ACM_MODEL_CACHE_DIR", testModelCacheDir);
+      vi.stubEnv("NODE_OPTIONS", undefined);
+      vi.stubEnv("CLAUDE_PLUGIN_OPTION_RECALL_BUDGET_TOKENS", undefined);
+      vi.stubEnv("CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL", undefined);
+      const hooks = await AdaptiveCognitiveMemory({
+        client: {} as PluginInput["client"],
+        project: { id: "acm-perf", worktree: projectDir, vcs: "git", time: { created: 0 } },
+        directory: projectDir,
+        worktree: projectDir,
+        experimental_workspace: { register: () => undefined },
+        serverUrl: new URL("http://127.0.0.1:4096"),
+        $: undefined as unknown as PluginInput["$"],
+      });
+      const promptRecall = async (sessionID: string): Promise<string> => {
+        const output: Parameters<NonNullable<Hooks["chat.message"]>>[1] = {
+          message: {
+            id: "msg_9a3f0c2b1001AbCdEfGhIjKlMn",
+            sessionID,
+            role: "user",
+            time: { created: 0 },
+            agent: "build",
+            model: { providerID: "anthropic", modelID: "claude" },
+          },
+          parts: [
+            {
+              id: "prt_18a922161000AbCdEfGhIjKlMn",
+              sessionID,
+              messageID: "msg_9a3f0c2b1001AbCdEfGhIjKlMn",
+              type: "text",
+              text: RECALL_PROMPT,
+            },
+          ],
+        };
+        await hooks["chat.message"]!({ sessionID }, output);
+        return output.parts.map((part) => (part.type === "text" ? part.text : "")).join("\n");
+      };
+
+      try {
+        const runMs: number[] = [];
+        for (let index = 0; index <= WARM_RUNS; index += 1) {
+          const runStartedAt = performance.now();
+          const recalled = await promptRecall(`ses_perf_opencode_${index}`);
+          runMs.push(performance.now() - runStartedAt);
+          expect(recalled).toContain("<memory>");
+        }
+        const warmP95 = percentile(runMs.slice(1), 0.95);
+        const slowestMs = Math.max(...runMs);
+        console.log(
+          `NFR-1 OpenCode spawn-to-exit p95: ${Math.round(warmP95)} ms (cap ${WARM_P95_CAP_MS}), slowest of ${runMs.length} runs ${Math.round(slowestMs)} ms (cap ${HOOK_TIMEOUT_FLOOR_S} s)`,
+        );
+        expect(warmP95).toBeLessThanOrEqual(WARM_P95_CAP_MS);
+        expect(slowestMs).toBeLessThanOrEqual(HOOK_TIMEOUT_FLOOR_S * 1000);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it.skipIf(process.env.CI === "true")(
     "spawned PreToolUse Read p95 stays under 300 ms",
     { timeout: 120_000 },
     async () => {
@@ -280,6 +397,7 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
       const emptyModelCache = mkdtempSync(join(tmpdir(), "acm-perf-no-model-"));
       const failureEnv: NodeJS.ProcessEnv = {
         CLAUDE_PLUGIN_DATA: pluginData,
+        ACM_DATA_DIR: pluginData,
         ACM_MODEL_CACHE_DIR: emptyModelCache,
         ACM_MODEL_REMOTE_HOST: UNREACHABLE_MODEL_HOST,
         CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false",
@@ -438,6 +556,7 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
       }
       const ticketEnv = {
         CLAUDE_PLUGIN_DATA: ticketData,
+        ACM_DATA_DIR: ticketData,
         ACM_MODEL_CACHE_DIR: testModelCacheDir,
         PATH: process.env.PATH,
         ...GIT_ISOLATION,

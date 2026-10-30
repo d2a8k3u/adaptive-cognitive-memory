@@ -16,14 +16,16 @@ const schema_1 = require("./db/schema");
 const transfer_1 = require("./db/transfer");
 const transitions_1 = require("./db/transitions");
 const embeddings_1 = require("./embeddings");
+const host_1 = require("./host");
 const ids_1 = require("./ids");
 const modeldownload_1 = require("./modeldownload");
 const outage_1 = require("./outage");
 const retention_1 = require("./retention");
-const version_1 = require("./version");
+const storelocation_1 = require("./storelocation");
 const NODE_MIN_MAJOR = 22;
 const EXPORT_STALE_AFTER_DAYS = 30;
-const PLUGIN_DATA_FIX = "set CLAUDE_PLUGIN_DATA to a writable directory";
+const PLUGIN_DATA = "plugin_data";
+const PLUGIN_DATA_FIX = `set ${cfg_1.DATA_DIR_ENV} to an absolute path of a writable directory`;
 const DB_FIX = "make the plugin data directory writable, or restore a backup / delete the database file to start fresh; a newer schema needs a plugin update";
 const VEC_FIX = "reinstall plugin dependencies (npm ci) to restore the sqlite-vec build for this platform";
 const MODEL_FIX = "run node dist/cli.js model-init to cache the embedding model";
@@ -34,7 +36,7 @@ const VEC_STATE_FIX = "restore sqlite-vec, then run node dist/cli.js reembed or 
 const FTS_FIX = "restore a backup or delete the database file to start fresh";
 const PROJECT_IDENTITY_FIX = "make the project directory readable and git answer git rev-parse --git-common-dir within 2 s there";
 const AUTO_MEMORY_FIX = 'to make this plugin the only durable memory, set "autoMemoryEnabled": false in .claude/settings.json (this project) or ~/.claude/settings.json (every project)';
-const RETENTION_FIX = `back up with node "${version_1.PLUGIN_ROOT}/dist/cli.js" export <file>, and uninstall with claude plugin uninstall ${version_1.PLUGIN_NAME} --keep-data so the database survives`;
+const RETENTION_FIX = `back up with node "${host_1.CLI_ENTRY}" export <file>, and move the database out of the plugin data directory: run the store move that ${PLUGIN_DATA} names (docs/storage.md)`;
 function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
 }
@@ -74,18 +76,73 @@ function checkNativeModule() {
         };
     });
 }
-function checkPluginData(config) {
-    const probePath = (0, node_path_1.join)(config.pluginData, ".acm-doctor-probe");
+function unreadableMarkerPath(legacy) {
+    return legacy?.markerPresent === true && legacy.movedTo === undefined
+        ? (0, node_path_1.join)(legacy.dir, storelocation_1.MOVED_MARKER_FILE)
+        : undefined;
+}
+function doctorStore(profile, env) {
+    const config = (0, cfg_1.loadConfig)(env);
+    const legacy = (0, storelocation_1.legacyFacts)(profile, env, config.dataDir);
+    const state = (0, storelocation_1.storeState)(config.dataDir, legacy);
+    return {
+        dataDir: config.dataDir,
+        state,
+        config: (0, storelocation_1.storeConfig)(config, state, env),
+        unreadableMarker: unreadableMarkerPath(legacy),
+    };
+}
+function missingStoreDetail(movedTo) {
+    return `${movedTo} does not exist`;
+}
+function writabilityFailure(store) {
+    const { dataDir } = store.config;
+    const probePath = (0, node_path_1.join)(dataDir, ".acm-doctor-probe");
     try {
+        if (store.state.kind === "shared") {
+            (0, storelocation_1.ensureDataDir)(store.config);
+        }
         (0, node_fs_1.writeFileSync)(probePath, "probe");
+        return undefined;
     }
     catch (error) {
-        return failed("plugin_data", `${config.pluginData}: ${errorMessage(error)}`, PLUGIN_DATA_FIX);
+        return `${dataDir}: ${errorMessage(error)}`;
     }
     finally {
         (0, node_fs_1.rmSync)(probePath, { force: true });
     }
-    return rated("plugin_data", passOrFail(true, `${config.pluginData} writable`), PLUGIN_DATA_FIX);
+}
+function checkPluginData(store) {
+    const notice = (0, storelocation_1.storeNotice)(store.state, store.dataDir);
+    if (notice !== undefined && (0, storelocation_1.storeMissing)(store.state)) {
+        return rated(PLUGIN_DATA, { status: "warn", detail: missingStoreDetail(store.state.movedTo) }, notice);
+    }
+    const failure = writabilityFailure(store);
+    if (failure !== undefined) {
+        return failed(PLUGIN_DATA, failure, PLUGIN_DATA_FIX);
+    }
+    const writable = `${store.config.dataDir} writable`;
+    if (notice !== undefined) {
+        return rated(PLUGIN_DATA, { status: "warn", detail: writable }, notice);
+    }
+    if (store.unreadableMarker !== undefined) {
+        return rated(PLUGIN_DATA, { status: "warn", detail: `${writable}; ${store.unreadableMarker} is unreadable` }, storelocation_1.MOVED_STORE_FIX);
+    }
+    return rated(PLUGIN_DATA, passOrFail(true, writable), PLUGIN_DATA_FIX);
+}
+function openStore(store) {
+    if (store === undefined) {
+        return { opened: undefined, detail: "skipped: database not open" };
+    }
+    if ((0, storelocation_1.storeMissing)(store.state)) {
+        return { opened: undefined, detail: `skipped: ${missingStoreDetail(store.state.movedTo)}` };
+    }
+    try {
+        return { opened: (0, database_1.openDatabase)(store.config), detail: "" };
+    }
+    catch (error) {
+        return { opened: undefined, detail: `${store.config.dbPath}: ${errorMessage(error)}` };
+    }
 }
 function checkDatabase(opened, openDetail, dbPath) {
     if (!opened) {
@@ -110,15 +167,15 @@ function checkVec(opened, openDetail) {
         ? rated("vec", passOrFail(true, "sqlite-vec loaded"), VEC_FIX)
         : failed("vec", `sqlite-vec not loaded — vector search unavailable: ${opened.vecError}`, VEC_FIX);
 }
-function missingModelCheck(pluginData, path) {
-    const lock = (0, modeldownload_1.readDownloadLock)(pluginData);
+function missingModelCheck(dataDir, path) {
+    const lock = (0, modeldownload_1.readDownloadLock)(dataDir);
     if ((0, modeldownload_1.lockFresh)(lock, Date.now())) {
         return rated("model", {
             status: "warn",
             detail: `model missing at ${path}; downloading since ${lock.startedAt} (pid ${lock.pid})`,
         }, MODEL_DOWNLOADING_FIX);
     }
-    const failure = (0, modeldownload_1.readDownloadFailure)(pluginData);
+    const failure = (0, modeldownload_1.readDownloadFailure)(dataDir);
     const cause = failure === undefined
         ? ""
         : `; the last download failed at ${failure.failedAt}: ${failure.error}`;
@@ -126,12 +183,12 @@ function missingModelCheck(pluginData, path) {
 }
 function checkModel(config, opened) {
     if (!config) {
-        return failed("model", "skipped: CLAUDE_PLUGIN_DATA not resolved", MODEL_FIX);
+        return failed("model", `skipped: ${cfg_1.DATA_DIR_ENV} not resolved`, MODEL_FIX);
     }
     const path = (0, embeddings_1.modelCachePath)(config.modelCacheDir);
     if (!(0, embeddings_1.modelCached)(config.modelCacheDir)) {
         try {
-            return missingModelCheck(config.pluginData, path);
+            return missingModelCheck(config.dataDir, path);
         }
         catch (error) {
             return failed("model", `model missing at ${path}; ${errorMessage(error)}`, MODEL_FIX);
@@ -219,7 +276,10 @@ function checkProjectIdentity(projectDir) {
         return failed("project_identity", errorMessage(error), PROJECT_IDENTITY_FIX);
     }
 }
-function checkAutoMemory(env, projectDir) {
+function checkAutoMemory(profile, env, projectDir) {
+    if (!profile.nativeAutoMemory) {
+        return rated("auto_memory", passOrFail(true, `native auto memory is not applicable on ${profile.id}`), "");
+    }
     try {
         return autoMemoryCheck((0, automemory_1.readAutoMemory)(env, projectDir, (0, ids_1.collectLocationFacts)(projectDir)));
     }
@@ -262,29 +322,22 @@ function checkDataRetention(env, config, opened, openDetail) {
     }));
 }
 function runDoctor(env, projectDir) {
+    const profile = (0, host_1.hostProfile)((0, host_1.resolveHost)(env));
     const checks = [checkNode(), checkNativeModule()];
-    let config;
+    let store;
     try {
-        config = (0, cfg_1.loadConfig)(env);
+        store = doctorStore(profile, env);
     }
     catch (error) {
-        checks.push(failed("plugin_data", errorMessage(error), PLUGIN_DATA_FIX));
+        checks.push(failed(PLUGIN_DATA, errorMessage(error), PLUGIN_DATA_FIX));
     }
-    if (config) {
-        checks.push(checkPluginData(config));
+    if (store) {
+        checks.push(checkPluginData(store));
     }
-    let opened;
-    let openDetail = "skipped: database not open";
-    if (config) {
-        try {
-            opened = (0, database_1.openDatabase)(config);
-        }
-        catch (error) {
-            openDetail = `${config.dbPath}: ${errorMessage(error)}`;
-        }
-    }
+    const config = store?.config;
+    const { opened, detail: openDetail } = openStore(store);
     try {
-        checks.push(checkDatabase(opened, openDetail, config?.dbPath ?? "unset"), checkVec(opened, openDetail), checkModel(config, opened), checkUnembedded(opened, openDetail), checkVecState(opened, openDetail), checkFts(opened, openDetail), checkCalibration(), checkProjectIdentity(projectDir), checkAutoMemory(env, projectDir), checkDataRetention(env, config, opened, openDetail));
+        checks.push(checkDatabase(opened, openDetail, config?.dbPath ?? "unset"), checkVec(opened, openDetail), checkModel(config, opened), checkUnembedded(opened, openDetail), checkVecState(opened, openDetail), checkFts(opened, openDetail), checkCalibration(), checkProjectIdentity(projectDir), checkAutoMemory(profile, env, projectDir), checkDataRetention(env, config, opened, openDetail));
     }
     finally {
         opened?.db.close();

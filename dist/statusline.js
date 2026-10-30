@@ -12,13 +12,14 @@ exports.disableStatusline = disableStatusline;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
 const node_path_1 = require("node:path");
+const cfg_1 = require("./cfg");
 const badge_1 = require("./statusline/badge");
 const STATUSLINE_DIR = "statusline";
 const SHIM_FILE = "badge.cjs";
 const DIST_SHIM_FILE = "badge.js";
 const DOUBLE_QUOTE_SPECIALS = /["$`\\\n]/;
-function statuslinePaths(pluginData) {
-    const root = (0, node_path_1.join)((0, node_path_1.resolve)(pluginData), STATUSLINE_DIR);
+function statuslinePaths(dataDir) {
+    const root = (0, node_path_1.join)((0, node_path_1.resolve)(dataDir), STATUSLINE_DIR);
     return {
         root,
         marker: (0, node_path_1.join)(root, badge_1.MARKER_FILE),
@@ -34,7 +35,7 @@ function distShim() {
 }
 function snippetLine(shimPath) {
     if (DOUBLE_QUOTE_SPECIALS.test(shimPath)) {
-        throw new Error(`${JSON.stringify(shimPath)} cannot be quoted in the statusline snippet: move CLAUDE_PLUGIN_DATA to a path without " $ \` \\ or a line break`);
+        throw new Error(`${JSON.stringify(shimPath)} cannot be quoted in the statusline snippet: set ${cfg_1.DATA_DIR_ENV} to a path without " $ \` \\ or a line break`);
     }
     return `{ test -f "${shimPath}" && node "${shimPath}"; } || :`;
 }
@@ -76,16 +77,16 @@ function pruneBadgeStates(paths, cutoff) {
         }
     }
 }
-function enableStatusline(pluginData, shimSource, now) {
-    const paths = statuslinePaths(pluginData);
+function enableStatusline(dataDir, shimSource, now) {
+    const paths = statuslinePaths(dataDir);
     const snippet = snippetLine(paths.shim);
     (0, node_fs_1.mkdirSync)(paths.sessions, { recursive: true });
     replaceFile(paths.shim, shimSource);
     replaceFile(paths.marker, markerText(now, sha256(shimSource)));
     return snippet;
 }
-function disableStatusline(pluginData) {
-    const paths = statuslinePaths(pluginData);
+function disableStatusline(dataDir) {
+    const paths = statuslinePaths(dataDir);
     const snippet = snippetLine(paths.shim);
     (0, node_fs_1.rmSync)(paths.root, { recursive: true, force: true });
     return snippet;

@@ -46,7 +46,7 @@ function minLineTokens() {
         validFrom: "0".repeat(ISO_DATE_CHARS),
     }));
 }
-function degradedHeading(degraded) {
+function degradedHeading(degraded, doctorInstruction) {
     const missing = [];
     if (degraded?.model) {
         missing.push("model");
@@ -58,7 +58,9 @@ function degradedHeading(degraded) {
         ...(missing.length === 0 ? [] : [`${missing.join(", ")} missing`]),
         ...(degraded?.embedding_timeout ? ["embedding timeout"] : []),
     ];
-    return causes.length === 0 ? [] : [`memory degraded (${causes.join("; ")}) — run /memory-doctor`];
+    return causes.length === 0
+        ? []
+        : [`memory degraded (${causes.join("; ")}) — run ${doctorInstruction}`];
 }
 function joinedLength(lines) {
     return lines.reduce((sum, line) => sum + line.length, 0) + Math.max(0, lines.length - 1);
@@ -69,8 +71,8 @@ function sectionedBody(rendered) {
         return lines.length === 0 ? [] : [title, ...lines];
     });
 }
-function renderInjection(rows, budgetTokens, degraded) {
-    const heading = degradedHeading(degraded);
+function renderInjection(rows, budgetTokens, doctorInstruction, degraded) {
+    const heading = degradedHeading(degraded, doctorInstruction);
     let used = joinedLength([...heading, BLOCK_OPEN, HEADER, BLOCK_CLOSE]);
     const rendered = [];
     for (const row of rows) {

@@ -1,13 +1,11 @@
 import { join } from "node:path";
 import { defineConfig } from "vitest/config";
 
-export const testModelCacheDir = join(
-  process.cwd(),
-  "node_modules",
-  ".cache",
-  "adaptive-cognitive-memory",
-  "models",
-);
+const testCacheRoot = join(process.cwd(), "node_modules", ".cache", "adaptive-cognitive-memory");
+
+export const testModelCacheDir = join(testCacheRoot, "models");
+
+const testDataDir = join(testCacheRoot, "test-data");
 
 export const testEmbedDeadlineMs = 20_000;
 
@@ -20,6 +18,7 @@ export default defineConfig({
   test: {
     env: {
       ACM_MODEL_CACHE_DIR: testModelCacheDir,
+      ACM_DATA_DIR: testDataDir,
     },
     globalSetup: ["./tests/global-setup.ts"],
   },

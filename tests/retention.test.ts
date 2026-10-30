@@ -14,9 +14,8 @@ const JUST_BEFORE_CUTOFF = "2026-09-13T23:59:59.999Z";
 const openedDbs: OpenedDb[] = [];
 
 function freshDb(): OpenedDb {
-  const opened = openDatabase(
-    loadConfig({ CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-retention-")) }),
-  );
+  const dataDir = mkdtempSync(join(tmpdir(), "acm-retention-"));
+  const opened = openDatabase(loadConfig({ CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir }));
   openedDbs.push(opened);
   return opened;
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { checkpoint, type OpenSignal, signalDetail } from "../src/capture";
+import { hostToolName } from "../src/toolnames";
+
+const CLAUDE_STORE_TOOL = hostToolName("claude", "memory_store");
 
 const OPEN_SIGNALS: readonly OpenSignal[] = [
   { id: 11, kind: "correction", detail: "nedelej" },
@@ -10,7 +13,7 @@ const OPEN_SIGNALS: readonly OpenSignal[] = [
 
 describe("checkpoint", () => {
   it("names each distinct open signal once and closes every one of them", () => {
-    expect(checkpoint(OPEN_SIGNALS, false)).toEqual({
+    expect(checkpoint(OPEN_SIGNALS, false, CLAUDE_STORE_TOOL)).toEqual({
       text: 'Memory checkpoint: you were corrected about "nedelej"; the user asked you to remember "from now on"; you resolved a failing `pytest` — store the durable lesson under the memory rules with mcp__plugin_adaptive-cognitive-memory_memory__memory_store, or state that there is none, then finish.',
       closedIds: [11, 12, 13, 14],
     });
@@ -38,7 +41,7 @@ describe("checkpoint", () => {
         detail: `step${index + 1}`,
       }));
 
-      const decided = checkpoint(open, false);
+      const decided = checkpoint(open, false, CLAUDE_STORE_TOOL);
 
       expect(decided?.text.replaceAll("you resolved a failing ", "")).toBe(
         `Memory checkpoint: ${listed} — store the durable lesson under the memory rules with mcp__plugin_adaptive-cognitive-memory_memory__memory_store, or state that there is none, then finish.`,
@@ -51,7 +54,7 @@ describe("checkpoint", () => {
     { name: "a stop hook is already continuing the turn", open: OPEN_SIGNALS, active: true },
     { name: "no signal is open", open: [], active: false },
   ])("stays silent when $name", ({ open, active }) => {
-    expect(checkpoint(open, active)).toBeUndefined();
+    expect(checkpoint(open, active, CLAUDE_STORE_TOOL)).toBeUndefined();
   });
 });
 

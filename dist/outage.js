@@ -15,7 +15,6 @@ const MISSING_SPECIFIER = /Cannot find (?:module|package) '([^']+)'/;
 const SCOPED_PACKAGE_PREFIX = "@";
 exports.NATIVE_MODULE_FIX = `run npm rebuild better-sqlite3 in ${version_1.PLUGIN_ROOT}, or reinstall the plugin, so the native module matches node ${process.versions.node}`;
 const UPDATE_FIX = "update the plugin to a version that reads this database";
-const DEPENDENCY_FIX = `run claude plugin update ${version_1.PLUGIN_INSTALL_ID} to retry Claude Code's dependency install, or npm ci --ignore-scripts in ${version_1.PLUGIN_ROOT}`;
 function errorCode(error) {
     return error instanceof Error && "code" in error && typeof error.code === "string"
         ? error.code
@@ -36,7 +35,7 @@ function missingDependency(error) {
     const specifier = MISSING_SPECIFIER.exec(error.message)?.[1];
     return specifier === undefined ? undefined : packageName(specifier);
 }
-function storageOutage(error) {
+function storageOutage(error, dependencyFix) {
     if (error instanceof schema_1.SchemaTooNewError) {
         return { cause: error.message, fix: UPDATE_FIX };
     }
@@ -47,7 +46,7 @@ function storageOutage(error) {
     if (dependency !== undefined) {
         return {
             cause: `the plugin's npm dependencies are not installed (missing ${dependency})`,
-            fix: DEPENDENCY_FIX,
+            fix: dependencyFix,
         };
     }
     return undefined;

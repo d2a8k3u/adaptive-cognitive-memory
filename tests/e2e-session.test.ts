@@ -66,7 +66,7 @@ async function sessionBPrompt(
   return runProcess({
     command: process.execPath,
     args: [distEntry("hooks.js")],
-    env: { CLAUDE_PLUGIN_DATA: pluginData, ...testModelEnv },
+    env: { CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData, ...testModelEnv },
     cwd: SESSION_B_CWD,
     stdinText: JSON.stringify({
       hook_event_name: "UserPromptSubmit",
@@ -86,6 +86,7 @@ describe("two-session e2e (AC-28, AC-8)", () => {
     mkdirSync(SESSION_B_CWD, { recursive: true });
     const childEnv = {
       CLAUDE_PLUGIN_DATA: pluginData,
+      ACM_DATA_DIR: pluginData,
       ...testModelEnv,
     };
 
@@ -155,8 +156,10 @@ describe("two-session e2e (AC-28, AC-8)", () => {
     const nested = join(root, "src", "app");
     mkdirSync(nested, { recursive: true });
     execFileSync("git", ["init", "-q", root], { stdio: "ignore" });
+    const dataDir = mkdtempSync(join(tmpdir(), "acm-e2e-"));
     const childEnv = {
-      CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-e2e-")),
+      CLAUDE_PLUGIN_DATA: dataDir,
+      ACM_DATA_DIR: dataDir,
       ...testModelEnv,
       PATH: process.env.PATH ?? "",
     };
@@ -227,13 +230,15 @@ describe("two-session e2e (AC-28, AC-8)", () => {
       const memoryIndex = join(memoryDir, "MEMORY.md");
       writeFileSync(claudeMd, "- Run database migrations with alembic only.\n");
       writeFileSync(memoryIndex, "- The staging database resets every Monday morning.\n");
+      const dataDir = mkdtempSync(join(tmpdir(), "acm-e2e-"));
       const client = new Client({ name: "acm-e2e-instructions", version: "0.0.0" });
       await client.connect(
         new StdioClientTransport({
           command: process.execPath,
           args: [distEntry("server.js")],
           env: {
-            CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-e2e-")),
+            CLAUDE_PLUGIN_DATA: dataDir,
+            ACM_DATA_DIR: dataDir,
             ...testModelEnv,
             CLAUDE_CONFIG_DIR: configDir,
             PATH: process.env.PATH ?? "",

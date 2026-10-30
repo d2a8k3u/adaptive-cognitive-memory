@@ -6,7 +6,7 @@ import { loadConfig } from "../src/cfg";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import type { MemoryEnv } from "../src/db/memories";
 import type { InstructionSources } from "../src/instructions";
-import { toolLookup } from "../src/keys";
+import { targetLookup } from "../src/keys";
 import { toolCandidates } from "../src/search";
 import {
   isToolError,
@@ -84,7 +84,7 @@ function openDeps(
   pluginData = mkdtempSync(join(tmpdir(), "acm-tools-")),
   instructionSources = emptyInstructionSources(),
 ): ToolDeps {
-  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
   const opened = openDatabase(config);
   openedDbs.push(opened);
   const env: MemoryEnv = {
@@ -98,6 +98,7 @@ function openDeps(
     embedDeadlineMs: config.embedDeadlineMs,
     processEnv: {
       CLAUDE_PLUGIN_DATA: pluginData,
+      ACM_DATA_DIR: pluginData,
       CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-tools-claude-")),
     },
     instructionSources,
@@ -828,7 +829,7 @@ describe("tools", () => {
       await memoryUpdate(deps, { id, anchors: ["billing/invoice.py"] });
 
       const anchoredAt = (path: string) => {
-        const lookup = toolLookup("Edit", { file_path: join(projectDir, path) }, projectDir);
+        const lookup = targetLookup({ kind: "files", paths: [join(projectDir, path)] }, projectDir);
         return lookup === undefined
           ? undefined
           : toolCandidates(deps.env.db, {

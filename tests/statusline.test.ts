@@ -115,6 +115,7 @@ function filesUnder(dir: string): string[] {
 function pluginEnv(pluginData: string, home: string): NodeJS.ProcessEnv {
   return {
     CLAUDE_PLUGIN_DATA: pluginData,
+    ACM_DATA_DIR: pluginData,
     HOME: home,
     CLAUDE_CONFIG_DIR: join(home, ".claude"),
     ...testModelEnv,

@@ -1,14 +1,27 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import type { Config } from "../src/cfg";
 import { type OpenedDb, openDatabase } from "../src/db/database";
+import type { HostId } from "../src/host";
 import { testModelCacheDir } from "../vitest.config";
-import { seedConfig } from "./fixtures/seed";
+import { seedConfig, toolText } from "./fixtures/seed";
 
+const SHARED_STORE_HOSTS: readonly HostId[] = ["claude", "codex", "opencode"];
+const HOST_SHAPE_ENV: Readonly<Record<HostId, Readonly<Record<string, string>>>> = {
+  claude: {},
+  codex: { ACM_HOST: "codex" },
+  opencode: { ACM_HOST: "opencode" },
+};
+const KILLED_HOST: HostId = "codex";
+const SHARED_WRITE_MS = 60_000;
+const KILL_AFTER_MS = 20_000;
 const SESSION_A_PROJECT_ID = "proj-conc-alpha";
 const SESSION_B_PROJECT_ID = "proj-conc-beta";
 const STORES_PER_SESSION = 10;
@@ -49,7 +62,7 @@ function runnerSource(): string {
     'const { openDatabase } = require(process.env.ACM_DIST + "/db/database.js");',
     'const { store } = require(process.env.ACM_DIST + "/db/memories.js");',
     "const config = {",
-    "  pluginData: process.env.CLAUDE_PLUGIN_DATA,",
+    "  dataDir: process.env.ACM_DATA_DIR,",
     "  dbPath: process.env.ACM_DB_PATH,",
     "  modelCacheDir: process.env.ACM_MODEL_CACHE_DIR,",
     "  budgetTokens: 1200,",
@@ -89,7 +102,8 @@ function runnerSource(): string {
 
 function runnerEnv(config: Config, facts: readonly string[], projectId: string): NodeJS.ProcessEnv {
   return {
-    CLAUDE_PLUGIN_DATA: config.pluginData,
+    CLAUDE_PLUGIN_DATA: config.dataDir,
+    ACM_DATA_DIR: config.dataDir,
     ACM_DB_PATH: config.dbPath,
     ACM_MODEL_CACHE_DIR: config.modelCacheDir,
     ACM_DIST: distDir(),
@@ -159,6 +173,82 @@ async function awaitMarker(path: string): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+}
+
+interface HostWriter {
+  readonly host: HostId;
+  readonly client: Client;
+  readonly transport: StdioClientTransport;
+}
+
+interface WriterOutcome {
+  readonly acknowledged: readonly { readonly id: string; readonly atMs: number }[];
+  readonly toolErrors: readonly string[];
+}
+
+async function startHostWriter(host: HostId, dataDir: string, cwd: string): Promise<HostWriter> {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [join(distDir(), "server.js")],
+    env: {
+      PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ""}`,
+      HOME: mkdtempSync(join(tmpdir(), "acm-conc-home-")),
+      ACM_DATA_DIR: dataDir,
+      ACM_MODEL_CACHE_DIR: mkdtempSync(join(tmpdir(), "acm-conc-no-model-")),
+      CLAUDE_PLUGIN_OPTION_DOWNLOAD_MODEL: "false",
+      ...HOST_SHAPE_ENV[host],
+    },
+    cwd,
+    stderr: "pipe",
+  });
+  const client = new Client({ name: `acm-conc-${host}`, version: "0.0.0" });
+  await client.connect(transport);
+  return { host, client, transport };
+}
+
+function hostStore(host: HostId, sequence: number) {
+  return {
+    name: "memory_store",
+    arguments: {
+      title: `${host} concurrency note ${sequence}`,
+      content: `Durable ${host} note ${sequence} recorded while three hosts write one store.`,
+      type: "semantic",
+      kind: "fact",
+      conflict_key: `test.concurrency_${host}_${sequence}`,
+      cardinality: "multi",
+      scope: "project",
+      resolution: { action: "ADD" },
+    },
+  };
+}
+
+async function writeUntil(
+  writer: HostWriter,
+  deadlineMs: number,
+  killed: boolean,
+): Promise<WriterOutcome> {
+  const acknowledged: { id: string; atMs: number }[] = [];
+  const toolErrors: string[] = [];
+  for (let sequence = 0; performance.now() < deadlineMs; sequence += 1) {
+    let result: Awaited<ReturnType<Client["callTool"]>>;
+    try {
+      result = await writer.client.callTool(hostStore(writer.host, sequence));
+    } catch (error) {
+      if (killed && error instanceof McpError && error.code === ErrorCode.ConnectionClosed) {
+        return { acknowledged, toolErrors };
+      }
+      throw error;
+    }
+    if (result.isError === true) {
+      toolErrors.push(toolText(result));
+      continue;
+    }
+    acknowledged.push({
+      id: (JSON.parse(toolText(result)) as { id: string }).id,
+      atMs: performance.now(),
+    });
+  }
+  return { acknowledged, toolErrors };
 }
 
 function distDir(): string {
@@ -266,6 +356,58 @@ describe("multi-process database access", () => {
     expect(exit.code, exit.stderr).toBe(0);
     expect(exit.stderr).toBe("");
     expect(existsSync(markers.done)).toBe(true);
+  });
+
+  it("three host-shaped servers storing for 60 s, one killed -9 mid-run, lose no acknowledged write (NFR-6)", {
+    timeout: 180_000,
+  }, async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "acm-conc-shared-"));
+    const project = mkdtempSync(join(tmpdir(), "acm-conc-project-"));
+    const writers: HostWriter[] = [];
+    for (const host of SHARED_STORE_HOSTS) {
+      writers.push(await startHostWriter(host, dataDir, project));
+    }
+    const startedAt = performance.now();
+    const killAt = startedAt + KILL_AFTER_MS;
+    const victimPid = writers.find(({ host }) => host === KILLED_HOST)!.transport.pid ?? 0;
+    expect(victimPid).toBeGreaterThan(0);
+    const killTimer = setTimeout(() => process.kill(victimPid, "SIGKILL"), KILL_AFTER_MS);
+
+    const outcomes = await Promise.all(
+      writers.map((writer) =>
+        writeUntil(writer, startedAt + SHARED_WRITE_MS, writer.host === KILLED_HOST),
+      ),
+    );
+    clearTimeout(killTimer);
+    for (const writer of writers) {
+      await writer.client.close();
+    }
+
+    const byHost = new Map(SHARED_STORE_HOSTS.map((host, index) => [host, outcomes[index]!]));
+    const acknowledgedIds = outcomes
+      .flatMap(({ acknowledged }) => acknowledged)
+      .map(({ id }) => id);
+    console.log(
+      `NFR-6 acknowledged writes: ${SHARED_STORE_HOSTS.map((host) => `${host} ${byHost.get(host)!.acknowledged.length}`).join(", ")}`,
+    );
+    const opened: OpenedDb = openDatabase(seedConfig(dataDir, testModelCacheDir));
+    try {
+      const storedRows = opened.db.prepare("SELECT id FROM memories").all() as { id: string }[];
+      const stored = new Set(storedRows.map(({ id }) => id));
+      const memories = stored.size;
+      expect(opened.db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+      expect(acknowledgedIds.filter((id) => !stored.has(id))).toEqual([]);
+      expect(outcomes.flatMap(({ toolErrors }) => toolErrors)).toEqual([]);
+      expect(opened.db.prepare("SELECT count(*) AS n FROM memories_fts").get()).toEqual({
+        n: memories,
+      });
+    } finally {
+      opened.db.close();
+    }
+    expect(byHost.get(KILLED_HOST)!.acknowledged.some(({ atMs }) => atMs < killAt)).toBe(true);
+    for (const host of SHARED_STORE_HOSTS.filter((candidate) => candidate !== KILLED_HOST)) {
+      expect(byHost.get(host)!.acknowledged.some(({ atMs }) => atMs > killAt)).toBe(true);
+    }
   });
 
   it("kill -9 mid-write leaves the database intact with no torn rows", {

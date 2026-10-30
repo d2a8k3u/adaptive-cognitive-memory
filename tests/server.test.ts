@@ -43,7 +43,7 @@ const servers: ReturnType<typeof createMcpServer>[] = [];
 async function connect(
   pluginData = mkdtempSync(join(tmpdir(), "acm-server-")),
 ): Promise<{ client: Client; config: ReturnType<typeof loadConfig>; env: MemoryEnv }> {
-  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+  const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
   const opened = openDatabase(config);
   openedDbs.push(opened);
   const env: MemoryEnv = {
@@ -60,6 +60,7 @@ async function connect(
       embedDeadlineMs: testEmbedDeadlineMs,
       processEnv: {
         CLAUDE_PLUGIN_DATA: pluginData,
+        ACM_DATA_DIR: pluginData,
         CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-server-claude-")),
       },
       instructionSources: { projectDir, autoMemoryIndex: join(projectDir, "MEMORY.md") },
@@ -311,7 +312,7 @@ describe("server", () => {
     timeout: 60_000,
   }, async () => {
     const pluginData = mkdtempSync(join(tmpdir(), "acm-backfill-"));
-    const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+    const config = loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
     const observer = openDatabase(config);
     openedDbs.push(observer);
     const insert = observer.db.prepare(
@@ -335,6 +336,7 @@ describe("server", () => {
     );
     const client = await spawnedServer({
       CLAUDE_PLUGIN_DATA: pluginData,
+      ACM_DATA_DIR: pluginData,
       ...testModelEnv,
     });
 
@@ -351,7 +353,9 @@ describe("server", () => {
     timeout: 60_000,
   }, async () => {
     const pluginData = mkdtempSync(join(tmpdir(), "acm-backfill-fail-"));
-    const seeded = openDatabase(loadConfig({ CLAUDE_PLUGIN_DATA: pluginData }));
+    const seeded = openDatabase(
+      loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData }),
+    );
     try {
       seeded.db
         .prepare(
@@ -365,6 +369,7 @@ describe("server", () => {
     }
     const client = await spawnedServer({
       CLAUDE_PLUGIN_DATA: pluginData,
+      ACM_DATA_DIR: pluginData,
       ACM_MODEL_CACHE_DIR: corruptModelCacheDir(),
     });
     const unembeddedCheck = async () => {
@@ -394,7 +399,7 @@ describe("server", () => {
     const pluginData = mkdtempSync(join(tmpdir(), "acm-listen-"));
     const dbPath = join(pluginData, "memory.sqlite");
     const child = spawn(process.execPath, [join(process.cwd(), "dist", "server.js")], {
-      env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData },
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData },
       stdio: ["pipe", "pipe", "pipe"],
     });
     const stderr: string[] = [];
@@ -433,13 +438,15 @@ describe("server", () => {
   it("starts without its native module, serving memory_doctor and naming the cause and fix on every other tool", {
     timeout: 60_000,
   }, async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "acm-outage-"));
     const client = new Client({ name: "acm-native-outage", version: "0.0.0" });
     await client.connect(
       new StdioClientTransport({
         command: process.execPath,
         args: [serverEntry],
         env: {
-          CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "acm-outage-")),
+          CLAUDE_PLUGIN_DATA: dataDir,
+          ACM_DATA_DIR: dataDir,
           CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "acm-outage-claude-")),
           PATH: process.env.PATH ?? "",
           NODE_OPTIONS: `--require ${join(process.cwd(), "tests", "fixtures", "dlopen-fail.cjs")}`,

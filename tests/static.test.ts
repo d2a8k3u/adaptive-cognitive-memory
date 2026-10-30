@@ -21,7 +21,7 @@ import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, LIST_PAGE_MAX_CHARS } from "../src/
 import { MAX_HEAD_WORDS } from "../src/keys";
 import { TICKET_ROWS_MAX } from "../src/search";
 import { snippetLine } from "../src/statusline";
-import { hostToolName, MEMORY_SERVER_NAME } from "../src/toolnames";
+import { hostToolName, MEMORY_SERVER_KEY } from "../src/toolnames";
 import { TOOL_DEFINITIONS, type ToolDefinition } from "../src/tools";
 import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
 
@@ -57,14 +57,18 @@ const LLM_CLIENT_ROOTS = [
   "openai",
 ];
 
-function distJsFiles(dir: string = DIST_DIR): string[] {
+function filesUnder(dir: string, suffixes: readonly string[]): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
-      return distJsFiles(path);
+      return filesUnder(path, suffixes);
     }
-    return entry.name.endsWith(".js") ? [path] : [];
+    return suffixes.some((suffix) => entry.name.endsWith(suffix)) ? [path] : [];
   });
+}
+
+function distJsFiles(): string[] {
+  return filesUnder(DIST_DIR, [".js"]);
 }
 
 function specifiersOf(content: string): string[] {
@@ -130,9 +134,9 @@ describe("plugin version owner", () => {
       mcpServers: Record<string, unknown>;
     };
 
-    expect(Object.keys(mcp.mcpServers)).toEqual([MEMORY_SERVER_NAME]);
-    expect(hostToolName("memory_store")).toBe(
-      `mcp__plugin_${plugin.name}_${MEMORY_SERVER_NAME}__memory_store`,
+    expect(Object.keys(mcp.mcpServers)).toEqual([MEMORY_SERVER_KEY]);
+    expect(hostToolName("claude", "memory_store")).toBe(
+      `mcp__plugin_${plugin.name}_${MEMORY_SERVER_KEY}__memory_store`,
     );
   });
 });
@@ -798,5 +802,115 @@ describe("static dist gates", () => {
     const shim = readFileSync(join(DIST_DIR, "statusline", "badge.js"), "utf8");
 
     expect([...new Set(specifiersOf(shim))].sort()).toEqual(["node:fs", "node:path"]);
+  });
+});
+
+const STOREMOVE_IMPORT = /from\s+"(?:\.\.?\/)+storemove"/;
+const MOVE_INVOCATION = /cli\.js"?\s+store\s+move\b|"store",\s*"move"|\bmoveStore\(/;
+const TEMP_DIR_USE = /mkdtempSync\(|tmpdir\(\)/;
+const REAL_STORE_REFERENCE = /homedir\(|~\/\.claude|\.claude\/plugins\/data|\$HOME/;
+const MOVE_RUNNER_DIRS = ["tests", ".github", "hooks", "evals"];
+const MOVE_RUNNER_SUFFIXES = [".ts", ".js", ".cjs", ".mjs", ".json", ".yml", ".yaml", ".sh", ".md"];
+
+describe("store move (FR-7)", () => {
+  it("is imported by src/cli.ts and by no other src module", () => {
+    const importers = filesUnder(join(process.cwd(), "src"), [".ts"])
+      .filter((file) => STOREMOVE_IMPORT.test(readFileSync(file, "utf8")))
+      .map((file) => relative(process.cwd(), file));
+
+    expect(importers).toEqual(["src/cli.ts"]);
+  });
+
+  it("is run by tests, CI, hooks and evals only against stores under a temp dir", () => {
+    const invoking = MOVE_RUNNER_DIRS.flatMap((dir) =>
+      filesUnder(join(process.cwd(), dir), MOVE_RUNNER_SUFFIXES),
+    )
+      .map((file) => ({ file: relative(process.cwd(), file), text: readFileSync(file, "utf8") }))
+      .filter(({ text }) => MOVE_INVOCATION.test(text));
+    const offenders = invoking
+      .filter(({ text }) => !TEMP_DIR_USE.test(text) || REAL_STORE_REFERENCE.test(text))
+      .map(({ file }) => file);
+
+    expect(invoking.map(({ file }) => file)).toContain("tests/storemove.test.ts");
+    expect(offenders).toEqual([]);
+  });
+});
+
+const SKILL_NAMES = ["memory", "memory-curate"];
+const CLAUDE_ONLY_TOKENS = [
+  "/memory-recall",
+  "/memory-doctor",
+  "CLAUDE.md",
+  ".claude/rules",
+  "auto memory",
+];
+const SKILL_FRONTMATTER = /^---\n([\s\S]*?)\n---\n/;
+
+function skillFiles(): string[] {
+  return filesUnder(join(process.cwd(), "skills"), [".md"]);
+}
+
+describe("host-neutral skills (FR-27)", () => {
+  it.each(SKILL_NAMES)("%s keeps frontmatter name and description", (name) => {
+    const text = readFileSync(join(process.cwd(), "skills", name, "SKILL.md"), "utf8");
+    const frontmatter = SKILL_FRONTMATTER.exec(text)?.[1] ?? "";
+
+    expect(frontmatter).toMatch(new RegExp(`^name: ${name}$`, "m"));
+    expect(frontmatter).toMatch(/^description: >\n {2}\S/m);
+  });
+
+  it("name no command or file that exists on Claude Code alone", () => {
+    const offenders = skillFiles().flatMap((file) => {
+      const text = readFileSync(file, "utf8").toLowerCase();
+      return CLAUDE_ONLY_TOKENS.filter((token) => text.includes(token.toLowerCase())).map(
+        (token) => `${relative(process.cwd(), file)} → ${token}`,
+      );
+    });
+
+    expect(offenders).toEqual([]);
+  });
+});
+
+const CLAUDE_CODE_HEADING = /claude code/i;
+const HEADING_LINE = /^(#{1,6}) (.*)$/;
+const FENCE_LINE = /^```/;
+
+function lonePluginDataLines(file: string): string[] {
+  const headings: string[] = [];
+  let inFence = false;
+  const offenders: string[] = [];
+  readFileSync(file, "utf8")
+    .split("\n")
+    .forEach((line, index) => {
+      if (FENCE_LINE.test(line)) {
+        inFence = !inFence;
+        return;
+      }
+      const heading = inFence ? null : HEADING_LINE.exec(line);
+      if (heading !== null) {
+        headings.length = (heading[1] ?? "").length - 1;
+        headings.push(heading[2] ?? "");
+        return;
+      }
+      if (
+        line.includes("CLAUDE_PLUGIN_DATA") &&
+        !headings.some((h) => CLAUDE_CODE_HEADING.test(h))
+      ) {
+        offenders.push(`${relative(process.cwd(), file)}:${index + 1}`);
+      }
+    });
+  return offenders;
+}
+
+describe("CLAUDE_PLUGIN_DATA in the docs (FR-30)", () => {
+  it("appears only under a Claude Code heading in the README and docs", () => {
+    const files = [
+      join(process.cwd(), "README.md"),
+      ...readdirSync(DOCS_DIR)
+        .filter((name) => name.endsWith(".md"))
+        .map((name) => join(DOCS_DIR, name)),
+    ];
+
+    expect(files.flatMap(lonePluginDataLines)).toEqual([]);
   });
 });

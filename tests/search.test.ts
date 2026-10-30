@@ -86,7 +86,7 @@ interface SeedMemory {
 
 function tempConfig() {
   const pluginData = mkdtempSync(join(tmpdir(), "acm-search-"));
-  return loadConfig({ CLAUDE_PLUGIN_DATA: pluginData });
+  return loadConfig({ CLAUDE_PLUGIN_DATA: pluginData, ACM_DATA_DIR: pluginData });
 }
 
 async function openSeeded(rows: readonly SeedMemory[]): Promise<OpenedDb> {
