@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import Ajv, { type ValidateFunction } from "ajv";
 import { describe, expect, it } from "vitest";
 import { codexRequest, patchedFiles } from "../src/hosts/codex";
 import { type HookReply, hostOutput } from "../src/hosts/output";
@@ -22,6 +25,24 @@ const UPDATE_PATCH = [
   "+b",
   "*** End Patch",
 ];
+
+const SCHEMA_DIR = join(process.cwd(), "tests", "fixtures", "codex-hooks-schema");
+const SCHEMA_FILE_STEMS: Readonly<Record<string, string>> = {
+  SessionStart: "session-start",
+  Stop: "stop",
+};
+const ajv = new Ajv();
+
+function codexSchema(event: string): ValidateFunction {
+  return ajv.compile(
+    JSON.parse(
+      readFileSync(
+        join(SCHEMA_DIR, `${SCHEMA_FILE_STEMS[event]}.command.output.schema.json`),
+        "utf8",
+      ),
+    ),
+  );
+}
 
 function projectRequest(event: string, actions: readonly EngineAction[]): HookRequest {
   return { event, scope: "project", sessionId: SESSION, cwd: CWD, actions };
@@ -135,6 +156,16 @@ describe("codexRequest", () => {
   ])("maps $name", ({ input, expected }) => {
     expect(codexRequest({ ...CODEX_FIELDS, ...input })).toEqual(expected);
   });
+
+  it("narrows a malformed session id and cwd to absent", () => {
+    expect(codexRequest({ hook_event_name: "Stop", session_id: 7, cwd: ["/repo"] })).toEqual({
+      event: "Stop",
+      scope: "session",
+      sessionId: undefined,
+      cwd: undefined,
+      actions: [{ kind: "stop", stopHookActive: false }],
+    });
+  });
 });
 
 describe("patchedFiles", () => {
@@ -214,7 +245,19 @@ describe("hostOutput on Codex", () => {
       stdout:
         '{"systemMessage":"store moved","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"<memory>"}}',
     },
+    {
+      name: "prints a session start notice without recall as a system message",
+      event: "SessionStart",
+      replies: [{ context: "", notice: "store moved" }],
+      stdout: '{"systemMessage":"store moved"}',
+    },
   ])("$name", ({ event, replies, stdout }) => {
-    expect(hostOutput("codex", event, replies)).toBe(stdout);
+    const printed = hostOutput("codex", event, replies);
+
+    expect(printed).toBe(stdout);
+    if (printed !== undefined) {
+      const validate = codexSchema(event);
+      expect(validate(JSON.parse(printed)), ajv.errorsText(validate.errors)).toBe(true);
+    }
   });
 });
