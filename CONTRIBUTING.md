@@ -1,8 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to adaptive-cognitive-memory!
-
-## Getting Started
+## Set up
 
 ```bash
 git clone git@github.com:d2a8k3u/adaptive-cognitive-memory.git
@@ -12,28 +10,27 @@ npm ci
 
 [Development](docs/development.md) lists where everything lives, the checks, the performance gates and the evals.
 
-## Making Changes
+## Make a change
 
-1. Create a branch from `main`
-2. Make your changes
-3. Ensure `npm run check` passes; if you touched `src/`, run `npm run build` and commit the updated `dist/`
-4. If you changed the recall or hook path, check the [performance gates](docs/development.md#performance-gates) on your machine
-5. Commit using [conventional commits](https://www.conventionalcommits.org/): `type(scope): description`
-6. Open a pull request
+1. Create a branch from `main`.
+2. Run `npm run check` until it passes. If you touched `src/`, run `npm run build` and commit the updated `dist/`.
+3. If you changed the recall or hook path, check the [performance gates](docs/development.md#performance-gates) on your machine.
+4. Commit with [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): description`.
+5. Open a pull request.
 
-## Code Style
+## Code style
 
-- TypeScript strict mode, CommonJS output, Node ≥ 22
-- Biome enforces formatting: 2-space indent, 100-column lines, double quotes, LF, organized imports
-- No comments — names and structure carry the meaning; rationale belongs in the commit message
-- No `any` — use `unknown` and narrow
-- Never weaken a test to make a change pass; tests define the contract
+- TypeScript strict mode, CommonJS output, Node ≥ 22.
+- Biome enforces formatting: 2-space indent, 100-column lines, double quotes, LF, organized imports.
+- No comments. Names and structure carry the meaning; rationale belongs in the commit message.
+- No `any`. Use `unknown` and narrow it.
+- Never weaken a test to make a change pass; the tests define the contract.
 
-## Reporting Issues
+## Report an issue
 
 Open an issue with:
 
-- What you expected vs. what happened
-- Steps to reproduce, including the memory content shape (never real secrets)
+- what you expected and what happened
+- steps to reproduce, including the shape of the memory content (never real secrets)
 - Node.js version and OS
-- Output of `/memory-doctor`
+- the doctor output: `/memory-doctor` on Claude Code, the doctor line from [Commands and CLI](docs/cli.md) on Codex and OpenCode
