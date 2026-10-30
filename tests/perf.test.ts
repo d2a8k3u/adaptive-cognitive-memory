@@ -229,6 +229,53 @@ describe("perf gates @ 1000 memories (AC-24)", () => {
   );
 
   it.skipIf(process.env.CI === "true")(
+    "Codex-shaped prompt hook runs hold the warm p95 cap and each finish within the hook timeout",
+    { timeout: 300_000 },
+    async () => {
+      const codexEnv: NodeJS.ProcessEnv = {
+        ...hookEnv,
+        PLUGIN_ROOT: process.cwd(),
+        CLAUDE_PLUGIN_ROOT: process.cwd(),
+      };
+      const spawnCodexHook = (sessionId: string) =>
+        runProcess({
+          command: process.execPath,
+          args: [distEntry("hooks.js")],
+          env: codexEnv,
+          stdinText: JSON.stringify({
+            session_id: sessionId,
+            transcript_path: null,
+            cwd: projectDir,
+            hook_event_name: "UserPromptSubmit",
+            model: "gpt-5-codex",
+            permission_mode: "default",
+            turn_id: `${sessionId}-turn`,
+            prompt: RECALL_PROMPT,
+          }),
+          timeoutMs: 30_000,
+        });
+
+      const runMs: number[] = [];
+      for (let index = 0; index <= WARM_RUNS; index += 1) {
+        const runStartedAt = performance.now();
+        const run = await spawnCodexHook(`perf-codex-${index}`);
+        runMs.push(performance.now() - runStartedAt);
+        expect(run.code).toBe(0);
+        expect(run.stderr).toBe("");
+        expect(run.stdout).toContain("<memory>");
+      }
+      const warmMs = runMs.slice(1);
+      const warmP95 = percentile(warmMs, 0.95);
+      const slowestMs = Math.max(...runMs);
+      console.log(
+        `NFR-1 Codex warm hook p95: ${Math.round(warmP95)} ms (cap ${WARM_P95_CAP_MS}), slowest of ${runMs.length} runs ${Math.round(slowestMs)} ms (cap ${HOOK_TIMEOUT_FLOOR_S} s)`,
+      );
+      expect(warmP95).toBeLessThanOrEqual(WARM_P95_CAP_MS);
+      expect(slowestMs).toBeLessThanOrEqual(HOOK_TIMEOUT_FLOOR_S * 1000);
+    },
+  );
+
+  it.skipIf(process.env.CI === "true")(
     "spawned PreToolUse Read p95 stays under 300 ms",
     { timeout: 120_000 },
     async () => {
