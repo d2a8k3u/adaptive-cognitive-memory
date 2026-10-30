@@ -4,6 +4,7 @@ import { PassThrough, Writable } from "node:stream";
 import type { Hooks, PluginInput } from "@opencode-ai/plugin";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AdaptiveCognitiveMemory } from "../opencode/adaptive-cognitive-memory";
+import { opencodeRequest } from "../src/hosts/opencode";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 
@@ -37,15 +38,11 @@ const SESSION_STATES_MAX = 1_024;
 const REPLAY_EVENTS = 1_000;
 const EMPTY_CONTEXT_REPLY_BYTES = '{"context":[""]}'.length;
 const CHECKPOINT = "Before you stop, store the release freeze with memory_memory_store.";
-const HANDLED_TOOL_IDS: ReadonlySet<string> = new Set([
-  "bash",
-  "read",
-  "edit",
-  "write",
-  "memory_memory_feedback",
-  "memory_memory_store",
-  "memory_memory_update",
-]);
+const PART_TICKS_PER_MS = 0x1000n;
+const PART_TIME_LIMIT = 1n << 48n;
+const PART_TIME_HEX_DIGITS = 12;
+const CLOCK_MS = 1_761_782_400_000;
+const CONSECUTIVE_IDLES = 3;
 const REPLAY_TOOL_IDS = [
   "bash",
   "read",
@@ -211,6 +208,10 @@ function stderrLines(): () => string[] {
   return () => lines;
 }
 
+function engineTranslates(fields: Readonly<Record<string, unknown>>): boolean {
+  return opencodeRequest({ session_id: SESSION, cwd: DIRECTORY, ...fields }) !== undefined;
+}
+
 function chat(hooks: Hooks, sessionID: string, text: string): Promise<void> {
   return hooks["chat.message"]!(
     { sessionID },
@@ -350,6 +351,20 @@ describe("OpenCode plugin when the engine fails (FR-24)", () => {
     expect(stderr()).toEqual(["memory opencode chat.message failed: EngineOutputError"]);
   });
 
+  it("lets a defect that is not an engine failure reach the host", async () => {
+    scriptEngine({ stdout: contextReply(["<memory>recall</memory>"]) });
+    const hooks = await openPlugin();
+    const stderr = stderrLines();
+
+    await expect(
+      hooks["tool.execute.after"]!(
+        { tool: "bash", sessionID: SESSION, callID: "call_1", args: { command: "npm test" } },
+        Object.freeze(bashOutput()),
+      ),
+    ).rejects.toThrow(TypeError);
+    expect(stderr()).toEqual([]);
+  });
+
   it("forwards the engine's stderr as one line of at most 300 characters", async () => {
     const engineLine = `memory hook chat.message failed: ${"E".repeat(STDERR_LINE_MAX_CHARS)}`;
     scriptEngine({ stderr: `${engineLine}\nsecond line\n` });
@@ -363,7 +378,7 @@ describe("OpenCode plugin when the engine fails (FR-24)", () => {
 });
 
 describe("OpenCode plugin spawn count (NFR-5)", () => {
-  it("spawns the engine exactly once per handled event over a replay of 1,000 mixed events", async () => {
+  it("spawns the engine exactly once per event the engine translates over a replay of 1,000 mixed events", async () => {
     scriptEngine();
     const hooks = await openPlugin();
     let handledEvents = 0;
@@ -378,12 +393,18 @@ describe("OpenCode plugin spawn count (NFR-5)", () => {
             { tool, sessionID: SESSION, callID: `call_${index}`, args: { command: "ls" } },
             { title: tool, output: "", metadata: {} },
           );
-          handledEvents += HANDLED_TOOL_IDS.has(tool) ? 1 : 0;
+          handledEvents += engineTranslates({
+            hook_event_name: "tool.execute.after",
+            tool,
+            args: { command: "ls" },
+          })
+            ? 1
+            : 0;
           break;
         case 2:
         case 3:
           await hooks.event!({ event: busEvent });
-          handledEvents += busEvent.type === "session.idle" ? 1 : 0;
+          handledEvents += engineTranslates({ hook_event_name: busEvent.type }) ? 1 : 0;
           break;
         default:
           await chat(hooks, `ses_replay${index}`, "deploy billing");
@@ -420,6 +441,37 @@ describe("OpenCode plugin session state", () => {
     ]);
   });
 
+  it("sends the user's own text parts as the prompt, without synthetic or ignored parts", async () => {
+    scriptEngine();
+    const hooks = await openPlugin();
+
+    await hooks["chat.message"]!(
+      { sessionID: SESSION },
+      chatOutput([
+        userPart("prt_18a922161000AbCdEfGhIjKlMn", "deploy billing"),
+        {
+          id: "prt_18a922161001AbCdEfGhIjKlMn",
+          sessionID: SESSION,
+          messageID: MESSAGE_ID,
+          type: "text",
+          text: "<memory>earlier recall</memory>",
+          synthetic: true,
+        },
+        {
+          id: "prt_18a922161002AbCdEfGhIjKlMn",
+          sessionID: SESSION,
+          messageID: MESSAGE_ID,
+          type: "text",
+          text: "ignored note",
+          ignored: true,
+        },
+        userPart("prt_18a922161003AbCdEfGhIjKlMn", "to staging"),
+      ]),
+    );
+
+    expect(spawned[0]!.envelope().prompt).toBe("deploy billing\nto staging");
+  });
+
   it("gives its own checkpoint re-prompt no recall, once", async () => {
     scriptEngine({ stdout: contextReply([CHECKPOINT]) });
     const stub = promptAsyncStub(async () => ({ data: undefined }));
@@ -444,6 +496,23 @@ describe("OpenCode plugin session state", () => {
 });
 
 describe("OpenCode re-prompt and the promptAsync call", () => {
+  it("marks only the idle right after its own re-prompt as stop_hook_active", async () => {
+    scriptEngine({ stdout: contextReply([CHECKPOINT]) }, {}, {});
+    const stub = promptAsyncStub(async () => ({ data: undefined }));
+    const hooks = await openPlugin(stub.client);
+
+    for (let index = 0; index < CONSECUTIVE_IDLES; index += 1) {
+      await hooks.event!({ event: { type: "session.idle", properties: { sessionID: SESSION } } });
+    }
+
+    expect(spawned.map((engine) => engine.envelope().stop_hook_active)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    expect(stub.calls).toHaveLength(1);
+  });
+
   it("skips recall for a re-prompt OpenCode delivers before promptAsync resolves", async () => {
     scriptEngine({ stdout: contextReply([CHECKPOINT]) });
     const plugin: { hooks?: Hooks } = {};
@@ -471,6 +540,25 @@ describe("OpenCode re-prompt and the promptAsync call", () => {
     await chat(hooks, SESSION, CHECKPOINT);
 
     expect(spawned).toHaveLength(2);
+  });
+});
+
+describe("OpenCode part ids from the clock", () => {
+  it("stamps an appended part with the clock when every existing part is older", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(CLOCK_MS);
+    scriptEngine({ stdout: contextReply(["<memory>recall</memory>"]) });
+    const hooks = await openPlugin();
+    const output = chatOutput([userPart("prt_000000000001AbCdEfGhIjKlMn", "deploy billing")]);
+
+    await hooks["chat.message"]!({ sessionID: SESSION }, output);
+
+    const clockField = ((BigInt(CLOCK_MS) * PART_TICKS_PER_MS) % PART_TIME_LIMIT)
+      .toString(16)
+      .padStart(PART_TIME_HEX_DIGITS, "0");
+    expect(output.parts.map(({ id }) => id)).toEqual([
+      "prt_000000000001AbCdEfGhIjKlMn",
+      expect.stringMatching(new RegExp(`^prt_${clockField}[0-9A-Za-z]{14}$`)),
+    ]);
   });
 });
 
