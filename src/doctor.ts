@@ -93,7 +93,7 @@ const PROJECT_IDENTITY_FIX =
   "make the project directory readable and git answer git rev-parse --git-common-dir within 2 s there";
 const AUTO_MEMORY_FIX =
   'to make this plugin the only durable memory, set "autoMemoryEnabled": false in .claude/settings.json (this project) or ~/.claude/settings.json (every project)';
-const RETENTION_FIX = `back up with node "${CLI_ENTRY}" export <file>, and move the database out of the plugin data directory: run the store move that ${PLUGIN_DATA} names, or set ${DATA_DIR_ENV} to a directory outside it`;
+const RETENTION_FIX = `back up with node "${CLI_ENTRY}" export <file>, and move the database out of the plugin data directory: run the store move that ${PLUGIN_DATA} names (docs/storage.md)`;
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

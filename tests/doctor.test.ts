@@ -218,7 +218,7 @@ describe("runDoctor", () => {
 
     expect(before.status).toBe("warn");
     expect(before.fix).toBe(
-      `back up with node "${join(process.cwd(), "dist", "cli.js")}" export <file>, and move the database out of the plugin data directory: run the store move that plugin_data names, or set ACM_DATA_DIR to a directory outside it`,
+      `back up with node "${join(process.cwd(), "dist", "cli.js")}" export <file>, and move the database out of the plugin data directory: run the store move that plugin_data names (docs/storage.md)`,
     );
     expect(after).toMatchObject({ status: "ok", fix: "" });
   });
