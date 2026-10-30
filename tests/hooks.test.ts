@@ -1411,7 +1411,8 @@ describe.each(HOST_SHAPES)("hooks defensive stdin ($host shape)", ({ env: hostEn
       stderrPattern: null,
     },
   ])("$name", async ({ stdinText, stdout, stderrPattern }) => {
-    const { env } = freshEnv(hostEnv);
+    const dataDir = join(mkdtempSync(join(tmpdir(), "acm-hooks-")), "never-created");
+    const { env } = freshEnv({ ...hostEnv, CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir });
 
     const result = await spawnHook(env, stdinText);
 
@@ -1422,6 +1423,7 @@ describe.each(HOST_SHAPES)("hooks defensive stdin ($host shape)", ({ env: hostEn
     } else {
       expect(result.stderr.trimEnd()).toMatch(stderrPattern);
     }
+    expect(existsSync(dataDir)).toBe(false);
   });
 
   it("does no work and creates no data dir for a session hook without a session id", async () => {
