@@ -464,6 +464,32 @@ describe("OpenCode plugin session state", () => {
     expect(stderr()).toEqual(["memory opencode chat.message failed: EngineExitError"]);
   });
 
+  it("retries the session start after the first message's parts cannot take its recall", async () => {
+    scriptEngine({ stdout: contextReply(["<memory>recall</memory>"]) }, {});
+    const hooks = await openPlugin();
+    stderrLines();
+
+    await hooks["chat.message"]!(
+      { sessionID: SESSION },
+      chatOutput([userPart("prt_ffffffffffffAbCdEfGhIjKlMn", "deploy billing")]),
+    );
+    await chat(hooks, SESSION, "deploy billing");
+
+    expect(spawned.map((engine) => engine.envelope().session_start)).toEqual([true, true]);
+  });
+
+  it("keeps the session started when a later message's engine fails", async () => {
+    scriptEngine({}, { code: 1 }, {});
+    const hooks = await openPlugin();
+    stderrLines();
+
+    await chat(hooks, SESSION, "deploy billing");
+    await chat(hooks, SESSION, "deploy billing");
+    await chat(hooks, SESSION, "deploy billing");
+
+    expect(spawned.map((engine) => engine.envelope().session_start)).toEqual([true, false, false]);
+  });
+
   it("sends the user's own text parts as the prompt, without synthetic or ignored parts", async () => {
     scriptEngine();
     const hooks = await openPlugin();
