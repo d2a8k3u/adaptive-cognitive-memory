@@ -51,7 +51,13 @@ An existing Claude Code store stays where it is, and Claude Code keeps using it,
 
 Move an existing Claude Code store before you install on Codex. Otherwise Codex creates a fresh store in the shared directory and the move refuses until that store is moved aside.
 
-1. Add this repository (`d2a8k3u/adaptive-cognitive-memory`) as a Codex plugin marketplace and install the plugin `adaptive-cognitive-memory` from it.
+1. Add this repository as a Codex plugin marketplace, then install the plugin from `/plugins` in the Codex CLI (`adaptive-cognitive-memory`). `--ref` and `--sparse` are optional flags of the add command.
+
+   ```bash
+   codex plugin marketplace add d2a8k3u/adaptive-cognitive-memory
+   ```
+
+   To enable or disable the plugin per configuration, set `enabled` in `config.toml`: `[plugins."adaptive-cognitive-memory@<marketplace>"]`.
 2. Codex installs no dependencies for plugins. Find the plugin cache directory of the installed version and install the dependencies there:
 
    ```bash
@@ -74,7 +80,7 @@ Move an existing Claude Code store before you install on Codex. Otherwise Codex 
    ```
 
    `env_vars` names the variables Codex passes from its own environment to the server; set `ACM_DATA_DIR` and the options there when you want values other than the defaults (see [Configuration](configuration.md)).
-4. Review and trust the plugin's hooks. Codex keeps a trust state for plugin hooks (`hooks.state` in `~/.codex/config.toml`) and runs a hook according to it; `codex exec` uses the same state. The global flag `--dangerously-bypass-hook-trust` skips the review and belongs to the smoke procedure in [Development](development.md#live-smoke-procedure), not to everyday use.
+4. Review and trust the plugin's hooks. Codex does not trust plugin-bundled hooks automatically: review and trust them with `/hooks` in the Codex CLI. The trust is bound to the hook hash, so a plugin update that changes `hooks/hooks.json` needs a new review. How `codex exec` treats this trust is not documented. The flag `--dangerously-bypass-hook-trust` skips the review for one invocation and belongs to the smoke procedure in [Development](development.md#live-smoke-procedure), not to everyday use.
 5. Check the install with the doctor line in [Commands and CLI](cli.md#codex).
 
 The plugin cache directory changes with every plugin version. After each plugin update, repeat step 2 for the new `<root>` and edit `args` in step 3 to the new path.
