@@ -6,6 +6,7 @@ import { checkpoint, type OpenSignal } from "../src/capture";
 import { runDoctor } from "../src/doctor";
 import type { RecalledMemory } from "../src/gate";
 import { type HostId, hostProfile } from "../src/host";
+import { hostOutput } from "../src/hosts/output";
 import { renderInjection } from "../src/inject";
 import { modelNotice } from "../src/modeldownload";
 import { sessionNotice, storageOutage } from "../src/outage";
@@ -105,18 +106,46 @@ function emittedTexts(host: HostId): HostTexts {
   };
 }
 
+function misnamedMentions(mentions: readonly ToolMention[], host: HostId): ToolMention[] {
+  return mentions.filter(
+    (mention) =>
+      (mention.host !== undefined && mention.host !== host) || !SERVER_TOOL_NAMES.has(mention.tool),
+  );
+}
+
+function stringLeaves(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  return typeof value === "object" && value !== null
+    ? Object.values(value).flatMap(stringLeaves)
+    : [];
+}
+
+function codexHookStdouts(texts: HostTexts): (string | undefined)[] {
+  return [
+    hostOutput("codex", "SessionStart", [{ context: texts.sessionStart, notice: texts.outage }]),
+    hostOutput("codex", "SessionStart", [{ context: "", notice: texts.modelDownload }]),
+    hostOutput("codex", "Stop", [{ context: texts.checkpoint }]),
+  ];
+}
+
 describe("host-facing texts", () => {
   it.each(HOSTS)("name every memory tool in %s texts in the form that host reports", (host) => {
     const mentions = Object.values(emittedTexts(host)).flatMap(toolMentions);
 
     expect(mentions).toContainEqual({ host, tool: "memory_store" });
-    expect(
-      mentions.filter(
-        (mention) =>
-          (mention.host !== undefined && mention.host !== host) ||
-          !SERVER_TOOL_NAMES.has(mention.tool),
-      ),
-    ).toEqual([]);
+    expect(misnamedMentions(mentions, host)).toEqual([]);
+  });
+
+  it("keep the Codex form in the session start, outage, model download and checkpoint stdout a Codex hook prints", () => {
+    const mentions = codexHookStdouts(emittedTexts("codex"))
+      .flatMap((stdout) => stringLeaves(stdout === undefined ? undefined : JSON.parse(stdout)))
+      .flatMap(toolMentions);
+
+    expect(mentions).toContainEqual({ host: "codex", tool: "memory_store" });
+    expect(mentions).toContainEqual({ host: undefined, tool: "memory_feedback" });
+    expect(misnamedMentions(mentions, "codex")).toEqual([]);
   });
 
   it.each(HOSTS_WITHOUT_CLAUDE_COMMANDS)(

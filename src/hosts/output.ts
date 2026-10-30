@@ -1,5 +1,7 @@
 import type { HostId } from "../host";
 
+const STOP_EVENT = "Stop";
+
 export interface HookReply {
   readonly context: string;
   readonly notice?: string;
@@ -22,6 +24,18 @@ function claudeOutput(event: string, replies: readonly HookReply[]): string | un
   return Object.keys(output).length === 0 ? undefined : JSON.stringify(output);
 }
 
+function codexStopOutput(replies: readonly HookReply[]): string | undefined {
+  const reason = replies
+    .map(({ context }) => context)
+    .filter((context) => context !== "")
+    .join("\n");
+  return reason === "" ? undefined : JSON.stringify({ decision: "block", reason });
+}
+
+function codexOutput(event: string, replies: readonly HookReply[]): string | undefined {
+  return event === STOP_EVENT ? codexStopOutput(replies) : claudeOutput(event, replies);
+}
+
 export function hostOutput(
   host: HostId,
   event: string,
@@ -31,6 +45,7 @@ export function hostOutput(
     case "claude":
       return claudeOutput(event, replies);
     case "codex":
+      return codexOutput(event, replies);
     case "opencode":
       return undefined;
   }
