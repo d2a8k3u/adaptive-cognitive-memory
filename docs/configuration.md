@@ -2,7 +2,7 @@
 
 ## Plugin options
 
-There are three options, with the same names, defaults and bounds on every host:
+The three options have the same names, defaults and bounds on every host:
 
 | Option | Meaning | Default | Range |
 |---|---|---|---|
@@ -34,15 +34,15 @@ Each option is read from an environment variable: `CLAUDE_PLUGIN_OPTION_RECALL_B
 
 | Variable | Meaning |
 |---|---|
-| `CLAUDE_PLUGIN_DATA` | the legacy store: the plugin data directory Claude Code sets. Claude Code uses it until `moved.json` exists in it, then uses the shared directory (see [Storage](storage.md#moving-the-claude-code-store)) |
+| `CLAUDE_PLUGIN_DATA` | the legacy store: the plugin data directory Claude Code sets. Claude Code uses it until `moved.json` exists in it, then uses the shared directory (see [Storage](storage.md#move-the-claude-code-store)) |
 | `CLAUDE_PROJECT_DIR` | the project directory the hooks read |
 
 ## Native auto memory (Claude Code)
 
-Claude Code's own auto memory (`~/.claude/projects/<project>/memory/MEMORY.md`, or the `autoMemoryDirectory` setting) is on by default and can run beside this plugin. The plugin reads the same settings Claude Code does — `CLAUDE_CODE_DISABLE_AUTO_MEMORY` (`1` off, `0` on) first, then `autoMemoryEnabled` in `.claude/settings.local.json`, `.claude/settings.json` and `~/.claude/settings.json`, highest first. Managed settings and `--settings` are invisible to it, so its verdict holds "as far as the readable settings show". While auto memory is on:
+Claude Code's own auto memory (`~/.claude/projects/<project>/memory/MEMORY.md`, or the `autoMemoryDirectory` setting) is on by default and can run beside this plugin. The plugin reads the same settings Claude Code does: `CLAUDE_CODE_DISABLE_AUTO_MEMORY` (`1` off, `0` on) first, then `autoMemoryEnabled` in `.claude/settings.local.json`, `.claude/settings.json` and `~/.claude/settings.json`, highest first. It cannot see managed settings or `--settings`, so the doctor qualifies its verdict with "as far as the readable settings show". While auto memory is on:
 
 - SessionStart (`startup`, `clear`, `compact`) adds one line asking Claude to store durable lessons with `memory_store`, not in `MEMORY.md`.
 - `memory_store` rejects content that restates a line of that `MEMORY.md` (as it does for `CLAUDE.md` and `.claude/rules/*.md`).
 - The doctor warns (`auto_memory`). To make this plugin the only durable memory, set `"autoMemoryEnabled": false` in `.claude/settings.json` (one project) or `~/.claude/settings.json` (every project).
 
-On Codex and OpenCode the plugin does not read or route native auto memory.
+On Codex and OpenCode the plugin ignores native auto memory.
