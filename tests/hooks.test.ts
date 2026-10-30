@@ -44,14 +44,42 @@ interface HookResult {
   stderr: string;
 }
 
+type HookFields = Readonly<Record<string, unknown>>;
+
+interface HostEvents {
+  readonly sessionStart: HookFields;
+  readonly prompt: (prompt: string) => HookFields;
+  readonly bash: (command: string) => HookFields;
+  readonly stop: HookFields;
+}
+
 interface HostShape {
   readonly host: string;
   readonly env: Record<string, string>;
-  readonly stdin: (sessionId: string) => Readonly<Record<string, unknown>>;
+  readonly stdin: (sessionId: string) => HookFields;
+  readonly events: HostEvents;
+  readonly sessionStartContext: (result: HookResult) => string;
 }
 
+const CLAUDE_EVENTS: HostEvents = {
+  sessionStart: { hook_event_name: "SessionStart" },
+  prompt: (prompt) => ({ hook_event_name: "UserPromptSubmit", prompt }),
+  bash: (command) => ({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command },
+  }),
+  stop: { hook_event_name: "Stop", stop_hook_active: false },
+};
+
 const HOST_SHAPES: readonly HostShape[] = [
-  { host: "Claude", env: {}, stdin: () => ({}) },
+  {
+    host: "Claude",
+    env: {},
+    stdin: () => ({}),
+    events: CLAUDE_EVENTS,
+    sessionStartContext: (result) => injectedContext(result, "SessionStart"),
+  },
   {
     host: "Codex",
     env: { PLUGIN_ROOT: process.cwd(), CLAUDE_PLUGIN_ROOT: process.cwd() },
@@ -61,6 +89,26 @@ const HOST_SHAPES: readonly HostShape[] = [
       model: "gpt-5-codex",
       permission_mode: "default",
     }),
+    events: CLAUDE_EVENTS,
+    sessionStartContext: (result) => injectedContext(result, "SessionStart"),
+  },
+  {
+    host: "OpenCode",
+    env: { ACM_HOST: "opencode" },
+    stdin: (sessionId) => ({ session_id: sessionId }),
+    events: {
+      sessionStart: { hook_event_name: "chat.message", prompt: "", session_start: true },
+      prompt: (prompt) => ({ hook_event_name: "chat.message", prompt, session_start: false }),
+      bash: (command) => ({
+        hook_event_name: "tool.execute.after",
+        tool: "bash",
+        args: { command },
+        exit: 0,
+        output: "",
+      }),
+      stop: { hook_event_name: "session.idle", stop_hook_active: false },
+    },
+    sessionStartContext: (result) => opencodeContexts(result).join("\n"),
   },
 ];
 
@@ -146,6 +194,12 @@ function injectedContext(result: HookResult, event: string): string {
   });
   return (output as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput
     .additionalContext;
+}
+
+function opencodeContexts(result: HookResult): string[] {
+  const output: unknown = result.stdout === "" ? undefined : JSON.parse(result.stdout);
+  expect(output).toEqual({ context: expect.any(Array) });
+  return (output as { context: string[] }).context;
 }
 
 async function seedMemories(config: Config, rows: readonly SeededMemory[]): Promise<void> {
@@ -1372,7 +1426,7 @@ describe("hooks model download", () => {
   }, 60_000);
 });
 
-describe.each(HOST_SHAPES)("hooks defensive stdin ($host shape)", ({ env: hostEnv }) => {
+describe.each(HOST_SHAPES)("hooks defensive stdin ($host shape)", ({ env: hostEnv, events }) => {
   it.each([
     {
       name: "unparseable json reports one syntaxerror line",
@@ -1406,7 +1460,7 @@ describe.each(HOST_SHAPES)("hooks defensive stdin ($host shape)", ({ env: hostEn
     },
     {
       name: "missing cwd is a silent no-op",
-      stdinText: JSON.stringify({ hook_event_name: "SessionStart" }),
+      stdinText: JSON.stringify(events.sessionStart),
       stdout: "",
       stderrPattern: null,
     },
@@ -1430,88 +1484,85 @@ describe.each(HOST_SHAPES)("hooks defensive stdin ($host shape)", ({ env: hostEn
     const dataDir = join(mkdtempSync(join(tmpdir(), "acm-hooks-")), "never-created");
     const { env } = freshEnv({ ...hostEnv, CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir });
 
-    const result = await spawnHook(
-      env,
-      JSON.stringify({ hook_event_name: "Stop", cwd: CWD, stop_hook_active: false }),
-    );
+    const result = await spawnHook(env, JSON.stringify({ ...events.stop, cwd: CWD }));
 
     expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
     expect(existsSync(dataDir)).toBe(false);
   });
 });
 
-describe.each(HOST_SHAPES)("hooks offline run (0 LLM, $host shape)", ({ env: hostEnv, stdin }) => {
-  it("serves every event without a single fetch attempt", async () => {
-    const { env, config } = freshEnv(hostEnv);
-    await seedMemories(config, [
-      {
-        id: "01J8GZSQHOOKOFFLINE0000000AAAA",
-        projectId: PROJECT_ID,
-        scope: "project",
-        type: "procedural",
-        kind: "constraint",
-        anchors: ["zzqnet"],
-        title: "offline fact",
-        abstract: "bash offline zzqnet drill works without any network",
-        content: "BODY-MARKER-3d77 body",
-        importance: 0.8,
-        vector: true,
-      },
-    ]);
-    const scratch = mkdtempSync(join(tmpdir(), "acm-hooks-net-"));
-    const markerPath = join(scratch, "net-marker");
-    const noNetModule = join(scratch, "no-net.cjs");
-    writeFileSync(
-      noNetModule,
-      [
-        'const fs = require("node:fs");',
-        "globalThis.fetch = function fetchStub() {",
-        '  fs.writeFileSync(process.env.ACM_NET_MARKER, "fetch attempted");',
-        '  throw new Error("network attempted");',
-        "};",
-      ].join("\n"),
-    );
-    const offlineEnv: NodeJS.ProcessEnv = {
-      ...env,
-      NODE_OPTIONS: `--require ${noNetModule}`,
-      ACM_NET_MARKER: markerPath,
-    };
+describe.each(HOST_SHAPES)(
+  "hooks offline run (0 LLM, $host shape)",
+  ({ env: hostEnv, stdin, events, sessionStartContext }) => {
+    it("serves every event without a single fetch attempt", async () => {
+      const { env, config } = freshEnv(hostEnv);
+      await seedMemories(config, [
+        {
+          id: "01J8GZSQHOOKOFFLINE0000000AAAA",
+          projectId: PROJECT_ID,
+          scope: "project",
+          type: "procedural",
+          kind: "constraint",
+          anchors: ["zzqnet"],
+          title: "offline fact",
+          abstract: "bash offline zzqnet drill works without any network",
+          content: "BODY-MARKER-3d77 body",
+          importance: 0.8,
+          vector: true,
+        },
+      ]);
+      const scratch = mkdtempSync(join(tmpdir(), "acm-hooks-net-"));
+      const markerPath = join(scratch, "net-marker");
+      const noNetModule = join(scratch, "no-net.cjs");
+      writeFileSync(
+        noNetModule,
+        [
+          'const fs = require("node:fs");',
+          "globalThis.fetch = function fetchStub() {",
+          '  fs.writeFileSync(process.env.ACM_NET_MARKER, "fetch attempted");',
+          '  throw new Error("network attempted");',
+          "};",
+        ].join("\n"),
+      );
+      const offlineEnv: NodeJS.ProcessEnv = {
+        ...env,
+        NODE_OPTIONS: `--require ${noNetModule}`,
+        ACM_NET_MARKER: markerPath,
+      };
 
-    const sessionStart = await spawnHook(
-      offlineEnv,
-      JSON.stringify({ ...stdin("offline-start"), hook_event_name: "SessionStart", cwd: CWD }),
-    );
-    const promptSubmit = await spawnHook(
-      offlineEnv,
-      JSON.stringify({
-        ...stdin("offline-prompt"),
-        hook_event_name: "UserPromptSubmit",
-        cwd: CWD,
-        prompt: "offline zzqnet drill",
-      }),
-    );
-    const preTool = await spawnHook(
-      offlineEnv,
-      JSON.stringify({
-        ...stdin("offline-pre-tool"),
-        hook_event_name: "PreToolUse",
-        cwd: CWD,
-        tool_name: "Bash",
-        tool_input: { command: "zzqnet drill --offline" },
-      }),
-    );
+      const sessionStart = await spawnHook(
+        offlineEnv,
+        JSON.stringify({ ...stdin("offline-start"), ...events.sessionStart, cwd: CWD }),
+      );
+      const promptSubmit = await spawnHook(
+        offlineEnv,
+        JSON.stringify({
+          ...stdin("offline-prompt"),
+          ...events.prompt("offline zzqnet drill"),
+          cwd: CWD,
+        }),
+      );
+      const preTool = await spawnHook(
+        offlineEnv,
+        JSON.stringify({
+          ...stdin("offline-pre-tool"),
+          ...events.bash("zzqnet drill --offline"),
+          cwd: CWD,
+        }),
+      );
 
-    expect(sessionStart.code).toBe(0);
-    expect(injectedContext(sessionStart, "SessionStart")).toContain(
-      "offline zzqnet drill works without any network",
-    );
-    expect(promptSubmit.code).toBe(0);
-    expect(promptSubmit.stdout).not.toBe("");
-    expect(preTool.code).toBe(0);
-    expect(preTool.stdout).not.toBe("");
-    expect(existsSync(markerPath)).toBe(false);
-  }, 60_000);
-});
+      expect(sessionStart.code).toBe(0);
+      expect(sessionStartContext(sessionStart)).toContain(
+        "offline zzqnet drill works without any network",
+      );
+      expect(promptSubmit.code).toBe(0);
+      expect(promptSubmit.stdout).not.toBe("");
+      expect(preTool.code).toBe(0);
+      expect(preTool.stdout).not.toBe("");
+      expect(existsSync(markerPath)).toBe(false);
+    }, 60_000);
+  },
+);
 
 describe("hooks import graph", () => {
   it("keeps search and embeddings out of the hooks static require graph", () => {
