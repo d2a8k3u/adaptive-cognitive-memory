@@ -34,7 +34,7 @@ const RECEIPT_TOOL_NAMES = [
   "mcp__plugin_adaptive-cognitive-memory_memory__memory_update",
 ] as const;
 const POST_TOOL_MATCHER =
-  "Bash|mcp__plugin_adaptive-cognitive-memory_memory__memory_(feedback|store|update)";
+  "Bash|mcp__plugin_adaptive-cognitive-memory_memory__memory_(feedback|store|update)|mcp__memory__memory_(feedback|store|update)";
 const ROUTING_LINE =
   "Native auto memory is also on: store durable lessons with mcp__plugin_adaptive-cognitive-memory_memory__memory_store, not in the auto-memory MEMORY.md.";
 
@@ -43,6 +43,26 @@ interface HookResult {
   stdout: string;
   stderr: string;
 }
+
+interface HostShape {
+  readonly host: string;
+  readonly env: Record<string, string>;
+  readonly stdin: (sessionId: string) => Readonly<Record<string, unknown>>;
+}
+
+const HOST_SHAPES: readonly HostShape[] = [
+  { host: "Claude", env: {}, stdin: () => ({}) },
+  {
+    host: "Codex",
+    env: { PLUGIN_ROOT: process.cwd(), CLAUDE_PLUGIN_ROOT: process.cwd() },
+    stdin: (sessionId) => ({
+      session_id: sessionId,
+      transcript_path: null,
+      model: "gpt-5-codex",
+      permission_mode: "default",
+    }),
+  },
+];
 
 interface SeededMemory {
   id: string;
@@ -1352,7 +1372,7 @@ describe("hooks model download", () => {
   }, 60_000);
 });
 
-describe("hooks defensive stdin", () => {
+describe.each(HOST_SHAPES)("hooks defensive stdin ($host shape)", ({ env: hostEnv }) => {
   it.each([
     {
       name: "unparseable json reports one syntaxerror line",
@@ -1391,7 +1411,7 @@ describe("hooks defensive stdin", () => {
       stderrPattern: null,
     },
   ])("$name", async ({ stdinText, stdout, stderrPattern }) => {
-    const { env } = freshEnv();
+    const { env } = freshEnv(hostEnv);
 
     const result = await spawnHook(env, stdinText);
 
@@ -1406,7 +1426,7 @@ describe("hooks defensive stdin", () => {
 
   it("does no work and creates no data dir for a session hook without a session id", async () => {
     const dataDir = join(mkdtempSync(join(tmpdir(), "acm-hooks-")), "never-created");
-    const { env } = freshEnv({ CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir });
+    const { env } = freshEnv({ ...hostEnv, CLAUDE_PLUGIN_DATA: dataDir, ACM_DATA_DIR: dataDir });
 
     const result = await spawnHook(
       env,
@@ -1418,9 +1438,9 @@ describe("hooks defensive stdin", () => {
   });
 });
 
-describe("hooks offline run (0 LLM)", () => {
+describe.each(HOST_SHAPES)("hooks offline run (0 LLM, $host shape)", ({ env: hostEnv, stdin }) => {
   it("serves every event without a single fetch attempt", async () => {
-    const { env, config } = freshEnv();
+    const { env, config } = freshEnv(hostEnv);
     await seedMemories(config, [
       {
         id: "01J8GZSQHOOKOFFLINE0000000AAAA",
@@ -1457,11 +1477,12 @@ describe("hooks offline run (0 LLM)", () => {
 
     const sessionStart = await spawnHook(
       offlineEnv,
-      JSON.stringify({ hook_event_name: "SessionStart", cwd: CWD }),
+      JSON.stringify({ ...stdin("offline-start"), hook_event_name: "SessionStart", cwd: CWD }),
     );
     const promptSubmit = await spawnHook(
       offlineEnv,
       JSON.stringify({
+        ...stdin("offline-prompt"),
         hook_event_name: "UserPromptSubmit",
         cwd: CWD,
         prompt: "offline zzqnet drill",
@@ -1470,6 +1491,7 @@ describe("hooks offline run (0 LLM)", () => {
     const preTool = await spawnHook(
       offlineEnv,
       JSON.stringify({
+        ...stdin("offline-pre-tool"),
         hook_event_name: "PreToolUse",
         cwd: CWD,
         tool_name: "Bash",
