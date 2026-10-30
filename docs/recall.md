@@ -22,7 +22,7 @@ Procedures:
 </memory>
 ```
 
-The first line appears only at session start while native auto memory is on, the second only when a prompt's recall ran degraded; sections appear only when non-empty. Constraints start with `Apply —`, procedures with `Follow —`.
+The first line appears only on Claude Code, at session start while native auto memory is on, the second only when a prompt's recall ran degraded; sections appear only when non-empty. Constraints start with `Apply —`, procedures with `Follow —`.
 
 ## When recall runs
 
@@ -39,9 +39,25 @@ The gate is fitted, not hand-tuned: `npm run eval:fit` stores the eval corpus th
 
 An embedding run has a 1.5 s deadline per event (`ACM_EMBED_DEADLINE_MS`); without a query vector `UserPromptSubmit` injects only the degraded warning, which names `embedding timeout` when the deadline passed and `model missing` when the model failed.
 
+## Events per host
+
+The table above names Claude Code's events. Codex and OpenCode run the same recall engine from their own events:
+
+| Recall | Claude Code | Codex | OpenCode |
+|---|---|---|---|
+| session start | `SessionStart` | `SessionStart` | the first `chat.message` of a session; `experimental.session.compacting` recalls again after a compaction |
+| every prompt | `UserPromptSubmit` | `UserPromptSubmit` | `chat.message` |
+| before a tool call | `PreToolUse` | `PreToolUse` | none: recall for the tool is appended after the call, from `tool.execute.after` |
+| after a failed Bash command | `PostToolUseFailure` | none | `tool.execute.after` of `bash`, failure read from `metadata.exit` |
+| Stop checkpoint | `Stop` | `Stop`, answered as `{"decision":"block","reason":…}` whose reason becomes the continuation prompt | `session.idle`, answered by a re-prompt through the plugin's client |
+
+Codex gives its hooks no exit status for a Bash command, so on Codex there is no failure capture, no failure recall, and `resolution` signals stay inert. On OpenCode the injected text is added as a text part of the message. The memory tools are named `mcp__plugin_adaptive-cognitive-memory_memory__memory_*` on Claude Code, `mcp__memory__memory_*` on Codex and `memory_memory_*` on OpenCode; the recall header's bare `memory_feedback` is the server's own tool name on every host.
+
+Texts that tell you to run the doctor name the host's form: `/memory-doctor` on Claude Code, and on Codex and OpenCode the `node <root>/dist/cli.js doctor` line from [Commands and CLI](cli.md).
+
 ## Turning recall off
 
-`/memory-recall off` turns recall off for the current project (its git repository, or its directory outside git): the hooks inject no memories there while capture, the Stop checkpoint, `memory_store` and `memory_search` keep working. `/memory-recall on` restores it.
+`recall off` turns recall off for the current project (its git repository, or its directory outside git): the hooks inject no memories there while capture, the Stop checkpoint, `memory_store` and `memory_search` keep working. `recall on` restores it. On Claude Code these are `/memory-recall off` and `/memory-recall on`; on Codex and OpenCode run the `recall on|off` line from [Commands and CLI](cli.md) inside the project.
 
 ## Branch-aware session start
 
