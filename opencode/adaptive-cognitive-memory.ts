@@ -275,15 +275,24 @@ export const AdaptiveCognitiveMemory: Plugin = async ({ client, directory }) => 
           updateSession(states, input.sessionID, { repromptText: undefined });
           return;
         }
+        const sessionStart = !state.started;
         updateSession(states, input.sessionID, { started: true });
-        const blocks = await callEngine({
-          hook_event_name: CHAT_MESSAGE_HOOK,
-          session_id: input.sessionID,
-          cwd: directory,
-          prompt,
-          session_start: !state.started,
-        });
-        output.parts.push(...recallParts(output.parts, input.sessionID, output.message.id, blocks));
+        try {
+          const blocks = await callEngine({
+            hook_event_name: CHAT_MESSAGE_HOOK,
+            session_id: input.sessionID,
+            cwd: directory,
+            prompt,
+            session_start: sessionStart,
+          });
+          const recalled = recallParts(output.parts, input.sessionID, output.message.id, blocks);
+          output.parts.push(...recalled);
+        } catch (error) {
+          if (sessionStart) {
+            updateSession(states, input.sessionID, { started: false });
+          }
+          throw error;
+        }
       }),
     [TOOL_AFTER_HOOK]: async (input, output) => {
       if (!HANDLED_TOOLS.has(input.tool)) {

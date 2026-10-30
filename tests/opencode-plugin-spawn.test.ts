@@ -26,6 +26,7 @@ interface EngineScript {
 interface SpawnedEngine {
   readonly envelope: () => Readonly<Record<string, unknown>>;
   readonly kills: string[];
+  readonly exit: (code: number) => void;
 }
 
 const DIRECTORY = "/workspace/billing";
@@ -121,7 +122,11 @@ function fakeEngine(script: EngineScript): ChildProcess {
       return true;
     },
   });
-  spawned.push({ envelope: () => JSON.parse(Buffer.concat(written).toString("utf8")), kills });
+  spawned.push({
+    envelope: () => JSON.parse(Buffer.concat(written).toString("utf8")),
+    kills,
+    exit: (code) => close(code, null),
+  });
   process.nextTick(() => {
     if (script.spawnError === true) {
       emitter.emit("error", Object.assign(new Error("spawn node ENOENT"), { code: "ENOENT" }));
@@ -439,6 +444,24 @@ describe("OpenCode plugin session state", () => {
       true,
       false,
     ]);
+  });
+
+  it("retries the session start after the first message's engine fails while a later message ran", async () => {
+    scriptEngine({ hang: true }, {}, {});
+    const hooks = await openPlugin();
+    const first = chatOutput([userPart("prt_18a922161000AbCdEfGhIjKlMn", "deploy billing")]);
+    const firstBefore = structuredClone(first);
+    const stderr = stderrLines();
+
+    const firstHandled = hooks["chat.message"]!({ sessionID: SESSION }, first);
+    await chat(hooks, SESSION, "deploy billing");
+    spawned[0]!.exit(1);
+    await firstHandled;
+    await chat(hooks, SESSION, "deploy billing");
+
+    expect(spawned.map((engine) => engine.envelope().session_start)).toEqual([true, false, true]);
+    expect(first).toEqual(firstBefore);
+    expect(stderr()).toEqual(["memory opencode chat.message failed: EngineExitError"]);
   });
 
   it("sends the user's own text parts as the prompt, without synthetic or ignored parts", async () => {
