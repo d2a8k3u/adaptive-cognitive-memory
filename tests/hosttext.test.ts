@@ -122,11 +122,22 @@ function stringLeaves(value: unknown): string[] {
     : [];
 }
 
-function codexHookStdouts(texts: HostTexts): (string | undefined)[] {
+const ENGINE_EVENTS: Readonly<
+  Record<(typeof HOSTS_WITHOUT_CLAUDE_COMMANDS)[number], { sessionStart: string; stop: string }>
+> = {
+  codex: { sessionStart: "SessionStart", stop: "Stop" },
+  opencode: { sessionStart: "chat.message", stop: "session.idle" },
+};
+
+function hookStdouts(
+  host: (typeof HOSTS_WITHOUT_CLAUDE_COMMANDS)[number],
+  texts: HostTexts,
+): (string | undefined)[] {
+  const { sessionStart, stop } = ENGINE_EVENTS[host];
   return [
-    hostOutput("codex", "SessionStart", [{ context: texts.sessionStart, notice: texts.outage }]),
-    hostOutput("codex", "SessionStart", [{ context: "", notice: texts.modelDownload }]),
-    hostOutput("codex", "Stop", [{ context: texts.checkpoint }]),
+    hostOutput(host, sessionStart, [{ context: texts.sessionStart, notice: texts.outage }]),
+    hostOutput(host, sessionStart, [{ context: "", notice: texts.modelDownload }]),
+    hostOutput(host, stop, [{ context: texts.checkpoint }]),
   ];
 }
 
@@ -138,15 +149,18 @@ describe("host-facing texts", () => {
     expect(misnamedMentions(mentions, host)).toEqual([]);
   });
 
-  it("keep the Codex form in the session start, outage, model download and checkpoint stdout a Codex hook prints", () => {
-    const mentions = codexHookStdouts(emittedTexts("codex"))
-      .flatMap((stdout) => stringLeaves(stdout === undefined ? undefined : JSON.parse(stdout)))
-      .flatMap(toolMentions);
+  it.each(HOSTS_WITHOUT_CLAUDE_COMMANDS)(
+    "keep the %s form in the session start, outage, model download and checkpoint stdout its engine prints",
+    (host) => {
+      const mentions = hookStdouts(host, emittedTexts(host))
+        .flatMap((stdout) => stringLeaves(stdout === undefined ? undefined : JSON.parse(stdout)))
+        .flatMap(toolMentions);
 
-    expect(mentions).toContainEqual({ host: "codex", tool: "memory_store" });
-    expect(mentions).toContainEqual({ host: undefined, tool: "memory_feedback" });
-    expect(misnamedMentions(mentions, "codex")).toEqual([]);
-  });
+      expect(mentions).toContainEqual({ host, tool: "memory_store" });
+      expect(mentions).toContainEqual({ host: undefined, tool: "memory_feedback" });
+      expect(misnamedMentions(mentions, host)).toEqual([]);
+    },
+  );
 
   it.each(HOSTS_WITHOUT_CLAUDE_COMMANDS)(
     "send %s to the plugin CLI under its own host id, never to a Claude command",
