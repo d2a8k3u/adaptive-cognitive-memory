@@ -36,6 +36,14 @@ function codexOutput(event: string, replies: readonly HookReply[]): string | und
   return event === STOP_EVENT ? codexStopOutput(replies) : claudeOutput(event, replies);
 }
 
+function opencodeOutput(replies: readonly HookReply[]): string | undefined {
+  const context = [
+    ...replies.flatMap(({ notice }) => (notice === undefined ? [] : [notice])),
+    ...replies.map(({ context }) => context).filter((text) => text !== ""),
+  ];
+  return context.length === 0 ? undefined : JSON.stringify({ context });
+}
+
 export function hostOutput(
   host: HostId,
   event: string,
@@ -47,6 +55,6 @@ export function hostOutput(
     case "codex":
       return codexOutput(event, replies);
     case "opencode":
-      return undefined;
+      return opencodeOutput(replies);
   }
 }

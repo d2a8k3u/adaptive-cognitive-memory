@@ -28,6 +28,13 @@ function codexStopOutput(replies) {
 function codexOutput(event, replies) {
     return event === STOP_EVENT ? codexStopOutput(replies) : claudeOutput(event, replies);
 }
+function opencodeOutput(replies) {
+    const context = [
+        ...replies.flatMap(({ notice }) => (notice === undefined ? [] : [notice])),
+        ...replies.map(({ context }) => context).filter((text) => text !== ""),
+    ];
+    return context.length === 0 ? undefined : JSON.stringify({ context });
+}
 function hostOutput(host, event, replies) {
     switch (host) {
         case "claude":
@@ -35,6 +42,6 @@ function hostOutput(host, event, replies) {
         case "codex":
             return codexOutput(event, replies);
         case "opencode":
-            return undefined;
+            return opencodeOutput(replies);
     }
 }
