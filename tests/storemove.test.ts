@@ -274,6 +274,8 @@ describe("moveStore", () => {
     const store = legacyStore(root, 1000, 300);
     const dataDir = join(root, "shared");
     const sourceDigest = storeDigest(store.anchor);
+    const sourceMeta = metaRows(store.anchor);
+    store.anchor.close();
     const before = fileHashes(store.dir);
     expect(statSync(`${store.dbPath}-wal`).size).toBeGreaterThan(0);
 
@@ -293,7 +295,7 @@ describe("moveStore", () => {
     const opened = openDatabase(moveConfig(dataDir));
     try {
       expect(storeDigest(opened.db)).toEqual(sourceDigest);
-      expect(metaRows(opened.db)).toEqual(metaRows(store.anchor));
+      expect(metaRows(opened.db)).toEqual(sourceMeta);
       expect(unembeddedActiveCount(opened.db)).toBe(0);
     } finally {
       opened.db.close();
@@ -367,6 +369,32 @@ describe("moveStore", () => {
     expect(sourceChanges(before, store.dir, [])).toEqual([]);
     expect(existsSync(join(store.dir, MOVED_MARKER_FILE))).toBe(false);
     expect(existsSync(join(dataDir, STAGING_DIR))).toBe(false);
+  });
+
+  it("refuses when a store appears in the data dir while the move runs, keeping that store and the source untouched", () => {
+    const root = tempRoot("acm-move-appeared-");
+    const store = legacyStore(root, 20, 100);
+    const dataDir = join(root, "shared");
+    const before = fileHashes(store.dir);
+    let appeared: StoreDigest | undefined;
+    const createStoreMeanwhile = (step: MoveStep) => {
+      if (step !== "write-journal") {
+        return;
+      }
+      openDatabase(moveConfig(dataDir)).db.close();
+      appeared = digestOfStore(join(dataDir, DB_FILENAME));
+    };
+
+    const outcome = moveStore(store.dir, moveConfig(dataDir), NOW, createStoreMeanwhile);
+
+    expect(outcome).toEqual({
+      kind: "refused",
+      reason: `a store appeared in ${dataDir} while the move ran; move it aside and run the move again (docs/storage.md)`,
+    });
+    expect(digestOfStore(join(dataDir, DB_FILENAME))).toEqual(appeared);
+    expect(readdirSync(dataDir)).toEqual([DB_FILENAME]);
+    expect(sourceChanges(before, store.dir, [])).toEqual([]);
+    expect(existsSync(join(store.dir, MOVED_MARKER_FILE))).toBe(false);
   });
 
   it("checks free space on the nearest existing ancestor of a missing data dir and refuses before creating anything", () => {

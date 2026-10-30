@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -75,6 +75,10 @@ function fixtureEnv(extra: Record<string, string>): Record<string, string> {
   };
 }
 
+function movedMarker(legacyDir: string): unknown {
+  return JSON.parse(readFileSync(join(legacyDir, MOVED_MARKER_FILE), "utf8"));
+}
+
 function probeCount(db: Database.Database): number {
   const present = db
     .prepare("SELECT count(*) FROM sqlite_schema WHERE name = 'move_probe'")
@@ -129,6 +133,46 @@ describe("store move interrupted by kill -9 (FR-3, FR-4)", () => {
       expect(digestOfStore(join(dataDir, DB_FILENAME))).toEqual(sourceDigest);
       expect(integrityOf(join(dataDir, DB_FILENAME))).toBe("ok");
       expect(sourceChanges(before, store.dir, [MOVED_MARKER_FILE])).toEqual([]);
+      expect(movedMarker(store.dir)).toMatchObject({
+        version: 1,
+        movedTo: dataDir,
+        digest: `sha256:${sourceDigest.sha256}`,
+      });
+    },
+    SPAWNED_TIMEOUT_MS,
+  );
+
+  it(
+    "after publish-store, a destination written meanwhile refuses the resume and leaves the source unmarked",
+    async () => {
+      const root = tempRoot("acm-crash-diverged-");
+      const store = legacyStore(root);
+      const dataDir = join(root, "shared");
+      const before = fileHashes(store.dir);
+      const killed = await runProcess({
+        command: process.execPath,
+        args: [MOVE_UNTIL, store.dir],
+        env: fixtureEnv({ ACM_DATA_DIR: dataDir, ACM_MOVE_KILL_AFTER: "publish-store" }),
+        stdinText: "",
+        timeoutMs: KILLED_RUN_TIMEOUT_MS,
+      });
+      const published = new Database(join(dataDir, DB_FILENAME));
+      published
+        .prepare("DELETE FROM verdicts WHERE rowid = (SELECT min(rowid) FROM verdicts)")
+        .run();
+      published.close();
+      const diverged = digestOfStore(join(dataDir, DB_FILENAME));
+
+      const rerun = moveStore(store.dir, moveConfig(dataDir), NOW);
+
+      expect(killed.code).toBe(SIGNALLED_EXIT);
+      expect(rerun).toEqual({
+        kind: "refused",
+        reason: `the store in ${dataDir} differs from ${store.dir}`,
+      });
+      expect(existsSync(join(store.dir, MOVED_MARKER_FILE))).toBe(false);
+      expect(digestOfStore(join(dataDir, DB_FILENAME))).toEqual(diverged);
+      expect(sourceChanges(before, store.dir, [])).toEqual([]);
     },
     SPAWNED_TIMEOUT_MS,
   );
