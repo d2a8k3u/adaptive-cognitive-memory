@@ -1,5 +1,7 @@
 # Adaptive cognitive memory
 
+![A correction typed in a Claude Code session is stored with memory_store, and a new Codex session in the same project recalls it as a constraint](docs/images/banner.gif)
+
 Gives Claude Code, Codex and OpenCode one local memory shared by every project: what the agent stores in one session comes back in later sessions, on any of the three hosts. Memory content never leaves your machine.
 
 ## Install
@@ -25,11 +27,19 @@ A memory has a scope, `project` (visible only in that project) or `user` (visibl
 
 Recall is automatic. Hooks inject one-line abstracts under a token budget at session start, on every prompt, before tool calls and after a failed Bash command. The agent reads a memory's full body with `memory_get`.
 
+![Hook output for four demo memories: session start injects a constraint and a preference, a Czech prompt recalls an English deploy fact, a pytest command recalls the test procedure, and the same question in another project injects nothing](docs/images/recall-output.png)
+
 Capture is explicit: nothing is saved automatically. The agent stores durable knowledge with the `memory_*` MCP tools, guided by the bundled `memory` skill. It notices a correction or a remember request itself, in any language; the hooks only point at a failing command that later passed. A store that finds related memories writes nothing and returns them, and the agent decides to supersede, update, skip or add. Superseded memories stay readable but never reach recall.
 
 No outbound request carries memory content: the MCP server talks stdio only and the hooks make no LLM calls. The one network operation is the one-time model download. Secrets are redacted when a memory is stored and again on export.
 
 A broken part is never silent. Without the embedding model or the sqlite-vec extension, recall falls back to FTS5 keyword search with a visible warning. A native module that does not load, or a database written by a newer plugin version, turns memory off with one notice at session start. The doctor names the broken piece and its fix.
+
+## Measured
+
+On labelled prompts the gate was never fitted on, prompt recall injects the right memory for 57.5% of the prompts that have one, 82% of the lines it injects are right, and it injects something on 2 of 120 prompts that have none. Before a tool call it finds the right memory in 84% of cases and injects nothing on any of 57 cases without one. A prompt hook takes about 620 ms at p95 against 1,000 memories on an Apple M4 Pro, most of it loading the embedding model. [Evaluation](docs/evaluation.md) has the method, every suite and the commands to rerun them.
+
+![Hit rate, share of right lines and injections on negative cases for prompt, pre-tool and failed-command recall](docs/images/recall-quality.png)
 
 ## Host differences
 
@@ -41,6 +51,7 @@ Codex has no failure capture, no recall after a failed command and no statusline
 
 - [Install and uninstall](docs/install.md): per-host install, the capability matrix, the embedding model download, keeping your memories when you uninstall
 - [Recall](docs/recall.md): what the agent sees, when each hook recalls and on which host event, turning recall off, branch-aware session start, recall after a failed Bash command
+- [Evaluation](docs/evaluation.md): how recall is measured, the current results and how to rerun them
 - [Capture](docs/capture.md): the two-phase store, capture moments, the Stop checkpoint and what the hooks print
 - [MCP tools and skills](docs/tools.md): every `memory_*` tool with its arguments and result, and the `memory-curate` skill
 - [Commands and CLI](docs/cli.md): the per-host `doctor`, `recall on|off` and `statusline` lines, `store move`, export, import, re-embedding and the doctor checks
