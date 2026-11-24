@@ -14,7 +14,7 @@ npm ci
 
 1. Create a branch from `main`.
 2. Run `npm run check` until it passes. If you touched `src/`, run `npm run build` and commit the updated `dist/`.
-3. If you changed the recall or hook path, check the [performance gates](docs/development.md#performance-gates) on your machine.
+3. If you changed the recall or hook path, check the [performance gates](docs/development.md#performance-gates) on your machine, run `npm run eval` and update [Evaluation](docs/evaluation.md) with the numbers that moved.
 4. Commit with [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): description`.
 5. Open a pull request.
 
