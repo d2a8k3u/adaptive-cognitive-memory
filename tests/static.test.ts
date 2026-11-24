@@ -23,7 +23,7 @@ import { TICKET_ROWS_MAX } from "../src/search";
 import { snippetLine } from "../src/statusline";
 import { hostToolName, MEMORY_SERVER_KEY } from "../src/toolnames";
 import { TOOL_DEFINITIONS, type ToolDefinition } from "../src/tools";
-import { PLUGIN_INSTALL_ID, PLUGIN_VERSION } from "../src/version";
+import { PLUGIN_NAME, PLUGIN_VERSION } from "../src/version";
 
 const DIST_DIR = join(process.cwd(), "dist");
 const HOOK_ENTRY = join(DIST_DIR, "hooks.js");
@@ -189,15 +189,13 @@ function readJson<T>(...path: string[]): T {
 }
 
 describe("marketplace install", () => {
-  it("lists the plugin under the install id that the dependency fix names", () => {
-    const marketplace = readJson<{ name: string; plugins: { name: string }[] }>(
+  it("lists this plugin as the repository marketplace's only plugin", () => {
+    const marketplace = readJson<{ plugins: { name: string }[] }>(
       ".claude-plugin",
       "marketplace.json",
     );
 
-    expect(marketplace.plugins.map((entry) => `${entry.name}@${marketplace.name}`)).toEqual([
-      PLUGIN_INSTALL_ID,
-    ]);
+    expect(marketplace.plugins.map((entry) => entry.name)).toEqual([PLUGIN_NAME]);
   });
 
   it("keeps the runtime dependencies installable by Claude Code's frozen, script-free npm install", () => {

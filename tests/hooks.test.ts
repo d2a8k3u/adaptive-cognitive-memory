@@ -1277,8 +1277,7 @@ describe("hooks storage outage", () => {
       event: "SessionStart",
       notice: [
         /npm dependencies are not installed \(missing better-sqlite3\)/,
-        /claude plugin update adaptive-cognitive-memory@adaptive-cognitive-memory/,
-        /npm ci --ignore-scripts/,
+        /npm ci --ignore-scripts in /,
       ],
     },
     {

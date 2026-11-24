@@ -1,5 +1,5 @@
-import { join } from "node:path";
-import { PLUGIN_INSTALL_ID, PLUGIN_ROOT } from "./version";
+import { basename, dirname, join } from "node:path";
+import { PLUGIN_ROOT } from "./version";
 
 export type HostId = "claude" | "codex" | "opencode";
 export const HOST_ENV = "ACM_HOST";
@@ -45,6 +45,26 @@ export function resolveHost(env: NodeJS.ProcessEnv): HostId {
 
 export const CLI_ENTRY = join(PLUGIN_ROOT, "dist", "cli.js");
 
+const CLAUDE_PLUGIN_CACHE_DIR = "cache";
+
+function claudeInstallId(pluginRoot: string): string | undefined {
+  const pluginDir = dirname(pluginRoot);
+  const marketplaceDir = dirname(pluginDir);
+  if (basename(dirname(marketplaceDir)) !== CLAUDE_PLUGIN_CACHE_DIR) {
+    return undefined;
+  }
+  return `${basename(pluginDir)}@${basename(marketplaceDir)}`;
+}
+
+export function claudeDependencyFix(pluginRoot: string): string {
+  const npmFix = `npm ci --ignore-scripts in ${pluginRoot}`;
+  const installId = claudeInstallId(pluginRoot);
+  if (installId === undefined) {
+    return npmFix;
+  }
+  return `run claude plugin update ${installId} to retry Claude Code's dependency install, or ${npmFix}`;
+}
+
 const CLAUDE_PROFILE: HostProfile = {
   id: "claude",
   projectDirEnv: "CLAUDE_PROJECT_DIR",
@@ -52,7 +72,7 @@ const CLAUDE_PROFILE: HostProfile = {
   nativeAutoMemory: true,
   statuslineBadge: true,
   doctorInstruction: "/memory-doctor",
-  dependencyFix: `run claude plugin update ${PLUGIN_INSTALL_ID} to retry Claude Code's dependency install, or npm ci --ignore-scripts in ${PLUGIN_ROOT}`,
+  dependencyFix: claudeDependencyFix(PLUGIN_ROOT),
 };
 
 function profileWithoutClaudeFeatures(id: Exclude<HostId, "claude">): HostProfile {

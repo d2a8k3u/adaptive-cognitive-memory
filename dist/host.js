@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CLI_ENTRY = exports.InvalidHostError = exports.CODEX_PLUGIN_ROOT_ENV = exports.HOST_ENV = void 0;
 exports.resolveHost = resolveHost;
+exports.claudeDependencyFix = claudeDependencyFix;
 exports.hostProfile = hostProfile;
 const node_path_1 = require("node:path");
 const version_1 = require("./version");
@@ -30,6 +31,23 @@ function resolveHost(env) {
     return declared;
 }
 exports.CLI_ENTRY = (0, node_path_1.join)(version_1.PLUGIN_ROOT, "dist", "cli.js");
+const CLAUDE_PLUGIN_CACHE_DIR = "cache";
+function claudeInstallId(pluginRoot) {
+    const pluginDir = (0, node_path_1.dirname)(pluginRoot);
+    const marketplaceDir = (0, node_path_1.dirname)(pluginDir);
+    if ((0, node_path_1.basename)((0, node_path_1.dirname)(marketplaceDir)) !== CLAUDE_PLUGIN_CACHE_DIR) {
+        return undefined;
+    }
+    return `${(0, node_path_1.basename)(pluginDir)}@${(0, node_path_1.basename)(marketplaceDir)}`;
+}
+function claudeDependencyFix(pluginRoot) {
+    const npmFix = `npm ci --ignore-scripts in ${pluginRoot}`;
+    const installId = claudeInstallId(pluginRoot);
+    if (installId === undefined) {
+        return npmFix;
+    }
+    return `run claude plugin update ${installId} to retry Claude Code's dependency install, or ${npmFix}`;
+}
 const CLAUDE_PROFILE = {
     id: "claude",
     projectDirEnv: "CLAUDE_PROJECT_DIR",
@@ -37,7 +55,7 @@ const CLAUDE_PROFILE = {
     nativeAutoMemory: true,
     statuslineBadge: true,
     doctorInstruction: "/memory-doctor",
-    dependencyFix: `run claude plugin update ${version_1.PLUGIN_INSTALL_ID} to retry Claude Code's dependency install, or npm ci --ignore-scripts in ${version_1.PLUGIN_ROOT}`,
+    dependencyFix: claudeDependencyFix(version_1.PLUGIN_ROOT),
 };
 function profileWithoutClaudeFeatures(id) {
     return {
