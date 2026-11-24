@@ -7,8 +7,8 @@ Gives Claude Code, Codex and OpenCode one local memory shared by every project: 
 You need Node.js ≥ 22. On Claude Code, run:
 
 ```bash
-claude plugin marketplace add d2a8k3u/adaptive-cognitive-memory
-claude plugin install adaptive-cognitive-memory@adaptive-cognitive-memory
+claude plugin marketplace add d2a8k3u/construct
+claude plugin install adaptive-cognitive-memory@construct
 ```
 
 Codex and OpenCode need a few more steps (dependencies, the MCP server entry, and on Codex the hook review): follow [Install](docs/install.md#install).

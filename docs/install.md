@@ -24,20 +24,16 @@ Per-event detail is in [Recall](recall.md).
 
 ### Claude Code
 
-The repository is its own marketplace. In Claude Code:
-
-```
-/plugin install adaptive-cognitive-memory --marketplace d2a8k3u/adaptive-cognitive-memory
-```
-
-or from a shell:
+Install from the [construct](https://github.com/d2a8k3u/construct) marketplace:
 
 ```bash
-claude plugin marketplace add d2a8k3u/adaptive-cognitive-memory
-claude plugin install adaptive-cognitive-memory@adaptive-cognitive-memory
+claude plugin marketplace add d2a8k3u/construct
+claude plugin install adaptive-cognitive-memory@construct
 ```
 
-Claude Code installs the plugin's npm dependencies from `package-lock.json` into the plugin's cached copy during the marketplace install (registry packages only, `--ignore-scripts`, within 60 s), so you run no install step yourself. If that install does not finish, `claude plugin list` notes the missing packages and the first session says so; `claude plugin update adaptive-cognitive-memory@adaptive-cognitive-memory` retries it.
+Inside a Claude Code session, `/plugin` does the same from a menu. The repository is also a marketplace of its own, and an install from it (`adaptive-cognitive-memory@adaptive-cognitive-memory`) keeps working.
+
+Claude Code installs the plugin's npm dependencies from `package-lock.json` into the plugin's cached copy during the marketplace install (registry packages only, `--ignore-scripts`, within 60 s), so you run no install step yourself. If that install does not finish, `claude plugin list` notes the missing packages and the first session says so; `claude plugin update adaptive-cognitive-memory@construct` retries it. The session notice names the install id of your copy.
 
 A checkout loaded in place (`claude --plugin-dir /path/to/adaptive-cognitive-memory`, or a marketplace added from a local path) gets no automatic install. Run once in the checkout:
 
