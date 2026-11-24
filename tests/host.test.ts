@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hostProfile, InvalidHostError, resolveHost } from "../src/host";
+import { claudeDependencyFix, hostProfile, InvalidHostError, resolveHost } from "../src/host";
 import { hostToolName } from "../src/toolnames";
 
 const PLUGIN_DIR = "/plugins/adaptive-cognitive-memory";
@@ -66,6 +66,23 @@ describe("hostProfile", () => {
       expect(hostProfile(host)).toMatchObject({ id: host, ...features });
     },
   );
+});
+
+describe("claudeDependencyFix", () => {
+  it.each([
+    {
+      name: "names the marketplace the plugin was installed from",
+      pluginRoot: "/Users/dev/.claude/plugins/cache/construct/adaptive-cognitive-memory/0.4.0",
+      fix: "run claude plugin update adaptive-cognitive-memory@construct to retry Claude Code's dependency install, or npm ci --ignore-scripts in /Users/dev/.claude/plugins/cache/construct/adaptive-cognitive-memory/0.4.0",
+    },
+    {
+      name: "offers only npm ci for a checkout loaded in place",
+      pluginRoot: "/Users/dev/src/adaptive-cognitive-memory",
+      fix: "npm ci --ignore-scripts in /Users/dev/src/adaptive-cognitive-memory",
+    },
+  ])("$name", ({ pluginRoot, fix }) => {
+    expect(claudeDependencyFix(pluginRoot)).toBe(fix);
+  });
 });
 
 describe("hostToolName", () => {
