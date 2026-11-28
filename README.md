@@ -57,6 +57,8 @@ Codex has no failure capture, no recall after a failed command and no statusline
 - [Commands and CLI](docs/cli.md): the per-host `doctor`, `recall on|off` and `statusline` lines, `store move`, export, import, re-embedding and the doctor checks
 - [Statusline badge](docs/statusline.md): the opt-in Claude Code badge and the line for your statusline script
 - [Configuration](docs/configuration.md): plugin options, `ACM_DATA_DIR`, `ACM_HOST`, environment variables and Claude Code's native auto memory
+- [Changelog](CHANGELOG.md): what changed in each release
+- [Security policy](SECURITY.md): how to report a vulnerability privately
 
 ### Developing the plugin
 
