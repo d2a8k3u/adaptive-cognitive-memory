@@ -8,7 +8,7 @@
     {
       "name": "adaptive-cognitive-memory",
       "source": "./",
-      "description": "One local memory for Claude Code, Codex and OpenCode, shared by every project: measured recall through hooks, explicit capture with a two-phase store, nothing leaves your machine"
+      "description": "One local memory for Claude Code, Codex and OpenCode, shared by every project: measured recall through hooks, explicit capture, and memory content never leaves your machine"
     }
   ]
 }
