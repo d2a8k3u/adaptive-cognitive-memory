@@ -2,6 +2,11 @@
 
 ![A correction typed in a Claude Code session is stored with memory_store, and a new Codex session in the same project recalls it as a constraint](docs/images/banner.gif)
 
+[![CI status](https://github.com/d2a8k3u/adaptive-cognitive-memory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/d2a8k3u/adaptive-cognitive-memory/actions/workflows/ci.yml)
+[![latest release](https://img.shields.io/github/v/release/d2a8k3u/adaptive-cognitive-memory)](https://github.com/d2a8k3u/adaptive-cognitive-memory/releases/latest)
+[![license](https://img.shields.io/github/license/d2a8k3u/adaptive-cognitive-memory)](LICENSE)
+[![Node.js 22 or newer](https://img.shields.io/badge/node-%E2%89%A522-blue)](docs/install.md#requirements)
+
 Gives Claude Code, Codex and OpenCode one local memory shared by every project: what the agent stores in one session comes back in later sessions, on any of the three hosts. Memory content never leaves your machine.
 
 ## Install
