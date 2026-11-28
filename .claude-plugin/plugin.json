@@ -1,9 +1,29 @@
 {
   "name": "adaptive-cognitive-memory",
-  "description": "Adaptive cognitive memory: one cross-project memory database with local semantic search, budgeted hook recall, explicit curated capture and a self-diagnosing doctor.",
+  "description": "One local memory for Claude Code, Codex and OpenCode, shared by every project: measured recall through hooks, explicit capture, and memory content never leaves your machine",
   "version": "0.4.1",
   "author": {
-    "name": "David Kulhanek"
+    "name": "David Kulhanek",
+    "url": "https://github.com/d2a8k3u"
+  },
+  "homepage": "https://github.com/d2a8k3u/adaptive-cognitive-memory",
+  "repository": "https://github.com/d2a8k3u/adaptive-cognitive-memory",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "persistent-memory",
+    "long-term-memory",
+    "cross-project",
+    "claude-code",
+    "codex",
+    "opencode",
+    "mcp",
+    "embeddings",
+    "semantic-search",
+    "sqlite"
+  ],
+  "network": {
+    "hosts": ["huggingface.co", "*.huggingface.co", "*.hf.co"]
   },
   "userConfig": {
     "recall_budget_tokens": {
