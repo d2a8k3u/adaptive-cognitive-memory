@@ -1,0 +1,21 @@
+name: Feature request
+description: Propose a new tool, option, host or recall behaviour.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and where the plugin gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you would like the plugin to do, and on which host.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: What you use today instead, or what you tried.

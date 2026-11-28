@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question
+    url: https://github.com/d2a8k3u/adaptive-cognitive-memory/discussions/categories/q-a
+    about: Ask how to install or use the plugin in Discussions.
+  - name: Security vulnerability
+    url: https://github.com/d2a8k3u/adaptive-cognitive-memory/security/advisories/new
+    about: Report it privately, never in a public issue.
