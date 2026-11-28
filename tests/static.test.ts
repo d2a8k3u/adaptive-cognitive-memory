@@ -696,10 +696,11 @@ function linkResolves(file: string, target: string): boolean {
 }
 
 describe("docs links", () => {
-  it("every relative link in the README, CONTRIBUTING and docs points at an existing file and heading", () => {
+  it("every relative link in the root markdown files and docs points at an existing file and heading", () => {
     const markdownFiles = [
-      join(process.cwd(), "README.md"),
-      join(process.cwd(), "CONTRIBUTING.md"),
+      ...readdirSync(process.cwd())
+        .filter((name) => name.endsWith(".md"))
+        .map((name) => join(process.cwd(), name)),
       ...readdirSync(DOCS_DIR)
         .filter((name) => name.endsWith(".md"))
         .map((name) => join(DOCS_DIR, name)),
