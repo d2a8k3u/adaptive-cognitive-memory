@@ -31,7 +31,7 @@ Recall is automatic. Hooks inject one-line abstracts under a token budget at ses
 
 Capture is explicit: nothing is saved automatically. The agent stores durable knowledge with the `memory_*` MCP tools, guided by the bundled `memory` skill. It notices a correction or a remember request itself, in any language; the hooks only point at a failing command that later passed. A store that finds related memories writes nothing and returns them, and the agent decides to supersede, update, skip or add. Superseded memories stay readable but never reach recall.
 
-No outbound request carries memory content: the MCP server talks stdio only and the hooks make no LLM calls. The one network operation is the one-time model download. Secrets are redacted when a memory is stored and again on export.
+No outbound request carries memory content: the MCP server talks stdio only and the hooks make no LLM calls. The one network operation is the one-time model download from Hugging Face (`huggingface.co`). Secrets are redacted when a memory is stored and again on export.
 
 A broken part is never silent. Without the embedding model or the sqlite-vec extension, recall falls back to FTS5 keyword search with a visible warning. A native module that does not load, or a database written by a newer plugin version, turns memory off with one notice at session start. The doctor names the broken piece and its fix.
 
