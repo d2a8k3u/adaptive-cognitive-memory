@@ -29,9 +29,4 @@ npm ci
 
 ## Report an issue
 
-Open an issue with:
-
-- what you expected and what happened
-- steps to reproduce, including the shape of the memory content (never real secrets)
-- Node.js version and OS
-- the doctor output: `/memory-doctor` on Claude Code, the doctor line from [Commands and CLI](docs/cli.md) on Codex and OpenCode
+Open an issue with the [bug report form](https://github.com/d2a8k3u/adaptive-cognitive-memory/issues/new?template=bug_report.yml). It asks for the doctor output: `/memory-doctor` on Claude Code, the doctor line from [Commands and CLI](docs/cli.md) on Codex and OpenCode. Ask questions in [Discussions](https://github.com/d2a8k3u/adaptive-cognitive-memory/discussions). Report a vulnerability privately as the [Security policy](SECURITY.md) describes.

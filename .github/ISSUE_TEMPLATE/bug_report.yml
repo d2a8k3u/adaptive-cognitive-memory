@@ -1,0 +1,55 @@
+name: Bug report
+description: Recall, capture, the doctor or the MCP server does something wrong, throws an error or crashes.
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+      description: The release you installed, or `version` in `.claude-plugin/plugin.json` of your copy.
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - Claude Code
+        - Codex
+        - OpenCode
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Host version, Node.js version and OS
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: "`/memory-doctor` on Claude Code, or the doctor line from docs/cli.md on Codex and OpenCode. Remove anything private."
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: The prompts, commands and memories that show the problem. Use made-up memory content, never real secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What the agent saw, the hook output or the error message.
+    validations:
+      required: true
