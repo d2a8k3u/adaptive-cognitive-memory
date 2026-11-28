@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { type OpenedDb, openDatabase } from "../src/db/database";
 import { type MemoryEnv, type StoreInput, store } from "../src/db/memories";
+import { embedPassage } from "../src/embeddings";
 import { testModelCacheDir } from "../vitest.config";
 import { seedConfig } from "./fixtures/seed";
 
@@ -40,6 +41,7 @@ describe("external exclusive lock (AC-23)", () => {
       vecLoaded: opened.vecLoaded,
       modelCacheDir: config.modelCacheDir,
     };
+    await embedPassage(["model loaded before the lock is taken"], env.modelCacheDir);
     const holder = new Database(config.dbPath, { fileMustExist: true });
     try {
       holder.exec("BEGIN EXCLUSIVE");
